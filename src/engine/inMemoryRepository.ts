@@ -1,0 +1,167 @@
+/* ============================================================================
+ * InMemoryRepository — used by the Cloudflare Worker in quick dev runs and by
+ * tests. Production headless runs use SupabaseRepository (durability).
+ * Supports the same seeding as the browser store.
+ * ========================================================================== */
+
+import type {
+  Agent,
+  AgentCycle,
+  AgentEvent,
+  CycleStepKey,
+  Experiment,
+  MemoryEntry,
+  Opportunity,
+  ResearchReport,
+  Strategy,
+  Transaction,
+} from '../types';
+import type { EngineRepository } from './repository';
+
+interface InMemoryState {
+  agent: Agent | null;
+  opportunities: Opportunity[];
+  transactions: Transaction[];
+  experiments: Experiment[];
+  memory: MemoryEntry[];
+  reports: ResearchReport[];
+  events: AgentEvent[];
+  strategies: Strategy[];
+  cycles: AgentCycle[];
+}
+
+export class InMemoryRepository implements EngineRepository {
+  state: InMemoryState = {
+    agent: null,
+    opportunities: [],
+    transactions: [],
+    experiments: [],
+    memory: [],
+    reports: [],
+    events: [],
+    strategies: [],
+    cycles: [],
+  };
+
+  /** Load a snapshot (e.g. produced by createSeedState). */
+  load(snapshot: Partial<InMemoryState>) {
+    this.state = { ...this.state, ...snapshot };
+  }
+
+  async getAgent() {
+    if (!this.state.agent) throw new Error('agent not initialized');
+    return this.state.agent;
+  }
+  async updateAgent(patch: Partial<Agent>) {
+    const next = { ...(await this.getAgent()), ...patch };
+    this.state.agent = next;
+    return next;
+  }
+
+  async listOpportunities() {
+    return this.state.opportunities;
+  }
+  async listResearchedOpportunities() {
+    return this.state.opportunities.filter((o) => o.researchStage !== 'UNDISCOVERED');
+  }
+  async upsertOpportunities(opps: Opportunity[]) {
+    const byId = new Map(this.state.opportunities.map((o) => [o.id, o]));
+    for (const o of opps) byId.set(o.id, o);
+    this.state.opportunities = [...byId.values()];
+  }
+
+  async listTransactions() {
+    return this.state.transactions;
+  }
+  async appendTransaction(tx: Transaction) {
+    this.state.transactions = [...this.state.transactions, tx];
+  }
+
+  async listExperiments() {
+    return this.state.experiments;
+  }
+  async appendExperiment(exp: Experiment) {
+    this.state.experiments = [exp, ...this.state.experiments];
+  }
+
+  async listMemory() {
+    return this.state.memory;
+  }
+  async upsertMemory(mem: MemoryEntry) {
+    const idx = this.state.memory.findIndex(
+      (m) => m.kind === mem.kind && (mem.refId ? m.refId === mem.refId : m.id === mem.id),
+    );
+    if (idx >= 0) {
+      const copy = [...this.state.memory];
+      copy[idx] = mem;
+      this.state.memory = copy;
+    } else {
+      this.state.memory = [mem, ...this.state.memory];
+    }
+  }
+
+  async listReports() {
+    return this.state.reports;
+  }
+  async appendReport(report: ResearchReport) {
+    this.state.reports = [report, ...this.state.reports.filter((r) => r.opportunityId !== report.opportunityId)];
+  }
+
+  async listStrategies() {
+    return this.state.strategies;
+  }
+  async appendStrategy(strategy: Strategy) {
+    this.state.strategies = [
+      { ...strategy, active: true },
+      ...this.state.strategies.map((s) => ({ ...s, active: false })),
+    ];
+  }
+  async deactivateStrategies() {
+    this.state.strategies = this.state.strategies.map((s) => ({ ...s, active: false }));
+  }
+
+  async listEvents() {
+    return this.state.events;
+  }
+  async appendEvent(event: AgentEvent) {
+    this.state.events = [...this.state.events, event].slice(-500);
+  }
+
+  async listCycles() {
+    return this.state.cycles;
+  }
+  async appendCycle(cycle: AgentCycle) {
+    this.state.cycles = [...this.state.cycles, cycle].slice(-200);
+  }
+  async updateCycleStep(cycleId: string, step: CycleStepKey, status: 'active' | 'done' | 'skipped', at?: number) {
+    this.state.cycles = this.state.cycles.map((c) =>
+      c.id !== cycleId
+        ? c
+        : {
+            ...c,
+            steps: c.steps.map((st) =>
+              st.key === step
+                ? { ...st, status, at: status === 'done' ? at ?? Date.now() : st.at }
+                : st,
+            ),
+          },
+    );
+  }
+  async completeCycle(cycleId: string, patch: Partial<AgentCycle>) {
+    this.state.cycles = this.state.cycles.map((c) => (c.id === cycleId ? { ...c, ...patch } : c));
+  }
+
+  async reset() {
+    this.state = {
+      agent: null,
+      opportunities: [],
+      transactions: [],
+      experiments: [],
+      memory: [],
+      reports: [],
+      events: [],
+      strategies: [],
+      cycles: [],
+    };
+  }
+}

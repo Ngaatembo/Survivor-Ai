@@ -1,0 +1,636 @@
+/* ============================================================================
+ * SupabaseRepository — durable Postgres persistence behind the same
+ * EngineRepository interface. Works in the Cloudflare Worker (service role
+ * key) and optionally in the browser (anon key + RLS).
+ *
+ * Money columns are NUMERIC(12,2) and come back as strings — normalized to
+ * numbers here. The nested `score` object is stored JSONB in
+ * opportunities.score_factors; score_total/recommendation are projected
+ * columns for SQL ranking.
+ * ========================================================================== */
+
+import type {
+  Agent,
+  AgentCycle,
+  AgentEvent,
+  CycleStep,
+  CycleStepKey,
+  EventType,
+  Experiment,
+  MemoryEntry,
+  Opportunity,
+  ResearchReport,
+  Strategy,
+  Transaction,
+  ScoreBreakdown,
+} from '../types';
+import type { EngineRepository } from './repository';
+import { createSeedSnapshot, AGENT_ID } from './seed';
+
+export interface SupabaseClientLike {
+  from(table: string): any;
+}
+
+export class SupabaseRepository implements EngineRepository {
+  constructor(
+    private db: SupabaseClientLike,
+    private agentId: string = AGENT_ID,
+  ) {}
+
+  private n(v: unknown): number {
+    if (v === null || v === undefined) return 0;
+    const num = typeof v === 'number' ? v : parseFloat(String(v));
+    return Number.isFinite(num) ? num : 0;
+  }
+
+  /* ------------------------------- agent -------------------------------- */
+
+  async getAgent(): Promise<Agent> {
+    const { data, error } = await this.db.from('agents').select('*').eq('id', this.agentId).single();
+    if (error || !data) throw new Error(error?.message ?? 'agent not found');
+    return this.mapAgent(data);
+  }
+
+  async updateAgent(patch: Partial<Agent>): Promise<Agent> {
+    const update = this.agentPatch(patch);
+    const { data, error } = await this.db
+      .from('agents')
+      .update(update)
+      .eq('id', this.agentId)
+      .select('*')
+      .single();
+    if (error) throw new Error(error.message);
+    return this.mapAgent(data);
+  }
+
+  private mapAgent(r: any): Agent {
+    return {
+      id: r.id,
+      name: r.name ?? 'SURVIVE-01',
+      status: r.status,
+      startedAt: Date.parse(r.started_at ?? r.created_at ?? new Date().toISOString()) || Date.now(),
+      startingCapital: this.n(r.starting_capital),
+      survivalThreshold: this.n(r.survival_threshold),
+      currentStrategy: r.current_strategy ?? '',
+      currentObjective: r.current_objective ?? '',
+      cycleCount: r.cycle_count ?? 0,
+      totalCyclesRun: r.total_cycles_run ?? 0,
+    };
+  }
+
+  private agentPatch(p: Partial<Agent>) {
+    const out: Record<string, unknown> = {};
+    if (p.status !== undefined) out.status = p.status;
+    if (p.currentStrategy !== undefined) out.current_strategy = p.currentStrategy;
+    if (p.currentObjective !== undefined) out.current_objective = p.currentObjective;
+    if (p.cycleCount !== undefined) out.cycle_count = p.cycleCount;
+    if (p.totalCyclesRun !== undefined) out.total_cycles_run = p.totalCyclesRun;
+    if (p.startingCapital !== undefined) out.starting_capital = p.startingCapital;
+    if (p.survivalThreshold !== undefined) out.survival_threshold = p.survivalThreshold;
+    if (p.startedAt !== undefined) out.started_at = new Date(p.startedAt).toISOString();
+    return out;
+  }
+
+  /* ---------------------------- opportunities --------------------------- */
+
+  async listOpportunities(): Promise<Opportunity[]> {
+    const { data, error } = await this.db
+      .from('opportunities')
+      .select('*, research_sources(*)')
+      .eq('agent_id', this.agentId)
+      .order('created_at', { ascending: true });
+    if (error) throw new Error(error.message);
+    return (data ?? []).map((r: any) => this.mapOpportunity(r));
+  }
+
+  async listResearchedOpportunities(): Promise<Opportunity[]> {
+    const all = await this.listOpportunities();
+    return all.filter((o) => o.researchStage !== 'UNDISCOVERED');
+  }
+
+  async upsertOpportunities(opps: Opportunity[]): Promise<void> {
+    if (opps.length === 0) return;
+    const rows = opps.map((o) => this.opportunityRow(o));
+    const { error } = await this.db
+      .from('opportunities')
+      .upsert(rows, { onConflict: 'id' });
+    if (error) throw new Error(error.message);
+
+    // Sources: wipe & re-insert for affected opportunities (kept simple; sources
+    // are append-mostly and small).
+    const ids = opps.map((o) => o.id);
+    await this.db.from('research_sources').delete().in('opportunity_id', ids);
+    const sourceRows = opps.flatMap((o) =>
+      o.sources.map((s) => ({
+        id: s.id,
+        opportunity_id: o.id,
+        title: s.title,
+        url: s.url ?? null,
+        kind: s.kind,
+        note: s.note ?? null,
+        verified: false,
+      })),
+    );
+    if (sourceRows.length) {
+      const { error: se } = await this.db.from('research_sources').upsert(sourceRows, { onConflict: 'id' });
+      if (se) throw new Error(se.message);
+    }
+  }
+
+  private mapOpportunity(r: any): Opportunity {
+    const factors = (r.score_factors ?? {}) as Record<string, unknown>;
+    const score: ScoreBreakdown | undefined =
+      r.score_total != null && factors.factors
+        ? {
+            total: r.score_total,
+            factors: factors.factors as ScoreBreakdown['factors'],
+            recommendation: (r.score_recommendation ?? factors.recommendation ?? 'WATCHLIST') as ScoreBreakdown['recommendation'],
+            budgetFit: Boolean(factors.budgetFit),
+            aiSuitable: Boolean(factors.aiSuitable),
+            scoredAt: factors.scoredAt ? Number(factors.scoredAt) : Date.now(),
+          }
+        : undefined;
+
+    return {
+      id: r.id,
+      name: r.name,
+      category: r.category,
+      tags: r.tags ?? [],
+      dataSource: r.data_source,
+      researchStage: r.research_stage,
+      description: r.description,
+      howMoneyMade: r.how_money_made,
+      capitalRequiredMin: this.n(r.capital_required_min),
+      capitalRequiredMax: this.n(r.capital_required_max),
+      timeToRevenueDaysMin: r.time_to_revenue_days_min,
+      timeToRevenueDaysMax: r.time_to_revenue_days_max,
+      skills: r.skills ?? [],
+      difficulty: r.difficulty,
+      competition: r.competition,
+      scalability: r.scalability,
+      risk: r.risk,
+      riskLevel: this.riskLevel(r.risk),
+      geographicRelevance: r.geographic_relevance ?? [],
+      evidenceTier: r.evidence_tier,
+      evidenceNotes: r.evidence_notes ?? '',
+      successProbability: this.n(r.success_probability),
+      revenuePotentialMonthlyMin: this.n(r.revenue_potential_monthly_min),
+      revenuePotentialMonthlyMax: this.n(r.revenue_potential_monthly_max),
+      upsideNote: r.upside_note ?? '',
+      downsideNote: r.downside_note ?? '',
+      operatingCostsNote: r.operating_costs_note ?? '',
+      examples: r.examples ?? [],
+      sources: (r.research_sources ?? []).map((s: any) => ({
+        id: s.id,
+        title: s.title,
+        url: s.url ?? undefined,
+        kind: s.kind,
+        note: s.note ?? undefined,
+      })),
+      dateResearched: r.date_researched ? Date.parse(r.date_researched) : null,
+      executionBlocked: Boolean(r.execution_blocked),
+      blockReason: r.block_reason ?? undefined,
+      score,
+    };
+  }
+
+  private opportunityRow(o: Opportunity): Record<string, unknown> {
+    return {
+      id: o.id,
+      agent_id: this.agentId,
+      name: o.name,
+      category: o.category,
+      tags: o.tags,
+      data_source: o.dataSource,
+      research_stage: o.researchStage,
+      description: o.description,
+      how_money_made: o.howMoneyMade,
+      capital_required_min: o.capitalRequiredMin,
+      capital_required_max: o.capitalRequiredMax,
+      time_to_revenue_days_min: o.timeToRevenueDaysMin,
+      time_to_revenue_days_max: o.timeToRevenueDaysMax,
+      skills: o.skills,
+      difficulty: o.difficulty,
+      competition: o.competition,
+      scalability: o.scalability,
+      risk: o.risk,
+      geographic_relevance: o.geographicRelevance,
+      evidence_tier: o.evidenceTier,
+      evidence_notes: o.evidenceNotes,
+      success_probability: o.successProbability,
+      revenue_potential_monthly_min: o.revenuePotentialMonthlyMin,
+      revenue_potential_monthly_max: o.revenuePotentialMonthlyMax,
+      upside_note: o.upsideNote,
+      downside_note: o.downsideNote,
+      operating_costs_note: o.operatingCostsNote,
+      examples: o.examples,
+      execution_blocked: o.executionBlocked,
+      block_reason: o.blockReason ?? null,
+      score_total: o.score?.total ?? null,
+      score_recommendation: o.score?.recommendation ?? null,
+      score_factors: o.score
+        ? { factors: o.score.factors, budgetFit: o.score.budgetFit, aiSuitable: o.score.aiSuitable, scoredAt: o.score.scoredAt }
+        : {},
+      date_researched: o.dateResearched ? new Date(o.dateResearched).toISOString() : null,
+    };
+  }
+
+  private riskLevel(risk: number): Opportunity['riskLevel'] {
+    return (['Low', 'Low–Medium', 'Medium', 'Medium–High', 'High'] as const)[Math.max(0, risk - 1)];
+  }
+
+  /* ----------------------------- transactions --------------------------- */
+
+  async listTransactions(): Promise<Transaction[]> {
+    const { data, error } = await this.db
+      .from('transactions')
+      .select('*')
+      .eq('agent_id', this.agentId)
+      .order('created_at', { ascending: true });
+    if (error) throw new Error(error.message);
+    return (data ?? []).map((r: any) => ({
+      id: r.id,
+      type: r.type,
+      amount: this.n(r.amount),
+      description: r.description,
+      relatedExperimentId: r.related_experiment_id ?? undefined,
+      balanceAfter: this.n(r.balance_after),
+      createdAt: Date.parse(r.created_at) || Date.now(),
+    }));
+  }
+
+  async appendTransaction(tx: Transaction): Promise<void> {
+    const { error } = await this.db.from('transactions').insert({
+      id: tx.id,
+      agent_id: this.agentId,
+      type: tx.type,
+      amount: tx.amount,
+      description: tx.description,
+      related_experiment_id: tx.relatedExperimentId ?? null,
+      balance_after: tx.balanceAfter,
+      created_at: new Date(tx.createdAt).toISOString(),
+    });
+    if (error) throw new Error(error.message);
+  }
+
+  /* ------------------------------ experiments --------------------------- */
+
+  async listExperiments(): Promise<Experiment[]> {
+    const { data, error } = await this.db
+      .from('experiments')
+      .select('*, experiment_results(*)')
+      .eq('agent_id', this.agentId)
+      .order('created_at', { ascending: false });
+    if (error) throw new Error(error.message);
+    return (data ?? []).map((r: any) => this.mapExperiment(r));
+  }
+
+  async appendExperiment(exp: Experiment): Promise<void> {
+    const { error } = await this.db.from('experiments').insert({
+      id: exp.id,
+      agent_id: this.agentId,
+      cycle_id: exp.cycleId,
+      opportunity_id: exp.opportunityId,
+      objective: exp.objective,
+      starting_budget: exp.startingBudget,
+      planned_action: exp.plannedAction,
+      expected_outcome: exp.expectedOutcome,
+      simulated: true,
+      status: 'COMPLETE',
+      created_at: new Date(exp.createdAt).toISOString(),
+    });
+    if (error) throw new Error(error.message);
+
+    const { error: re } = await this.db.from('experiment_results').insert({
+      experiment_id: exp.id,
+      outcome: exp.outcome,
+      actual_cost: exp.actualCost,
+      actual_revenue: exp.actualRevenue,
+      profit_loss: exp.profitLoss,
+      roi_pct: exp.roi,
+      duration_days: exp.durationDays,
+      lessons_learned: exp.lessonsLearned,
+      evidence_note: exp.evidenceNote,
+      created_at: new Date(exp.createdAt).toISOString(),
+    });
+    if (re) throw new Error(re.message);
+  }
+
+  private mapExperiment(r: any): Experiment {
+    const res = r.experiment_results?.[0] ?? {};
+    return {
+      id: r.id,
+      cycleId: r.cycle_id ?? null,
+      opportunityId: r.opportunity_id,
+      opportunityName: r.opportunity_name ?? '',
+      category: r.category ?? 'Services',
+      objective: r.objective ?? '',
+      startingBudget: this.n(r.starting_budget),
+      plannedAction: r.planned_action ?? '',
+      expectedOutcome: r.expected_outcome ?? '',
+      actualCost: this.n(res.actual_cost),
+      actualRevenue: this.n(res.actual_revenue),
+      profitLoss: this.n(res.profit_loss),
+      roi: this.n(res.roi_pct),
+      outcome: res.outcome ?? 'INCONCLUSIVE',
+      durationDays: res.duration_days ?? 0,
+      lessonsLearned: res.lessons_learned ?? [],
+      evidenceNote: res.evidence_note ?? '',
+      simulated: true,
+      createdAt: Date.parse(r.created_at) || Date.now(),
+    };
+  }
+
+  /* -------------------------------- memory ------------------------------ */
+
+  async listMemory(): Promise<MemoryEntry[]> {
+    const { data, error } = await this.db
+      .from('agent_memory')
+      .select('*')
+      .eq('agent_id', this.agentId)
+      .order('updated_at', { ascending: false });
+    if (error) throw new Error(error.message);
+    return (data ?? []).map((r: any) => ({
+      id: r.id,
+      kind: r.kind,
+      refId: r.ref_id ?? undefined,
+      title: r.title,
+      tests: r.tests ?? 0,
+      spent: this.n(r.spent),
+      revenue: this.n(r.revenue),
+      conclusion: r.conclusion,
+      notes: r.notes ?? [],
+      updatedAt: Date.parse(r.updated_at ?? r.created_at) || Date.now(),
+    }));
+  }
+
+  async upsertMemory(mem: MemoryEntry): Promise<void> {
+    const { error } = await this.db
+      .from('agent_memory')
+      .upsert(
+        {
+          id: mem.id,
+          agent_id: this.agentId,
+          kind: mem.kind,
+          ref_type: mem.refId ? (mem.kind === 'category' ? 'category' : 'opportunity') : null,
+          ref_id: mem.refId ?? null,
+          title: mem.title,
+          tests: mem.tests,
+          spent: mem.spent,
+          revenue: mem.revenue,
+          conclusion: mem.conclusion,
+          notes: mem.notes,
+          updated_at: new Date(mem.updatedAt).toISOString(),
+        },
+        { onConflict: 'id' },
+      );
+    if (error) throw new Error(error.message);
+  }
+
+  /* -------------------------------- reports ----------------------------- */
+
+  async listReports(): Promise<ResearchReport[]> {
+    const { data, error } = await this.db
+      .from('research_reports')
+      .select('*')
+      .eq('agent_id', this.agentId)
+      .order('created_at', { ascending: false });
+    if (error) throw new Error(error.message);
+    return (data ?? []).map((r: any) => ({
+      id: r.id,
+      opportunityId: r.opportunity_id,
+      opportunityName: r.opportunity_name ?? '',
+      generatedAt: Date.parse(r.created_at) || Date.now(),
+      generator: r.generator,
+      executiveSummary: r.executive_summary,
+      marketOpportunity: r.market_opportunity ?? '',
+      howItWorks: r.how_it_works ?? '',
+      capitalRequirements: r.capital_requirements ?? '',
+      competition: r.competition ?? '',
+      risks: r.risks ?? [],
+      evidence: r.evidence ?? '',
+      potentialRevenue: r.potential_revenue ?? '',
+      recommendedExperiment: r.recommended_experiment ?? '',
+      confidence: this.n(r.confidence),
+      finalScore: r.final_score ?? 0,
+      dataSource: r.data_source ?? 'SAMPLE',
+    }));
+  }
+
+  async appendReport(report: ResearchReport): Promise<void> {
+    const { error } = await this.db
+      .from('research_reports')
+      .upsert(
+        {
+          id: report.id,
+          agent_id: this.agentId,
+          opportunity_id: report.opportunityId,
+          generator: report.generator,
+          executive_summary: report.executiveSummary,
+          market_opportunity: report.marketOpportunity,
+          how_it_works: report.howItWorks,
+          capital_requirements: report.capitalRequirements,
+          competition: report.competition,
+          risks: report.risks,
+          evidence: report.evidence,
+          potential_revenue: report.potentialRevenue,
+          recommended_experiment: report.recommendedExperiment,
+          confidence: report.confidence,
+          final_score: report.finalScore,
+          data_source: report.dataSource,
+          created_at: new Date(report.generatedAt).toISOString(),
+        },
+        { onConflict: 'id' },
+      );
+    if (error) throw new Error(error.message);
+  }
+
+  /* ------------------------------ strategies ---------------------------- */
+
+  async listStrategies(): Promise<Strategy[]> {
+    const { data, error } = await this.db
+      .from('strategies')
+      .select('*')
+      .eq('agent_id', this.agentId)
+      .order('created_at', { ascending: false });
+    if (error) throw new Error(error.message);
+    return (data ?? []).map((r: any) => ({
+      id: r.id,
+      name: r.name,
+      rationale: r.rationale ?? '',
+      active: Boolean(r.active),
+      createdAt: Date.parse(r.created_at) || Date.now(),
+    }));
+  }
+
+  async appendStrategy(strategy: Strategy): Promise<void> {
+    const { error } = await this.db.from('strategies').insert({
+      id: strategy.id,
+      agent_id: this.agentId,
+      name: strategy.name,
+      rationale: strategy.rationale,
+      active: strategy.active,
+      created_at: new Date(strategy.createdAt).toISOString(),
+    });
+    if (error) throw new Error(error.message);
+  }
+
+  async deactivateStrategies(): Promise<void> {
+    const { error } = await this.db
+      .from('strategies')
+      .update({ active: false })
+      .eq('agent_id', this.agentId)
+      .eq('active', true);
+    if (error) throw new Error(error.message);
+  }
+
+  /* -------------------------------- events ------------------------------ */
+
+  async listEvents(): Promise<AgentEvent[]> {
+    const { data, error } = await this.db
+      .from('agent_events')
+      .select('*')
+      .eq('agent_id', this.agentId)
+      .order('created_at', { ascending: true });
+    if (error) throw new Error(error.message);
+    return (data ?? []).map((r: any) => ({
+      id: r.id,
+      type: r.type as EventType,
+      message: r.message,
+      createdAt: Date.parse(r.created_at) || Date.now(),
+    }));
+  }
+
+  async appendEvent(event: AgentEvent): Promise<void> {
+    const { error } = await this.db.from('agent_events').insert({
+      id: event.id,
+      agent_id: this.agentId,
+      type: event.type,
+      message: event.message,
+      created_at: new Date(event.createdAt).toISOString(),
+    });
+    if (error) throw new Error(error.message);
+  }
+
+  /* -------------------------------- cycles ------------------------------ */
+
+  async listCycles(): Promise<AgentCycle[]> {
+    const { data, error } = await this.db
+      .from('agent_cycles')
+      .select('*')
+      .eq('agent_id', this.agentId)
+      .order('started_at', { ascending: true });
+    if (error) throw new Error(error.message);
+    return (data ?? []).map((r: any) => ({
+      id: r.id,
+      index: r.cycle_index,
+      startedAt: Date.parse(r.started_at) || Date.now(),
+      completedAt: r.completed_at ? Date.parse(r.completed_at) : undefined,
+      steps: (r.steps ?? []) as CycleStep[],
+      discoveredIds: r.discovered_ids ?? [],
+      selectedOpportunityId: r.selected_opportunity_id ?? undefined,
+      experimentId: r.experiment_id ?? undefined,
+      summary: r.summary ?? undefined,
+    }));
+  }
+
+  async appendCycle(cycle: AgentCycle): Promise<void> {
+    const { error } = await this.db.from('agent_cycles').insert({
+      id: cycle.id,
+      agent_id: this.agentId,
+      cycle_index: cycle.index,
+      steps: cycle.steps,
+      discovered_ids: cycle.discoveredIds,
+      selected_opportunity_id: cycle.selectedOpportunityId ?? null,
+      experiment_id: cycle.experimentId ?? null,
+      summary: cycle.summary ?? null,
+      started_at: new Date(cycle.startedAt).toISOString(),
+      completed_at: cycle.completedAt ? new Date(cycle.completedAt).toISOString() : null,
+    });
+    if (error) throw new Error(error.message);
+  }
+
+  async updateCycleStep(
+    cycleId: string,
+    step: CycleStepKey,
+    status: 'active' | 'done' | 'skipped',
+    at?: number,
+  ): Promise<void> {
+    const cycles = await this.listCycles();
+    const cycle = cycles.find((c) => c.id === cycleId);
+    if (!cycle) return;
+    const steps = cycle.steps.map((s) =>
+      s.key === step ? { ...s, status, at: status === 'done' ? at ?? Date.now() : s.at } : s,
+    );
+    const { error } = await this.db
+      .from('agent_cycles')
+      .update({ steps })
+      .eq('id', cycleId);
+    if (error) throw new Error(error.message);
+  }
+
+  async completeCycle(cycleId: string, patch: Partial<AgentCycle>): Promise<void> {
+    const update: Record<string, unknown> = {};
+    if (patch.completedAt !== undefined)
+      update.completed_at = patch.completedAt ? new Date(patch.completedAt).toISOString() : null;
+    if (patch.summary !== undefined) update.summary = patch.summary;
+    if (patch.discoveredIds !== undefined) update.discovered_ids = patch.discoveredIds;
+    if (patch.selectedOpportunityId !== undefined)
+      update.selected_opportunity_id = patch.selectedOpportunityId ?? null;
+    if (patch.experimentId !== undefined) update.experiment_id = patch.experimentId ?? null;
+    const { error } = await this.db.from('agent_cycles').update(update).eq('id', cycleId);
+    if (error) throw new Error(error.message);
+  }
+
+  /* -------------------------------- reset ------------------------------- */
+
+  async reset({ seed = true }: { seed?: boolean } = {}): Promise<void> {
+    for (const table of [
+      'transactions',
+      'experiment_results',
+      'experiments',
+      'agent_memory',
+      'research_reports',
+      'research_sources',
+      'opportunities',
+      'agent_events',
+      'strategies',
+      'agent_cycles',
+    ]) {
+      await this.db.from(table).delete().eq('agent_id', this.agentId);
+    }
+    await this.db.from('agents').delete().eq('id', this.agentId);
+    if (seed) await seedSupabase(this.db, this.agentId);
+  }
+}
+
+/* ---------------------------- first-run seeding --------------------------- */
+
+export async function seedSupabase(
+  db: SupabaseClientLike,
+  agentId: string = AGENT_ID,
+): Promise<void> {
+  const snap = createSeedSnapshot();
+  const repo = new SupabaseRepository(db, agentId);
+
+  // Insert agent with the service-role-friendly defaults.
+  await db.from('agents').upsert({
+    id: snap.agent.id,
+    name: snap.agent.name,
+    status: 'ALIVE',
+    starting_capital: snap.agent.startingCapital,
+    survival_threshold: snap.agent.survivalThreshold,
+    current_strategy: snap.agent.currentStrategy,
+    current_objective: snap.agent.currentObjective,
+    cycle_count: 0,
+    total_cycles_run: 0,
+    real_money_enabled: false,
+    daily_spend_limit: 0,
+    created_at: new Date(snap.agent.startedAt).toISOString(),
+  });
+
+  await repo.upsertOpportunities(snap.opportunities);
+  for (const tx of snap.transactions) await repo.appendTransaction(tx);
+  for (const evt of snap.events) await repo.appendEvent(evt);
+  for (const strat of snap.strategies) await repo.appendStrategy(strat);
+}

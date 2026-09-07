@@ -1,0 +1,32 @@
+{
+  "name": "survive-ai",
+  "private": true,
+  "version": "0.2.0",
+  "type": "module",
+  "description": "SURVIVE AI — autonomous economic AI research laboratory (simulated capital, no real money)",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc --noEmit && vite build",
+    "preview": "vite preview",
+    "typecheck": "tsc --noEmit",
+    "seed:supabase": "esbuild scripts/seedSupabase.ts --bundle --platform=node --format=esm --outfile=dist/seed.mjs --log-level=error --external:@supabase/supabase-js && node --env-file=.env dist/seed.mjs",
+    "worker:dev": "npm run typecheck && wrangler dev worker/src/index.ts --config worker/wrangler.toml",
+    "worker:deploy": "npm run typecheck && wrangler deploy worker/src/index.ts --config worker/wrangler.toml"
+  },
+  "dependencies": {
+    "@supabase/supabase-js": "^2.109.0",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "zustand": "^4.5.5"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^4.20260702.1",
+    "@types/react": "^18.3.11",
+    "@types/react-dom": "^18.3.0",
+    "@vitejs/plugin-react": "^4.3.2",
+    "esbuild": "^0.24.2",
+    "typescript": "^5.6.2",
+    "vite": "^5.4.8",
+    "wrangler": "^3.114.17"
+  }
+}

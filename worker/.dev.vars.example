@@ -1,0 +1,11 @@
+# Copy to worker/.dev.vars for `npm run worker:dev`. NEVER commit real secrets.
+# These mirror the `wrangler secret put` values for production.
+
+SUPABASE_SERVICE_ROLE_KEY=your-service-role-key
+ANTHROPIC_API_KEY=
+OPENAI_API_KEY=
+TAVILY_API_KEY=
+BRAVE_API_KEY=
+
+# Shared secret required to trigger a cycle over HTTP (POST /cycles/run).
+TRIGGER_SECRET=choose-a-long-random-string
