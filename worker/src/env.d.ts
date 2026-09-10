@@ -1,6 +1,9 @@
 export interface Env {
-  SUPABASE_URL: string;
-  SUPABASE_SERVICE_ROLE_KEY: string;
+  DB: D1Database;
+  DB_BACKEND?: 'd1' | 'supabase';
+
+  SUPABASE_URL?: string;
+  SUPABASE_SERVICE_ROLE_KEY?: string;
   AGENT_ID?: string;
 
   ANTHROPIC_API_KEY?: string;

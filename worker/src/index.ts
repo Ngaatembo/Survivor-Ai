@@ -15,6 +15,8 @@
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 import { AgentEngine } from '../../src/engine/agentEngine';
 import { SupabaseRepository } from '../../src/engine/supabaseRepository';
+import { D1Repository } from '../../src/engine/d1Repository';
+import type { EngineRepository } from '../../src/engine/repository';
 import { createLLMProvider } from '../../src/services/providers/llm';
 import { createSearchProvider } from '../../src/services/providers/search';
 import { balanceFrom } from '../../src/services/wallet';
@@ -34,13 +36,28 @@ const json = (data: unknown, init?: ResponseInit) =>
 
 function buildEngine(env: Env): {
   engine: AgentEngine;
-  repo: SupabaseRepository;
+  repo: EngineRepository;
   connections: Record<string, boolean>;
 } {
-  const db: SupabaseClient = createClient(env.SUPABASE_URL, env.SUPABASE_SERVICE_ROLE_KEY, {
-    auth: { persistSession: false },
-  });
-  const repo = new SupabaseRepository(db, env.AGENT_ID ?? 'agent-survive-01');
+  const backend = env.DB_BACKEND ?? 'd1';
+  const agentId = env.AGENT_ID ?? 'agent-survive-01';
+
+  let repo: EngineRepository;
+  let dbConnected: boolean;
+  if (backend === 'supabase') {
+    if (!env.SUPABASE_URL || !env.SUPABASE_SERVICE_ROLE_KEY) {
+      throw new Error('DB_BACKEND=supabase but SUPABASE_URL/SUPABASE_SERVICE_ROLE_KEY are not set');
+    }
+    const db: SupabaseClient = createClient(env.SUPABASE_URL, env.SUPABASE_SERVICE_ROLE_KEY, {
+      auth: { persistSession: false },
+    });
+    repo = new SupabaseRepository(db, agentId);
+    dbConnected = true;
+  } else {
+    if (!env.DB) throw new Error('DB_BACKEND=d1 but the DB (D1) binding is missing from wrangler.toml');
+    repo = new D1Repository(env.DB, agentId);
+    dbConnected = true;
+  }
 
   const llm = createLLMProvider({
     anthropic: env.ANTHROPIC_API_KEY,
@@ -57,7 +74,7 @@ function buildEngine(env: Env): {
     engine,
     repo,
     connections: {
-      supabase: Boolean(env.SUPABASE_URL && env.SUPABASE_SERVICE_ROLE_KEY),
+      [backend]: dbConnected,
       llm: Boolean(llm?.connected),
       search: Boolean(search?.connected),
     },
@@ -109,12 +126,13 @@ export default {
     if (req.method === 'OPTIONS') return new Response(null, { status: 204 });
 
     if (url.pathname === '/health') {
+      const backend = env.DB_BACKEND ?? 'd1';
       return json({
         ok: true,
         service: 'survive-ai',
         time: new Date().toISOString(),
         connectors: {
-          supabase: Boolean(env.SUPABASE_URL && env.SUPABASE_SERVICE_ROLE_KEY),
+          db: { backend, connected: backend === 'supabase' ? Boolean(env.SUPABASE_URL && env.SUPABASE_SERVICE_ROLE_KEY) : Boolean(env.DB) },
           llm: Boolean(env.ANTHROPIC_API_KEY || env.OPENAI_API_KEY),
           search: Boolean(env.TAVILY_API_KEY || env.BRAVE_API_KEY),
           payments: false, // never enabled on the worker

@@ -1,0 +1,240 @@
+-- ============================================================================
+-- SURVIVE AI — Cloudflare D1 (SQLite) schema
+-- ----------------------------------------------------------------------------
+-- SQLite translation of supabase/schema.sql. Differences from the Postgres
+-- version, all driven by SQLite's type system:
+--   * enums              -> TEXT + CHECK (col IN (...))
+--   * text[]              -> TEXT holding a JSON array, e.g. '["a","b"]'
+--   * jsonb               -> TEXT holding a JSON object
+--   * numeric(12,2)       -> REAL (money is SIMULATED; no need for exact decimal)
+--   * boolean              -> INTEGER 0/1 (SQLite has no native boolean)
+--   * timestamptz          -> TEXT, ISO 8601 (e.g. '2026-09-10T12:00:00.000Z')
+--   * Row Level Security   -> dropped; D1 has no RLS. The worker holds the only
+--                             credentials (the D1 binding), so access control
+--                             is enforced at the Worker/API layer instead.
+-- Apply with:
+--   npx wrangler d1 execute survivor-ai --file=./schema.d1.sql --remote
+-- ============================================================================
+
+PRAGMA foreign_keys = ON;
+
+-- agents -----------------------------------------------------------------
+
+CREATE TABLE agents (
+  id                  TEXT PRIMARY KEY,
+  name                TEXT NOT NULL DEFAULT 'SURVIVE-01',
+  status              TEXT NOT NULL DEFAULT 'ALIVE'
+                        CHECK (status IN ('ALIVE','AT_RISK','DEAD','RESEARCHING','EXECUTING','PAUSED')),
+  starting_capital    REAL NOT NULL DEFAULT 50.00,
+  survival_threshold  REAL NOT NULL DEFAULT 5.00,
+  current_strategy    TEXT,
+  current_objective   TEXT,
+  cycle_count         INTEGER NOT NULL DEFAULT 0,
+  total_cycles_run    INTEGER NOT NULL DEFAULT 0,
+  created_at          TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+  -- hard safety switch: when 0, no real-money capability may ever execute
+  real_money_enabled  INTEGER NOT NULL DEFAULT 0,
+  daily_spend_limit   REAL NOT NULL DEFAULT 0.00
+);
+
+-- opportunities ------------------------------------------------------------
+
+CREATE TABLE opportunities (
+  id                          TEXT PRIMARY KEY,
+  agent_id                    TEXT NOT NULL REFERENCES agents(id) ON DELETE CASCADE,
+  name                        TEXT NOT NULL,
+  category                    TEXT NOT NULL
+                                CHECK (category IN ('Digital Business','Content','E-Commerce','Services','Finance','Local / Real-World')),
+  tags                        TEXT NOT NULL DEFAULT '[]',   -- JSON array
+  data_source                 TEXT NOT NULL DEFAULT 'SAMPLE' CHECK (data_source IN ('SAMPLE','LIVE')),
+  research_stage              TEXT NOT NULL DEFAULT 'UNDISCOVERED'
+                                CHECK (research_stage IN ('UNDISCOVERED','DISCOVERED','RESEARCHED','VERIFIED','SCORED','RANKED')),
+  description                 TEXT NOT NULL,
+  how_money_made              TEXT NOT NULL,
+  capital_required_min        REAL NOT NULL DEFAULT 0,
+  capital_required_max        REAL NOT NULL DEFAULT 0,
+  time_to_revenue_days_min    INTEGER NOT NULL,
+  time_to_revenue_days_max    INTEGER NOT NULL,
+  skills                      TEXT NOT NULL DEFAULT '[]',   -- JSON array
+  difficulty                  INTEGER NOT NULL CHECK (difficulty BETWEEN 1 AND 5),
+  competition                 INTEGER NOT NULL CHECK (competition BETWEEN 1 AND 5),
+  scalability                 INTEGER NOT NULL CHECK (scalability BETWEEN 1 AND 5),
+  risk                        INTEGER NOT NULL CHECK (risk BETWEEN 1 AND 5),
+  geographic_relevance        TEXT NOT NULL DEFAULT '[]',   -- JSON array
+  evidence_tier                TEXT NOT NULL CHECK (evidence_tier IN ('VERIFIED','LIKELY','UNCERTAIN','UNVERIFIED')),
+  evidence_notes               TEXT,
+  success_probability          REAL NOT NULL CHECK (success_probability BETWEEN 0 AND 1),
+  revenue_potential_monthly_min REAL NOT NULL,
+  revenue_potential_monthly_max REAL NOT NULL,
+  upside_note                  TEXT,
+  downside_note                 TEXT,
+  operating_costs_note          TEXT,
+  examples                      TEXT NOT NULL DEFAULT '[]', -- JSON array
+  execution_blocked             INTEGER NOT NULL DEFAULT 0,
+  block_reason                   TEXT,
+  score_total                    INTEGER CHECK (score_total BETWEEN 0 AND 100),
+  score_recommendation           TEXT CHECK (score_recommendation IN ('HIGH PRIORITY','RECOMMENDED','WATCHLIST','DEPRIORITIZE','RESEARCH ONLY')),
+  score_factors                   TEXT NOT NULL DEFAULT '{}', -- JSON object; full 9-factor breakdown
+  date_researched                  TEXT,
+  created_at                       TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
+);
+CREATE INDEX idx_opp_agent_stage ON opportunities(agent_id, research_stage);
+CREATE INDEX idx_opp_score ON opportunities(agent_id, score_total DESC);
+
+-- research_sources -----------------------------------------------------------
+
+CREATE TABLE research_sources (
+  id                TEXT PRIMARY KEY,
+  opportunity_id    TEXT NOT NULL REFERENCES opportunities(id) ON DELETE CASCADE,
+  title             TEXT NOT NULL,
+  url               TEXT,
+  kind              TEXT NOT NULL, -- platform | report | community | academic | sample-note | web
+  note              TEXT,
+  verified          INTEGER NOT NULL DEFAULT 0,
+  retrieved_at      TEXT
+);
+CREATE INDEX idx_sources_opportunity ON research_sources(opportunity_id);
+
+-- research_reports -----------------------------------------------------------
+
+CREATE TABLE research_reports (
+  id                    TEXT PRIMARY KEY,
+  agent_id              TEXT NOT NULL REFERENCES agents(id) ON DELETE CASCADE,
+  opportunity_id        TEXT NOT NULL REFERENCES opportunities(id) ON DELETE CASCADE,
+  opportunity_name      TEXT NOT NULL DEFAULT '',
+  generator             TEXT NOT NULL DEFAULT 'local-rule-engine',
+  executive_summary     TEXT NOT NULL,
+  market_opportunity    TEXT,
+  how_it_works          TEXT,
+  capital_requirements  TEXT,
+  competition           TEXT,
+  risks                 TEXT NOT NULL DEFAULT '[]', -- JSON array
+  evidence              TEXT,
+  potential_revenue     TEXT,
+  recommended_experiment TEXT,
+  confidence            REAL NOT NULL,
+  final_score           INTEGER NOT NULL,
+  data_source           TEXT NOT NULL DEFAULT 'SAMPLE' CHECK (data_source IN ('SAMPLE','LIVE')),
+  created_at            TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
+);
+CREATE INDEX idx_reports_agent_time ON research_reports(agent_id, created_at DESC);
+
+-- experiments + results --------------------------------------------------------
+
+CREATE TABLE experiments (
+  id                  TEXT PRIMARY KEY,
+  agent_id            TEXT NOT NULL REFERENCES agents(id) ON DELETE CASCADE,
+  cycle_id            TEXT REFERENCES agent_cycles(id),
+  opportunity_id      TEXT NOT NULL REFERENCES opportunities(id),
+  opportunity_name    TEXT NOT NULL DEFAULT '',
+  category            TEXT NOT NULL DEFAULT 'Services'
+                        CHECK (category IN ('Digital Business','Content','E-Commerce','Services','Finance','Local / Real-World')),
+  objective           TEXT NOT NULL,
+  starting_budget     REAL NOT NULL,
+  planned_action      TEXT NOT NULL,
+  expected_outcome    TEXT,
+  simulated           INTEGER NOT NULL DEFAULT 1,
+  status              TEXT NOT NULL DEFAULT 'PLANNED', -- PLANNED | RUNNING | COMPLETE
+  created_at          TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
+);
+CREATE INDEX idx_experiments_agent_time ON experiments(agent_id, created_at DESC);
+
+CREATE TABLE experiment_results (
+  id                  TEXT PRIMARY KEY,
+  experiment_id       TEXT NOT NULL UNIQUE REFERENCES experiments(id) ON DELETE CASCADE,
+  outcome             TEXT NOT NULL CHECK (outcome IN ('SUCCESS','PARTIAL_SUCCESS','FAILED','INCONCLUSIVE')),
+  actual_cost         REAL NOT NULL,
+  actual_revenue      REAL NOT NULL,
+  profit_loss         REAL NOT NULL,
+  roi_pct             REAL NOT NULL,
+  duration_days       INTEGER,
+  lessons_learned     TEXT NOT NULL DEFAULT '[]', -- JSON array
+  evidence_note       TEXT,
+  raw_simulation      TEXT, -- JSON object: probability, roll, parameters
+  created_at          TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
+);
+
+-- agent_memory ---------------------------------------------------------------
+
+CREATE TABLE agent_memory (
+  id            TEXT PRIMARY KEY,
+  agent_id      TEXT NOT NULL REFERENCES agents(id) ON DELETE CASCADE,
+  kind          TEXT NOT NULL CHECK (kind IN ('opportunity','category','lesson','assumption')),
+  ref_type      TEXT,          -- 'opportunity' | 'category'
+  ref_id        TEXT,          -- opportunity id or category name
+  title         TEXT NOT NULL,
+  tests         INTEGER NOT NULL DEFAULT 0,
+  spent         REAL NOT NULL DEFAULT 0,
+  revenue       REAL NOT NULL DEFAULT 0,
+  conclusion    TEXT NOT NULL DEFAULT 'UNTESTED'
+                  CHECK (conclusion IN ('PROMISING','VIABLE','MIXED','AVOID','UNTESTED','WATCH')),
+  notes         TEXT NOT NULL DEFAULT '[]', -- JSON array
+  created_at    TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+  updated_at    TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
+);
+CREATE INDEX idx_memory_agent ON agent_memory(agent_id, kind);
+
+-- transactions (append-only ledger) -------------------------------------------
+
+CREATE TABLE transactions (
+  id                    TEXT PRIMARY KEY,
+  agent_id              TEXT NOT NULL REFERENCES agents(id) ON DELETE CASCADE,
+  type                  TEXT NOT NULL CHECK (type IN ('DEPOSIT','REVENUE','EXPENSE','REFUND','PROFIT','LOSS')),
+  amount                REAL NOT NULL,   -- signed: + in, - out
+  description           TEXT NOT NULL,
+  related_experiment_id TEXT REFERENCES experiments(id),
+  balance_after         REAL NOT NULL,   -- denormalized checkpoint
+  created_at            TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
+);
+-- Balance is always derived: SUM(amount). The ledger is append-only.
+CREATE INDEX idx_tx_agent_time ON transactions(agent_id, created_at);
+
+-- agent_events -----------------------------------------------------------------
+
+CREATE TABLE agent_events (
+  id          TEXT PRIMARY KEY,
+  agent_id    TEXT NOT NULL REFERENCES agents(id) ON DELETE CASCADE,
+  type        TEXT NOT NULL
+                CHECK (type IN ('SYSTEM','CYCLE','DISCOVERY','RESEARCH','VERIFY','SCORE',
+                                 'DECISION','REJECTION','EXPERIMENT','WALLET','MEMORY','WARNING')),
+  message     TEXT NOT NULL,
+  data        TEXT, -- JSON object
+  created_at  TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
+);
+CREATE INDEX idx_events_agent_time ON agent_events(agent_id, created_at DESC);
+
+-- strategies ---------------------------------------------------------------------
+
+CREATE TABLE strategies (
+  id          TEXT PRIMARY KEY,
+  agent_id    TEXT NOT NULL REFERENCES agents(id) ON DELETE CASCADE,
+  name        TEXT NOT NULL,
+  rationale   TEXT,
+  active      INTEGER NOT NULL DEFAULT 1,
+  created_at  TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
+);
+CREATE INDEX idx_strategies_agent_time ON strategies(agent_id, created_at DESC);
+
+-- agent_cycles ---------------------------------------------------------------------
+
+CREATE TABLE agent_cycles (
+  id                       TEXT PRIMARY KEY,
+  agent_id                 TEXT NOT NULL REFERENCES agents(id) ON DELETE CASCADE,
+  cycle_index              INTEGER NOT NULL,
+  steps                    TEXT NOT NULL DEFAULT '[]',  -- JSON array: per-step status/timestamps
+  discovered_ids           TEXT NOT NULL DEFAULT '[]',  -- JSON array
+  selected_opportunity_id  TEXT REFERENCES opportunities(id),
+  experiment_id            TEXT REFERENCES experiments(id),
+  summary                  TEXT,
+  started_at               TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+  completed_at              TEXT
+);
+CREATE INDEX idx_cycles_agent_time ON agent_cycles(agent_id, started_at);
+
+-- Notes -----------------------------------------------------------------------
+-- * SQLite resolves circular FKs (experiments.cycle_id <-> agent_cycles) fine
+--   at CREATE TABLE time as long as foreign_keys enforcement happens on
+--   INSERT, not on table creation — no ALTER TABLE ADD CONSTRAINT needed here,
+--   unlike Postgres.
+-- * No RLS: the D1 binding is only ever accessible from the Worker, which
+--   holds no end-user session — there is a single agent/owner by design.

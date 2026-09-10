@@ -3,22 +3,32 @@
 # ----------------------------------------------------------------------------
 # Local dev:  npm run worker:dev        (uses .dev.vars)
 # Deploy:     npm run worker:deploy
+# Apply the D1 schema (one-time, or after schema.d1.sql changes):
+#   npx wrangler d1 execute survivor-ai --file=./schema.d1.sql --remote
 # Set secrets after first deploy:
-#   npx wrangler secret put SUPABASE_SERVICE_ROLE_KEY
 #   npx wrangler secret put ANTHROPIC_API_KEY      (or OPENAI_API_KEY)
 #   npx wrangler secret put TAVILY_API_KEY         (or BRAVE_API_KEY)
 #   npx wrangler secret put TRIGGER_SECRET         (shared secret for HTTP trigger)
+# Only needed if DB_BACKEND = "supabase" (kept as a fallback path):
+#   npx wrangler secret put SUPABASE_SERVICE_ROLE_KEY
 # ============================================================================
 
 name = "survive-ai"
 main = "src/index.ts"
 compatibility_date = "2024-11-01"
 
+[[d1_databases]]
+binding = "DB"
+database_name = "survivor-ai"
+database_id = "d4b6f436-1a2c-4f80-86a5-3c1717408d96"
+
 [vars]
 # Non-secret configuration. Secrets are set via `wrangler secret put`.
+DB_BACKEND = "d1"    # "d1" (default, unblocked) | "supabase" (legacy fallback)
 SUPABASE_URL = "https://YOUR-PROJECT.supabase.co"
 AGENT_ID = "agent-survive-01"
 # Cron schedule: every 30 minutes the agent runs one research cycle.
 # Cron is always on; the agent self-throttles (dead = no-op).
 [triggers]
 crons = ["*/30 * * * *"]
+
