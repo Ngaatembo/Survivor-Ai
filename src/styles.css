@@ -81,6 +81,7 @@ button:disabled { cursor: not-allowed; opacity: 0.45; }
 .brand {
   padding: 16px 16px 14px;
   border-bottom: 1px solid var(--border-soft);
+  position: relative;
 }
 .brand-name {
   font-family: var(--mono);
@@ -91,6 +92,38 @@ button:disabled { cursor: not-allowed; opacity: 0.45; }
   display: flex;
   align-items: center;
   gap: 8px;
+}
+.sidebar-close {
+  display: none;
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  width: 26px;
+  height: 26px;
+  border: 1px solid var(--border);
+  background: var(--panel-2);
+  color: var(--muted);
+  border-radius: var(--radius-sm);
+  font-size: 13px;
+  align-items: center;
+  justify-content: center;
+}
+.menu-toggle {
+  display: none;
+  flex-shrink: 0;
+  width: 32px;
+  height: 32px;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--border-strong);
+  background: var(--panel-2);
+  color: var(--text-2);
+  border-radius: var(--radius-sm);
+  font-size: 14px;
+  padding: 0;
+}
+.nav-backdrop {
+  display: none;
 }
 .brand-name .tick { color: var(--green); }
 .brand-sub {
@@ -188,7 +221,7 @@ button:disabled { cursor: not-allowed; opacity: 0.45; }
 .btn.warn { color: var(--amber); border-color: rgba(210, 153, 34, 0.4); }
 .btn.small { padding: 4px 9px; font-size: 10.5px; }
 
-.content { flex: 1; overflow-y: auto; padding: 20px 22px 60px; }
+.content { flex: 1; overflow-y: auto; overflow-x: hidden; padding: 20px 22px 60px; }
 
 /* -------------------------------- panels --------------------------------- */
 
@@ -527,3 +560,82 @@ label.check { display: inline-flex; align-items: center; gap: 6px; font-size: 12
 
 .stage-badge { font-family: var(--mono); font-size: 9.5px; letter-spacing: 0.08em; padding: 2px 6px; border-radius: 3px; background: var(--panel-3); color: var(--faint); text-transform: uppercase; }
 .stage-badge.lit { color: var(--blue); background: var(--blue-dim); }
+
+/* ============================================================================
+   RESPONSIVE / MOBILE
+   Sidebar becomes an off-canvas drawer; grids collapse; fixed-width bits shrink.
+   ========================================================================== */
+
+@media (max-width: 900px) {
+  .menu-toggle { display: flex; }
+  .sidebar-close { display: flex; }
+
+  .sidebar {
+    position: fixed;
+    top: 0;
+    left: 0;
+    bottom: 0;
+    z-index: 50;
+    transform: translateX(-100%);
+    transition: transform 0.22s ease;
+    box-shadow: 4px 0 28px rgba(0, 0, 0, 0.5);
+    width: min(var(--sidebar-w), 78vw);
+  }
+  .sidebar.open { transform: translateX(0); }
+
+  .nav-backdrop {
+    display: block;
+    position: fixed;
+    inset: 0;
+    background: rgba(4, 7, 10, 0.62);
+    z-index: 45;
+    animation: fade-in 0.18s ease-out;
+  }
+
+  .main { width: 100%; }
+
+  .topbar { padding: 0 12px; gap: 8px; }
+  .topbar .view-title { font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .topbar .view-title .crumb { display: none; }
+
+  .controls {
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    max-width: 100%;
+    padding-bottom: 2px;
+  }
+  .controls::-webkit-scrollbar { display: none; }
+  .status-pill .activity { display: none; }
+
+  .content { padding: 14px 14px 50px; }
+
+  .cols-4, .cols-3, .cols-2 { grid-template-columns: repeat(2, 1fr); }
+
+  .opp-grid { grid-template-columns: 1fr; }
+
+  .bar-row { flex-wrap: wrap; }
+  .bar-row .bar-label { width: 100%; }
+  .bar-row .bar-track { flex-basis: 100%; }
+
+  .kv { grid-template-columns: 110px 1fr; }
+
+  .drawer { width: 100vw; padding: 18px 16px 50px; }
+
+  .report-doc { max-width: 100%; }
+
+  .filter-bar { gap: 6px; }
+  .text-input { min-width: 0; flex: 1; }
+}
+
+@media (max-width: 560px) {
+  .cols-4, .cols-3, .cols-2 { grid-template-columns: 1fr; }
+
+  .stat-value { font-size: 19px; }
+  .panel { padding: 12px 13px; }
+
+  .btn { padding: 7px 10px; font-size: 10.5px; }
+
+  .kv { grid-template-columns: 1fr; gap: 2px 0; }
+  .kv .k { padding-top: 6px; }
+}

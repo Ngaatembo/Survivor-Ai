@@ -55,6 +55,7 @@ export function App() {
   const [view, setView] = useState<View>('command');
   const [drawerId, setDrawerId] = useState<string | null>(null);
   const [confirmReset, setConfirmReset] = useState(false);
+  const [navOpen, setNavOpen] = useState(false);
 
   const running = useStore((s) => s.loop.running);
   const busy = useStore((s) => s.loop.busy);
@@ -73,12 +74,16 @@ export function App() {
 
   return (
     <div className="app">
-      <aside className="sidebar">
+      {navOpen && <div className="nav-backdrop" onClick={() => setNavOpen(false)} />}
+      <aside className={`sidebar ${navOpen ? 'open' : ''}`}>
         <div className="brand">
           <div className="brand-name">
             <span className="tick">▮</span> SURVIVE AI
           </div>
           <div className="brand-sub">autonomous economic lab · v0.1</div>
+          <button className="sidebar-close" onClick={() => setNavOpen(false)} aria-label="Close menu">
+            ✕
+          </button>
         </div>
         <nav className="nav">
           {(['OVERVIEW', 'DISCOVERY', 'OPERATIONS', 'SYSTEM'] as const).map((section) => (
@@ -88,7 +93,10 @@ export function App() {
                 <button
                   key={n.id}
                   className={`nav-item ${view === n.id ? 'active' : ''}`}
-                  onClick={() => setView(n.id)}
+                  onClick={() => {
+                    setView(n.id);
+                    setNavOpen(false);
+                  }}
                 >
                   <span className="icon">{n.icon}</span>
                   {n.label}
@@ -113,6 +121,9 @@ export function App() {
 
       <div className="main">
         <header className="topbar">
+          <button className="menu-toggle" onClick={() => setNavOpen(true)} aria-label="Open menu">
+            ☰
+          </button>
           <div className="view-title">
             <span className="crumb">SURVIVE-01</span>
             {TITLES[view]}
