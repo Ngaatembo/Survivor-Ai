@@ -117,11 +117,28 @@ export function simulateExperiment({ opportunity: o, budget, memory }: Simulatio
   };
 }
 
+/** Hard server-side cap: never allocate more than this fraction of balance
+ *  to a single experiment. Enforced here AND re-checked by the caller
+ *  immediately before the ledger write — see agentEngine.ts. */
+export const MAX_EXPERIMENT_ALLOCATION_PCT = 0.18;
+
+/**
+ * Returns the experiment budget for one cycle, or 0 if the balance is too
+ * small to fund anything within the 18% cap. IMPORTANT: unlike an earlier
+ * version of this function, the 18% ceiling is a HARD cap — it is never
+ * overridden by a "minimum viable experiment" floor. At low balances (e.g.
+ * $5, where 18% is $0.90) that means no experiment runs this cycle; the
+ * agent keeps researching instead of quietly overspending its cap.
+ */
 export function experimentBudget(o: Opportunity, balance: number): number {
-  // Never risk more than ~18% of remaining capital in one experiment, and
-  // always keep clear of the survival threshold.
-  const pct = Math.floor(balance * 0.18);
-  let budget = Math.min(Math.max(o.capitalRequiredMin, 2), Math.max(2, pct));
-  budget = Math.min(budget, Math.max(2, balance - 0.5));
-  return Math.round(Math.max(2, budget) * 100) / 100;
+  if (balance <= 0) return 0;
+  const cap = Math.round(balance * MAX_EXPERIMENT_ALLOCATION_PCT * 100) / 100;
+  if (cap < 1) return 0; // too little capital left to fund a meaningful, capped experiment
+  // Within the cap, prefer the opportunity's own minimum requirement (never
+  // exceed the cap to reach it), and always leave the survival threshold's
+  // worth of headroom untouched where the balance allows.
+  const desired = Math.max(1, o.capitalRequiredMin || 1);
+  let budget = Math.min(desired, cap);
+  budget = Math.min(budget, Math.max(0, balance - 0.5));
+  return Math.round(Math.max(0, budget) * 100) / 100;
 }

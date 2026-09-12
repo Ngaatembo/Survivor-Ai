@@ -83,14 +83,42 @@ cp worker/.dev.vars.example worker/.dev.vars   # fill in keys
 npm run worker:dev
 ```
 
-## 4. Pointing the dashboard at the live backend (optional)
+## 4. Pointing the dashboard at the live backend
 
-The browser app defaults to localStorage so it works standalone. To read/write
-the same Supabase database the Worker uses, add a browser-side
-`SupabaseRepository` wired to the **anon** key (Row Level Security in the
-schema governs access) — the repository interface is already implemented in
-`src/engine/supabaseRepository.ts`; set `VITE_SUPABASE_URL` /
-`VITE_SUPABASE_ANON_KEY` in `.env` to light the connector green.
+The browser app defaults to a fully standalone DEMO mode (localStorage +
+local rule engine, clearly labeled in the sidebar) so it still works with
+zero configuration. To make the dashboard a read-only mirror of the
+deployed Worker/D1 instead — the real fix for the frontend/backend
+disconnect — set one build-time variable:
+
+```bash
+# .env (frontend build)
+VITE_API_BASE_URL=https://survivor-ai-backend.<your-subdomain>.workers.dev
+```
+
+When this is set:
+
+- On load, and every 15s after, the dashboard calls the Worker's `GET
+  /state` (full agent/opportunities/experiments/wallet/memory/activity/
+  cycles/reports snapshot) and `GET /health`, and renders exactly that data.
+  Neither endpoint requires or exposes `TRIGGER_SECRET` — the frontend never
+  triggers cycles; the Worker's cron is the only thing that runs them.
+- The local autonomous-loop controls (START RESEARCH / RUN NEXT CYCLE /
+  manual experiments / RESET) are disabled — the topbar shows a live status
+  pill (`● LIVE — cron-driven`) instead, so there is only ever one place a
+  cycle can be started, and only one wallet/opportunity/experiment dataset
+  the dashboard will ever show.
+- If the backend is unreachable, the UI shows an explicit "Backend
+  unreachable" banner with the real error — it never falls back to inventing
+  local data to fill the gap.
+- Nothing about business state is written to localStorage in this mode
+  (only UI preferences would be, if any are ever added) — D1 via the Worker
+  is the single source of truth end-to-end.
+
+`src/engine/supabaseRepository.ts` remains available for the (legacy,
+non-default) `DB_BACKEND=supabase` path if you ever run the Worker against
+Supabase instead of D1, but the browser talks to it only indirectly, through
+the Worker's HTTP API above — the browser is never given a Supabase key.
 
 ## 5. Push to GitHub
 

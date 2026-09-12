@@ -45,7 +45,11 @@ create table agents (
   created_at          timestamptz not null default now(),
   -- hard safety switch: when false, no real-money capability may ever execute
   real_money_enabled  boolean not null default false,
-  daily_spend_limit   numeric(12,2) not null default 0.00
+  daily_spend_limit   numeric(12,2) not null default 0.00,
+  -- cycle concurrency lock (see migrations/0001_add_cycle_lock.sql for the D1
+  -- equivalent): prevents overlapping cron ticks / manual triggers from
+  -- racing each other. NULL = not locked.
+  cycle_lock_at       timestamptz
 );
 
 -- opportunities --------------------------------------------------------------

@@ -1,4 +1,4 @@
-import { useStore, useWalletTotals } from '../store';
+import { useStore, useWalletTotals, backendConfigured } from '../store';
 import { Panel, Stat, Badge, DataSourceBadge } from './ui';
 import { SurvivalMeter } from './SurvivalMeter';
 import { LoopPipeline } from './LoopPipeline';
@@ -148,7 +148,7 @@ export function CommandCenter({ go }: { go: (v: View) => void }) {
           )}
         </Panel>
 
-        <Panel title="Recent activity" right={<DataSourceBadge source="SAMPLE" />}>
+        <Panel title="Recent activity" right={<DataSourceBadge source={backendConfigured ? 'LIVE' : 'SAMPLE'} />}>
           <div className="feed" style={{ maxHeight: 280, overflowY: 'auto' }}>
             {[...events].reverse().slice(0, 9).map((e) => (
               <div key={e.id} className="event">

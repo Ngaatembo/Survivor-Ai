@@ -32,6 +32,7 @@ import { createSeedSnapshot } from './engine/seed';
 import { createLLMProvider } from './services/providers/llm';
 import { createSearchProvider } from './services/providers/search';
 import { env, featureFlags } from './config/env';
+import { fetchBackendState, fetchBackendHealth, BackendError } from './services/backendApi';
 
 const delay = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
@@ -58,6 +59,15 @@ interface LoopState {
   activity: string;
 }
 
+/** Status of the read-only mirror of the deployed backend (D1/Worker). */
+interface BackendSyncState {
+  /** True once at least one successful /state fetch has completed. */
+  connected: boolean;
+  syncing: boolean;
+  error: string | null;
+  lastSyncedAt: number | null;
+}
+
 interface SurviveState {
   agent: Agent;
   opportunities: Opportunity[];
@@ -69,6 +79,7 @@ interface SurviveState {
   strategies: Strategy[];
   cycles: AgentCycle[];
   loop: LoopState;
+  backend: BackendSyncState;
 
   logEvent: (type: AgentEvent['type'], message: string) => void;
   startLoop: () => void;
@@ -77,7 +88,27 @@ interface SurviveState {
   resetSimulation: () => void;
   runManualExperiment: (opportunityId: string) => void;
   generateReportFor: (opportunityId: string) => void;
+  syncFromBackend: () => Promise<void>;
   _runAuto: () => Promise<void>;
+}
+
+/**
+ * When VITE_API_BASE_URL is configured, the deployed backend/D1 is the sole
+ * source of truth (fixes the frontend/backend disconnect — see README /
+ * DEPLOYMENT.md "CRITICAL EXISTING PROBLEM"). The local autonomous loop,
+ * manual-experiment and reset actions are disabled in this mode: they would
+ * otherwise mutate a second, independent copy of "the" wallet/opportunities/
+ * experiments purely in the browser, which is exactly the bug this fixes.
+ * generateReportFor's local scoring fallback is also skipped in backend mode
+ * (reports are generated server-side).
+ */
+function guardLocalMutation(get: () => SurviveState): boolean {
+  if (!featureFlags.backend) return false;
+  get().logEvent(
+    'WARNING',
+    'Live backend mode: the autonomous loop runs on the Cloudflare Worker cron. Local demo controls are disabled so the dashboard never disagrees with the backend.',
+  );
+  return true;
 }
 
 export const useStore = create<SurviveState>()(
@@ -128,7 +159,45 @@ export const useStore = create<SurviveState>()(
           busy: false,
           currentStep: null,
           activeCycleId: null,
-          activity: 'Idle — awaiting research instructions.',
+          activity: featureFlags.backend ? 'Connecting to live backend…' : 'Idle — awaiting research instructions.',
+        },
+        backend: {
+          connected: false,
+          syncing: false,
+          error: null,
+          lastSyncedAt: null,
+        },
+
+        syncFromBackend: async () => {
+          if (!featureFlags.backend) return;
+          if (get().backend.syncing) return;
+          set((s: any) => ({ backend: { ...s.backend, syncing: true } }));
+          try {
+            const [state, health] = await Promise.all([fetchBackendState(), fetchBackendHealth()]);
+            set({
+              agent: state.agent,
+              opportunities: state.opportunities,
+              experiments: state.experiments,
+              transactions: state.transactions,
+              memory: state.memory,
+              events: state.events,
+              cycles: state.cycles,
+              reports: state.reports,
+              strategies: state.strategies,
+              backend: {
+                connected: true,
+                syncing: false,
+                error: null,
+                lastSyncedAt: Date.now(),
+              },
+            } as any);
+            void health; // surfaced via useBackendHealth() below if needed later
+          } catch (e) {
+            const message = e instanceof BackendError ? e.message : (e as Error).message;
+            set((s: any) => ({
+              backend: { ...s.backend, syncing: false, connected: false, error: message },
+            }));
+          }
         },
 
         logEvent: (type: AgentEvent['type'], message: string) =>
@@ -137,6 +206,7 @@ export const useStore = create<SurviveState>()(
           })),
 
         startLoop: () => {
+          if (guardLocalMutation(get)) return;
           const s = get();
           if (s.agent.status === 'DEAD') {
             get().logEvent('WARNING', 'Agent is DEAD. Reset the simulation to restart.');
@@ -152,12 +222,14 @@ export const useStore = create<SurviveState>()(
         },
 
         pauseLoop: () => {
+          if (guardLocalMutation(get)) return;
           if (!get().loop.running) return;
           set((st: any) => ({ loop: { ...st.loop, running: false } }));
           get().logEvent('CYCLE', 'Pause requested — agent will halt after the current step.');
         },
 
         runNextCycle: () => {
+          if (guardLocalMutation(get)) return;
           const s = get();
           if (s.loop.busy) return;
           if (s.agent.status === 'DEAD') {
@@ -168,6 +240,7 @@ export const useStore = create<SurviveState>()(
         },
 
         resetSimulation: () => {
+          if (guardLocalMutation(get)) return;
           const fresh = seedInitialState();
           set({
             ...fresh,
@@ -185,6 +258,7 @@ export const useStore = create<SurviveState>()(
         /* Manual experiment (Decision Center / Explorer). Uses the same
          * simulation + memory services as the autonomous loop. */
         runManualExperiment: (opportunityId: string) => {
+          if (guardLocalMutation(get)) return;
           const s = get();
           if (s.agent.status === 'DEAD') {
             get().logEvent('WARNING', 'Agent is DEAD — experiments are locked.');
@@ -283,6 +357,7 @@ export const useStore = create<SurviveState>()(
 
         /* Reports go through the engine (same generator as the worker). */
         generateReportFor: async (opportunityId: string) => {
+          if (guardLocalMutation(get)) return;
           // Ensure score exists locally before generating.
           const opp = get().opportunities.find((o: Opportunity) => o.id === opportunityId);
           if (opp && !opp.score) {
@@ -354,18 +429,31 @@ export const useStore = create<SurviveState>()(
     },
     {
       name: 'survive-ai-v2',
-      partialize: (s: any) => ({
-        agent: s.agent,
-        opportunities: s.opportunities,
-        reports: s.reports,
-        experiments: s.experiments,
-        memory: s.memory,
-        transactions: s.transactions,
-        events: s.events,
-        strategies: s.strategies,
-        cycles: s.cycles,
-      }),
+      // In live-backend mode, business state is NEVER the browser's to keep:
+      // it is refetched from the backend on every load and every poll, and
+      // persisting a second copy to localStorage is exactly the "independent
+      // browser state" bug this integration fixes. Only the standalone demo
+      // (no backend configured) persists its simulated state locally.
+      partialize: (s: any) =>
+        featureFlags.backend
+          ? {}
+          : {
+              agent: s.agent,
+              opportunities: s.opportunities,
+              reports: s.reports,
+              experiments: s.experiments,
+              memory: s.memory,
+              transactions: s.transactions,
+              events: s.events,
+              strategies: s.strategies,
+              cycles: s.cycles,
+            },
       onRehydrateStorage: () => (state: any) => {
+        if (featureFlags.backend) {
+          // Nothing meaningful was persisted (see partialize above) — the
+          // first syncFromBackend() call (kicked off below) populates state.
+          return;
+        }
         if (!state) return;
         const balance = balanceFrom(state.transactions ?? []);
         const status =
@@ -384,6 +472,19 @@ export const useStore = create<SurviveState>()(
     },
   ),
 );
+
+/* ------------------------- live backend polling ---------------------------- */
+// When a backend is configured, the dashboard is a read-only mirror of it:
+// sync immediately on load, then on a short interval. This (plus the guards
+// above) is what makes the backend/D1 the sole source of truth end-to-end —
+// PHASE 3 / "Frontend must use the backend as its source of truth."
+const BACKEND_POLL_MS = 15_000;
+if (featureFlags.backend) {
+  void useStore.getState().syncFromBackend();
+  setInterval(() => {
+    void useStore.getState().syncFromBackend();
+  }, BACKEND_POLL_MS);
+}
 
 /* ------------------------------ selectors --------------------------------- */
 
@@ -409,5 +510,14 @@ export const browserConnections = {
   search: featureFlags.search,
   llmClaude: Boolean(env.anthropicKey),
   llmOpenai: Boolean(env.openaiKey),
-  workers: false,
+  // True once the backend URL is configured AND at least one /state fetch
+  // has actually succeeded — configured-but-unreachable reads as false here.
+  get workers() {
+    return featureFlags.backend && useStore.getState().backend.connected;
+  },
 };
+
+/** True when the dashboard is mirroring a deployed backend (config only —
+ *  does not imply the connection is currently healthy; see backend.connected
+ *  in the store for that). */
+export const backendConfigured = featureFlags.backend;

@@ -54,7 +54,7 @@ class AnthropicProvider implements LLMProvider {
         }),
       });
       if (!res.ok) throw new Error(`anthropic ${res.status}`);
-      const data = await res.json();
+      const data: any = await res.json();
       return (data?.content ?? []).map((b: { text?: string }) => b.text ?? '').join('').trim() || null;
     } catch (e) {
       console.warn('[llm:claude] failed, falling back to rule engine', e);
@@ -113,7 +113,7 @@ class OpenAIProvider implements LLMProvider {
         }),
       });
       if (!res.ok) throw new Error(`openai ${res.status}`);
-      const data = await res.json();
+      const data: any = await res.json();
       return data?.choices?.[0]?.message?.content?.trim() ?? null;
     } catch (e) {
       console.warn('[llm:openai] failed, falling back to rule engine', e);

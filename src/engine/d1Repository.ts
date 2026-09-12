@@ -117,11 +117,77 @@ export class D1Repository implements EngineRepository {
     const keys = Object.keys(fields);
     if (keys.length === 0) return this.getAgent();
     const setClause = keys.map((k) => `${k} = ?`).join(', ');
-    await this.db
+    const res: any = await this.db
       .prepare(`UPDATE agents SET ${setClause} WHERE id = ?`)
       .bind(...keys.map((k) => fields[k]), this.agentId)
       .run();
+    // Defense in depth: never silently "succeed" at persisting nothing.
+    // A 0-row UPDATE almost always means the agent hasn't been created
+    // yet — callers must go through createAgentIfMissing() first.
+    if (res && res.meta && res.meta.changes === 0) {
+      throw new Error(
+        `updateAgent(${this.agentId}) affected 0 rows — agent does not exist yet; call createAgentIfMissing() first`,
+      );
+    }
     return this.getAgent();
+  }
+
+  /** Create the agent row iff it doesn't already exist. Idempotent. */
+  async createAgentIfMissing(agent: Agent): Promise<Agent> {
+    await this.db
+      .prepare(
+        `INSERT INTO agents
+           (id, name, status, starting_capital, survival_threshold, current_strategy,
+            current_objective, cycle_count, total_cycles_run, real_money_enabled,
+            daily_spend_limit, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 0, ?)
+         ON CONFLICT(id) DO NOTHING`,
+      )
+      .bind(
+        agent.id,
+        agent.name,
+        agent.status,
+        agent.startingCapital,
+        agent.survivalThreshold,
+        agent.currentStrategy,
+        agent.currentObjective,
+        agent.cycleCount,
+        agent.totalCyclesRun,
+        this.iso(agent.startedAt),
+      )
+      .run();
+    return this.getAgent();
+  }
+
+  /**
+   * Atomic compare-and-swap claim: only one caller can move the agent into
+   * RESEARCHING/EXECUTING at a time. A stale lock (a previous run that
+   * crashed mid-cycle without releasing it) can be reclaimed after
+   * `staleAfterMs`. Never reclaims a DEAD agent.
+   */
+  async tryClaimCycle(staleAfterMs = 15 * 60 * 1000): Promise<boolean> {
+    const now = Date.now();
+    const staleBefore = this.iso(now - staleAfterMs);
+    const res: any = await this.db
+      .prepare(
+        `UPDATE agents SET status = 'RESEARCHING', cycle_lock_at = ?
+         WHERE id = ? AND status != 'DEAD'
+           AND (
+             status NOT IN ('RESEARCHING', 'EXECUTING')
+             OR cycle_lock_at IS NULL
+             OR cycle_lock_at < ?
+           )`,
+      )
+      .bind(this.iso(now), this.agentId, staleBefore)
+      .run();
+    return Boolean(res?.meta?.changes && res.meta.changes > 0);
+  }
+
+  async releaseCycleLock(status: Agent['status']): Promise<void> {
+    await this.db
+      .prepare('UPDATE agents SET status = ?, cycle_lock_at = NULL WHERE id = ?')
+      .bind(status, this.agentId)
+      .run();
   }
 
   private mapAgent(r: any): Agent {

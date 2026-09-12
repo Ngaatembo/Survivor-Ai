@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { useStore } from './store';
+import { useStore, backendConfigured } from './store';
 import { AgentStatusPill } from './components/AgentStatusPill';
 import { CommandCenter } from './components/CommandCenter';
 import { ResearchEngine } from './components/ResearchEngine';
@@ -67,6 +67,7 @@ export function App() {
   const opportunities = useStore((s) => s.opportunities);
   const experiments = useStore((s) => s.experiments);
   const events = useStore((s) => s.events);
+  const backend = useStore((s) => s.backend);
 
   const drawerOpp = drawerId ? opportunities.find((o) => o.id === drawerId) ?? null : null;
 
@@ -114,8 +115,15 @@ export function App() {
         </nav>
         <div className="sidebar-foot">
           <div className="sim-tag">● SIMULATION ENVIRONMENT</div>
-          <div>No real money · No live APIs</div>
-          <div>Data: SAMPLE seed + localStorage</div>
+          <div>No real money · No live trading/payments</div>
+          {backendConfigured ? (
+            <div>
+              Data: LIVE backend
+              {backend.connected ? ' — connected' : backend.error ? ' — unreachable' : ' — connecting…'}
+            </div>
+          ) : (
+            <div>Data: SAMPLE seed + localStorage (DEMO)</div>
+          )}
         </div>
       </aside>
 
@@ -131,40 +139,58 @@ export function App() {
           <div className="topbar-spacer" />
           <div className="controls">
             <AgentStatusPill />
-            <button className="btn primary" onClick={startLoop} disabled={running || busy || dead} title="Run the autonomous loop continuously">
-              {running ? '◉ RUNNING' : '▶ START RESEARCH'}
-            </button>
-            <button className="btn warn" onClick={pauseLoop} disabled={!running}>
-              ❚❚ PAUSE AGENT
-            </button>
-            <button className="btn" onClick={runNextCycle} disabled={busy || dead} title="Run one complete research → simulate → learn cycle">
-              ⏭ RUN NEXT CYCLE
-            </button>
-            {confirmReset ? (
-              <>
-                <button
-                  className="btn danger"
-                  onClick={() => {
-                    resetSimulation();
-                    setConfirmReset(false);
-                    setView('command');
-                  }}
-                >
-                  CONFIRM RESET
-                </button>
-                <button className="btn" onClick={() => setConfirmReset(false)}>
-                  CANCEL
-                </button>
-              </>
+            {backendConfigured ? (
+              <span
+                className="badge-count"
+                title="The autonomous loop runs on the Cloudflare Worker's cron (every 30 minutes) — this dashboard only observes it."
+              >
+                {backend.connected ? '● LIVE — cron-driven' : backend.error ? '○ backend unreachable' : '◌ connecting…'}
+              </span>
             ) : (
-              <button className="btn danger" onClick={() => setConfirmReset(true)} title="Wipe state and start a fresh $50 simulation">
-                ↺ RESET
-              </button>
+              <>
+                <button className="btn primary" onClick={startLoop} disabled={running || busy || dead} title="Run the autonomous loop continuously">
+                  {running ? '◉ RUNNING' : '▶ START RESEARCH'}
+                </button>
+                <button className="btn warn" onClick={pauseLoop} disabled={!running}>
+                  ❚❚ PAUSE AGENT
+                </button>
+                <button className="btn" onClick={runNextCycle} disabled={busy || dead} title="Run one complete research → simulate → learn cycle">
+                  ⏭ RUN NEXT CYCLE
+                </button>
+                {confirmReset ? (
+                  <>
+                    <button
+                      className="btn danger"
+                      onClick={() => {
+                        resetSimulation();
+                        setConfirmReset(false);
+                        setView('command');
+                      }}
+                    >
+                      CONFIRM RESET
+                    </button>
+                    <button className="btn" onClick={() => setConfirmReset(false)}>
+                      CANCEL
+                    </button>
+                  </>
+                ) : (
+                  <button className="btn danger" onClick={() => setConfirmReset(true)} title="Wipe state and start a fresh $50 simulation">
+                    ↺ RESET
+                  </button>
+                )}
+              </>
             )}
           </div>
         </header>
 
         <main className="content">
+          {backendConfigured && !backend.connected && (
+            <div className={`banner ${backend.error ? 'banner-error' : 'banner-info'}`}>
+              {backend.error
+                ? `Backend unreachable: ${backend.error}. Showing the last data this dashboard received (or nothing, on first load) — nothing here is invented to fill the gap.`
+                : 'Connecting to the live backend…'}
+            </div>
+          )}
           {view === 'command' && <CommandCenter go={setView} />}
           {view === 'research' && <ResearchEngine onOpenOpp={openOpp} />}
           {view === 'explorer' && <OpportunityExplorer />}

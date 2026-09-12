@@ -1,5 +1,5 @@
 import { useStore } from '../store';
-import { Panel, Badge, EvidenceBadge, DataSourceBadge, RecommendationBadge } from './ui';
+import { Panel, Badge, EvidenceBadge, RecommendationBadge } from './ui';
 import { LoopPipeline } from './LoopPipeline';
 import { getConnectors } from '../services/connectors';
 import { browserConnections } from '../store';
@@ -130,7 +130,7 @@ export function ResearchEngine({ onOpenOpp }: { onOpenOpp: (id: string) => void 
             </div>
           </Panel>
 
-          <Panel title="Research connectors" right={<DataSourceBadge source="SAMPLE" />}>
+          <Panel title="Research connectors">
             <div className="faint small" style={{ marginBottom: 8, lineHeight: 1.6 }}>
               Live research providers for the discovery/verification stages:
             </div>

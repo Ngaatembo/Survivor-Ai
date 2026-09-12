@@ -31,7 +31,7 @@ class TavilyProvider implements SearchProvider {
         }),
       });
       if (!res.ok) throw new Error(`tavily ${res.status}`);
-      const data = await res.json();
+      const data: any = await res.json();
       return (data?.results ?? []).map((r: Record<string, unknown>) => ({
         title: String(r.title ?? 'Untitled'),
         url: String(r.url ?? ''),
@@ -70,7 +70,7 @@ class BraveProvider implements SearchProvider {
         },
       });
       if (!res.ok) throw new Error(`brave ${res.status}`);
-      const data = await res.json();
+      const data: any = await res.json();
       return (data?.web?.results ?? []).map((r: Record<string, unknown>) => ({
         title: String(r.title ?? 'Untitled'),
         url: String(r.url ?? ''),

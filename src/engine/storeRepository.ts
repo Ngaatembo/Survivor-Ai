@@ -38,6 +38,7 @@ type Get = () => StateShape & Record<string, unknown>;
 type Set = (partial: Partial<StateShape> | ((s: any) => any)) => void;
 
 export function createStoreRepository(get: Get, set: Set, reseed: () => StateShape): EngineRepository {
+  let cycleLockAt: number | null = null;
   return {
     async getAgent() {
       return get().agent;
@@ -46,6 +47,24 @@ export function createStoreRepository(get: Get, set: Set, reseed: () => StateSha
       const next = { ...get().agent, ...patch };
       set({ agent: next });
       return next;
+    },
+    async createAgentIfMissing(agent) {
+      if (!get().agent) set({ agent });
+      return get().agent;
+    },
+    async tryClaimCycle(staleAfterMs = 15 * 60 * 1000) {
+      const agent = get().agent;
+      if (!agent || agent.status === 'DEAD') return false;
+      const locked = agent.status === 'RESEARCHING' || agent.status === 'EXECUTING';
+      if (locked && cycleLockAt !== null && Date.now() - cycleLockAt < staleAfterMs) return false;
+      cycleLockAt = Date.now();
+      set({ agent: { ...agent, status: 'RESEARCHING' } });
+      return true;
+    },
+    async releaseCycleLock(status) {
+      cycleLockAt = null;
+      const agent = get().agent;
+      if (agent) set({ agent: { ...agent, status } });
     },
 
     async listOpportunities() {

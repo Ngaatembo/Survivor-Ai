@@ -34,7 +34,11 @@ CREATE TABLE agents (
   created_at          TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
   -- hard safety switch: when 0, no real-money capability may ever execute
   real_money_enabled  INTEGER NOT NULL DEFAULT 0,
-  daily_spend_limit   REAL NOT NULL DEFAULT 0.00
+  daily_spend_limit   REAL NOT NULL DEFAULT 0.00,
+  -- cycle concurrency lock: set when a cycle claims the right to run, cleared
+  -- on release; a lock older than the engine's staleAfterMs can be reclaimed
+  -- so a crashed run never permanently wedges the agent. NULL = not locked.
+  cycle_lock_at       TEXT
 );
 
 -- opportunities ------------------------------------------------------------

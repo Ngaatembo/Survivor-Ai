@@ -13,6 +13,7 @@
  * ========================================================================== */
 
 import type {
+  Agent,
   AgentCycle,
   CycleStep,
   CycleStepKey,
@@ -98,11 +99,18 @@ export class AgentEngine {
     const agent = await this.safeGetAgent();
     if (agent) return;
     const snap = createSeedSnapshot();
+    // Create the agent row FIRST and idempotently — createAgentIfMissing()
+    // is a no-op if a concurrent boot already created it (ON CONFLICT DO
+    // NOTHING / upsert), so this is safe under concurrent cold starts.
+    // (Bug fixed here: this used to call updateAgent(), which assumes the
+    // row already exists — a plain UPDATE against a missing row silently
+    // affects 0 rows on D1 and errors on Supabase, so nothing ever got
+    // seeded on a fresh database.)
+    await this.repo.createAgentIfMissing(snap.agent);
     await this.repo.upsertOpportunities(snap.opportunities);
     for (const tx of snap.transactions) await this.repo.appendTransaction(tx);
     for (const evt of snap.events) await this.repo.appendEvent(evt);
     for (const strat of snap.strategies) await this.repo.appendStrategy(strat);
-    await this.repo.updateAgent(snap.agent);
   }
 
   private async safeGetAgent() {
@@ -124,6 +132,36 @@ export class AgentEngine {
       return null;
     }
 
+    // Atomic claim: prevents an overlapping cron tick / manual trigger from
+    // racing this one and creating duplicate cycles or double-spending the
+    // simulated balance. A stale claim (crashed mid-cycle) can be reclaimed.
+    const claimed = await this.repo.tryClaimCycle();
+    if (!claimed) {
+      await hooks.log(
+        'WARNING',
+        'A cycle is already running — this trigger was skipped to avoid overlapping execution.',
+      );
+      return null;
+    }
+
+    try {
+      return await this.runClaimedCycle(agent, opts, hooks, stepDelay, shouldContinue);
+    } finally {
+      const finalTx = await this.repo.listTransactions();
+      const finalBalance = balanceFrom(finalTx);
+      const releaseStatus =
+        finalBalance <= 0 ? 'DEAD' : finalBalance < SURVIVAL_THRESHOLD ? 'AT_RISK' : 'ALIVE';
+      await this.repo.releaseCycleLock(releaseStatus);
+    }
+  }
+
+  private async runClaimedCycle(
+    agent: Agent,
+    opts: RunOptions,
+    hooks: EngineHooks,
+    stepDelay: number,
+    shouldContinue: () => boolean,
+  ): Promise<CycleOutcome | null> {
     let opportunities = await this.repo.listOpportunities();
     let transactions = await this.repo.listTransactions();
     let memory = await this.repo.listMemory();
@@ -292,17 +330,14 @@ export class AgentEngine {
     const selected = decision?.selected ?? null;
     transactions = await this.repo.listTransactions();
     const balance = balanceFrom(transactions);
-    if (selected && balance > 1) {
+    const budget = selected ? experimentBudget(selected, balance) : 0;
+    // Hard safety re-check, independent of experimentBudget()'s own math:
+    // never let a write proceed above 18% of the CURRENT balance. This is
+    // the last line of defense before the ledger is touched.
+    const hardCap = Math.round(balance * 0.18 * 100) / 100;
+    if (selected && budget > 0 && budget <= hardCap + 0.005) {
       await hooks.setActivity?.(`Simulating experiment: ${selected.name}…`, 'SIMULATE');
-      const budget = experimentBudget(selected, balance);
       const expId = uid('exp');
-      const expenseTx: Transaction = ledgerRecord(transactions, {
-        type: 'EXPENSE',
-        amount: -budget,
-        description: `Simulated experiment budget — ${selected.name}`,
-        relatedExperimentId: expId,
-      }).slice(-1)[0];
-      await this.repo.appendTransaction(expenseTx);
       await hooks.log('EXPERIMENT', `Experiment simulation created for "${selected.name}" with $${budget.toFixed(2)} simulated budget. No real money moves.`);
 
       await delay(stepDelay);
@@ -318,22 +353,6 @@ export class AgentEngine {
         budget,
         memory: memory.find((m) => m.kind === 'opportunity' && m.refId === selected.id),
       });
-
-      if (sim.actualRevenue > 0) {
-        const revenueTx: Transaction = ledgerRecord(transactions, {
-          type: 'REVENUE',
-          amount: sim.actualRevenue,
-          description: `Simulated revenue — ${selected.name}`,
-          relatedExperimentId: expId,
-        }).slice(-1)[0];
-        await this.repo.appendTransaction(revenueTx);
-        await hooks.log(
-          'WALLET',
-          `Experiment returned $${sim.actualRevenue.toFixed(2)} simulated revenue (net ${sim.actualRevenue - sim.actualCost >= 0 ? '+' : ''}$${(sim.actualRevenue - sim.actualCost).toFixed(2)}).`,
-        );
-      } else {
-        await hooks.log('WALLET', `Experiment returned $0.00 simulated revenue — $${sim.actualCost.toFixed(2)} budget consumed.`);
-      }
 
       experiment = {
         id: expId,
@@ -356,7 +375,38 @@ export class AgentEngine {
         simulated: true,
         createdAt: Date.now(),
       };
+      // The experiment row MUST exist before either ledger entry below is
+      // written — transactions.related_experiment_id is a foreign key, and
+      // writing the expense first (referencing an experiment that doesn't
+      // exist yet) throws a FK constraint violation on D1/Postgres. (This
+      // was a real, verified bug: fixed after it surfaced in local testing.)
       await this.repo.appendExperiment(experiment);
+
+      const expenseTx: Transaction = ledgerRecord(transactions, {
+        type: 'EXPENSE',
+        amount: -budget,
+        description: `Simulated experiment budget — ${selected.name}`,
+        relatedExperimentId: expId,
+      }).slice(-1)[0];
+      await this.repo.appendTransaction(expenseTx);
+      transactions = [...transactions, expenseTx];
+
+      if (sim.actualRevenue > 0) {
+        const revenueTx: Transaction = ledgerRecord(transactions, {
+          type: 'REVENUE',
+          amount: sim.actualRevenue,
+          description: `Simulated revenue — ${selected.name}`,
+          relatedExperimentId: expId,
+        }).slice(-1)[0];
+        await this.repo.appendTransaction(revenueTx);
+        await hooks.log(
+          'WALLET',
+          `Experiment returned $${sim.actualRevenue.toFixed(2)} simulated revenue (net ${sim.actualRevenue - sim.actualCost >= 0 ? '+' : ''}$${(sim.actualRevenue - sim.actualCost).toFixed(2)}).`,
+        );
+      } else {
+        await hooks.log('WALLET', `Experiment returned $0.00 simulated revenue — $${sim.actualCost.toFixed(2)} budget consumed.`);
+      }
+
       await this.repo.completeCycle(cycle.id, {
         experimentId: experiment.id,
         selectedOpportunityId: selected.id,
@@ -367,7 +417,12 @@ export class AgentEngine {
       );
     } else {
       await this.repo.updateCycleStep(cycle.id, 'SIMULATE', 'skipped');
-      await hooks.log('WARNING', 'SIMULATE step skipped: no affordable executable candidate (finance models remain research-only).');
+      await hooks.log(
+        'WARNING',
+        selected
+          ? `SIMULATE step skipped: the 18% allocation cap on a $${balance.toFixed(2)} balance is too small to fund a meaningful experiment this cycle — research continues.`
+          : 'SIMULATE step skipped: no affordable executable candidate (finance models remain research-only).',
+      );
     }
     if (!(await tick('SIMULATE', stepDelay * 0.6))) return aborted(cycle, await this.repo.listTransactions());
 
@@ -430,14 +485,12 @@ export class AgentEngine {
     }
     await tick('LEARN', stepDelay * 0.6);
 
-    /* Final status */
+    /* Final status — persisted by the caller's releaseCycleLock() so it is
+     * set exactly once, on every exit path (success, abort, or throw). */
     transactions = await this.repo.listTransactions();
     const finalBalance = balanceFrom(transactions);
     const finalStatus: CycleOutcome['finalStatus'] =
       finalBalance <= 0 ? 'DEAD' : finalBalance < SURVIVAL_THRESHOLD ? 'AT_RISK' : 'ALIVE';
-    await this.repo.updateAgent({
-      status: finalStatus,
-    });
 
     return { cycle, decision, experiment, balance: finalBalance, finalStatus };
 

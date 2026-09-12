@@ -176,6 +176,46 @@ export default {
       }
     }
 
+    if (url.pathname === '/state') {
+      // Full read-only mirror of backend/D1 state for the dashboard — this is
+      // what fixes the frontend/backend disconnect: the browser renders
+      // exactly this payload instead of inventing its own local state.
+      // No secrets are ever included here; it is the same simulated
+      // business data /status already summarizes, just unabridged.
+      try {
+        const { repo } = buildEngine(env);
+        const agent = await repo.getAgent();
+        const [opportunities, experiments, transactions, memory, events, cycles, reports, strategies] =
+          await Promise.all([
+            repo.listOpportunities(),
+            repo.listExperiments(),
+            repo.listTransactions(),
+            repo.listMemory(),
+            repo.listEvents(),
+            repo.listCycles(),
+            repo.listReports(),
+            repo.listStrategies(),
+          ]);
+        return json({
+          ok: true,
+          fetchedAt: new Date().toISOString(),
+          agent,
+          opportunities,
+          experiments,
+          transactions,
+          memory,
+          // Bounded so the payload can never grow unbounded over the agent's
+          // lifetime — the dashboard only needs recent history to render.
+          events: events.slice(-300),
+          cycles: cycles.slice(-150),
+          reports,
+          strategies,
+        });
+      } catch (e) {
+        return json({ ok: false, error: (e as Error).message }, { status: 500 });
+      }
+    }
+
     if (url.pathname === '/cycles/run' && req.method === 'POST') {
       const secret = req.headers.get('x-trigger-secret');
       if (!env.TRIGGER_SECRET || secret !== env.TRIGGER_SECRET) {

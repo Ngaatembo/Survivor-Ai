@@ -57,6 +57,24 @@ export class InMemoryRepository implements EngineRepository {
     this.state.agent = next;
     return next;
   }
+  async createAgentIfMissing(agent: Agent) {
+    if (!this.state.agent) this.state.agent = agent;
+    return this.state.agent;
+  }
+  private cycleLockAt: number | null = null;
+  async tryClaimCycle(staleAfterMs = 15 * 60 * 1000) {
+    const agent = this.state.agent;
+    if (!agent || agent.status === 'DEAD') return false;
+    const locked = agent.status === 'RESEARCHING' || agent.status === 'EXECUTING';
+    if (locked && this.cycleLockAt !== null && Date.now() - this.cycleLockAt < staleAfterMs) return false;
+    this.cycleLockAt = Date.now();
+    this.state.agent = { ...agent, status: 'RESEARCHING' };
+    return true;
+  }
+  async releaseCycleLock(status: Agent['status']) {
+    this.cycleLockAt = null;
+    if (this.state.agent) this.state.agent = { ...this.state.agent, status };
+  }
 
   async listOpportunities() {
     return this.state.opportunities;

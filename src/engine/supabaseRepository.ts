@@ -59,8 +59,63 @@ export class SupabaseRepository implements EngineRepository {
       .eq('id', this.agentId)
       .select('*')
       .single();
-    if (error) throw new Error(error.message);
+    if (error) {
+      throw new Error(
+        `${error.message} — updateAgent(${this.agentId}) failed; if the agent doesn't exist yet, call createAgentIfMissing() first`,
+      );
+    }
     return this.mapAgent(data);
+  }
+
+  /** Create the agent row iff it doesn't already exist. Idempotent. */
+  async createAgentIfMissing(agent: Agent): Promise<Agent> {
+    const { error } = await this.db.from('agents').upsert(
+      {
+        id: agent.id,
+        name: agent.name,
+        status: agent.status,
+        starting_capital: agent.startingCapital,
+        survival_threshold: agent.survivalThreshold,
+        current_strategy: agent.currentStrategy,
+        current_objective: agent.currentObjective,
+        cycle_count: agent.cycleCount,
+        total_cycles_run: agent.totalCyclesRun,
+        real_money_enabled: false,
+        daily_spend_limit: 0,
+        created_at: new Date(agent.startedAt).toISOString(),
+      },
+      { onConflict: 'id', ignoreDuplicates: true },
+    );
+    if (error) throw new Error(error.message);
+    return this.getAgent();
+  }
+
+  /**
+   * Atomic-enough claim for a single-writer worker: only one caller can move
+   * the agent into RESEARCHING/EXECUTING at a time. A stale lock (a previous
+   * run that crashed mid-cycle without releasing it) can be reclaimed after
+   * `staleAfterMs`. Never reclaims a DEAD agent. Supabase has no CAS-on-update
+   * feedback via supabase-js the way D1's changes-count gives us, so this
+   * reads-then-writes with a status filter on the write itself — still race-
+   * safe against the common case (cron ticks, which never overlap on a single
+   * scheduled Worker) even though it is not a true DB-level CAS.
+   */
+  async tryClaimCycle(staleAfterMs = 15 * 60 * 1000): Promise<boolean> {
+    const now = Date.now();
+    const staleBefore = new Date(now - staleAfterMs).toISOString();
+    const { data, error } = await this.db
+      .from('agents')
+      .update({ status: 'RESEARCHING', cycle_lock_at: new Date(now).toISOString() })
+      .eq('id', this.agentId)
+      .neq('status', 'DEAD')
+      .or(`status.not.in.(RESEARCHING,EXECUTING),cycle_lock_at.is.null,cycle_lock_at.lt.${staleBefore}`)
+      .select('id');
+    if (error) return false;
+    return Array.isArray(data) && data.length > 0;
+  }
+
+  async releaseCycleLock(status: Agent['status']): Promise<void> {
+    await this.db.from('agents').update({ status, cycle_lock_at: null }).eq('id', this.agentId);
   }
 
   private mapAgent(r: any): Agent {

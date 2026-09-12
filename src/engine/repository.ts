@@ -23,7 +23,26 @@ import type {
 export interface EngineRepository {
   // agent
   getAgent(): Promise<Agent>;
+  /**
+   * Create the agent row if (and only if) it does not already exist.
+   * MUST be idempotent — safe to call on every boot. This is the only
+   * method that may create the row; updateAgent() assumes it already
+   * exists and must never be relied on to seed a brand-new agent (a
+   * plain UPDATE against a missing row silently affects 0 rows on D1,
+   * and errors on Supabase — either way nothing gets persisted).
+   */
+  createAgentIfMissing(agent: Agent): Promise<Agent>;
   updateAgent(patch: Partial<Agent>): Promise<Agent>;
+  /**
+   * Atomically claim the right to run a cycle: flips status to
+   * RESEARCHING only if no cycle is currently in flight (or the
+   * previous claim is stale), so overlapping cron ticks / manual
+   * triggers can never run concurrently and double-spend. Returns
+   * false if another cycle currently holds the lock.
+   */
+  tryClaimCycle(staleAfterMs?: number): Promise<boolean>;
+  /** Release the cycle lock, recording the agent's final status. */
+  releaseCycleLock(status: Agent['status']): Promise<void>;
 
   // opportunities
   listOpportunities(): Promise<Opportunity[]>;
