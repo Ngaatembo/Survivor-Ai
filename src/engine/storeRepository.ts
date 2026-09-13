@@ -11,10 +11,13 @@ import type {
   Agent,
   AgentCycle,
   AgentEvent,
+  BusinessModel,
   CycleStepKey,
   Experiment,
   MemoryEntry,
   Opportunity,
+  OpportunityDecision,
+  RecommendedAction,
   ResearchReport,
   Strategy,
   Transaction,
@@ -39,6 +42,16 @@ type Set = (partial: Partial<StateShape> | ((s: any) => any)) => void;
 
 export function createStoreRepository(get: Get, set: Set, reseed: () => StateShape): EngineRepository {
   let cycleLockAt: number | null = null;
+  // Commercial-core state (business models / decisions / recommended
+  // actions) is kept in-memory for the browser demo rather than added to
+  // the persisted Zustand store — the demo is a local sandbox, and the
+  // durable, real target for this data is the production D1/Supabase
+  // backend (see D1Repository/SupabaseRepository). Scoped this way so the
+  // browser demo still exercises the full commercial-core code path
+  // without a larger store.ts/localStorage-schema migration.
+  let businessModels: BusinessModel[] = [];
+  let decisions: OpportunityDecision[] = [];
+  let actions: RecommendedAction[] = [];
   return {
     async getAgent() {
       return get().agent;
@@ -170,7 +183,31 @@ export function createStoreRepository(get: Get, set: Set, reseed: () => StateSha
     },
 
     async reset() {
+      businessModels = [];
+      decisions = [];
+      actions = [];
       set(reseed() as any);
+    },
+
+    async listBusinessModels() {
+      return businessModels;
+    },
+    async upsertBusinessModel(model) {
+      businessModels = [model, ...businessModels.filter((m) => m.opportunityId !== model.opportunityId)];
+    },
+
+    async listDecisions() {
+      return decisions;
+    },
+    async appendDecision(decision) {
+      decisions = [decision, ...decisions].slice(0, 500);
+    },
+
+    async listActions() {
+      return actions;
+    },
+    async replaceActions(next) {
+      actions = next;
     },
   };
 }

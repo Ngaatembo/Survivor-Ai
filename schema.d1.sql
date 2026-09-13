@@ -80,7 +80,11 @@ CREATE TABLE opportunities (
   score_recommendation           TEXT CHECK (score_recommendation IN ('HIGH PRIORITY','RECOMMENDED','WATCHLIST','DEPRIORITIZE','RESEARCH ONLY')),
   score_factors                   TEXT NOT NULL DEFAULT '{}', -- JSON object; full 9-factor breakdown
   date_researched                  TEXT,
-  created_at                       TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
+  created_at                       TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+  -- Commercial-core lifecycle (build-spec §4) — evidence-driven, never
+  -- flipped to PROVEN/SCALING off one lucky result. See decisionEngine.ts.
+  lifecycle_state                TEXT NOT NULL DEFAULT 'DISCOVERED'
+                                    CHECK (lifecycle_state IN ('DISCOVERED','VALIDATING','PROVEN','SCALING','FAILED','ARCHIVED'))
 );
 CREATE INDEX idx_opp_agent_stage ON opportunities(agent_id, research_stage);
 CREATE INDEX idx_opp_score ON opportunities(agent_id, score_total DESC);
@@ -234,6 +238,84 @@ CREATE TABLE agent_cycles (
   completed_at              TEXT
 );
 CREATE INDEX idx_cycles_agent_time ON agent_cycles(agent_id, started_at);
+
+-- opportunity_models ---------------------------------------------------------
+-- Commercial core (build-spec §3): the concrete, sellable business model
+-- behind a promising opportunity. One row per opportunity; regenerated
+-- (upserted, keyed on opportunity_id) as evidence improves.
+
+CREATE TABLE opportunity_models (
+  id                                TEXT PRIMARY KEY,
+  agent_id                          TEXT NOT NULL REFERENCES agents(id) ON DELETE CASCADE,
+  opportunity_id                    TEXT NOT NULL UNIQUE REFERENCES opportunities(id) ON DELETE CASCADE,
+  opportunity_name                  TEXT NOT NULL DEFAULT '',
+  target_customer                   TEXT NOT NULL,
+  problem                           TEXT NOT NULL,
+  offer                             TEXT NOT NULL,
+  why_they_buy                      TEXT NOT NULL,
+  suggested_price                   REAL NOT NULL,
+  price_rationale                   TEXT NOT NULL,
+  delivery_cost_estimate            REAL NOT NULL,
+  expected_gross_margin_pct         REAL NOT NULL,
+  acquisition_channel               TEXT NOT NULL,
+  sales_message                     TEXT NOT NULL,
+  follow_up_sequence                TEXT NOT NULL DEFAULT '[]', -- JSON array
+  objection_handling                TEXT NOT NULL DEFAULT '[]', -- JSON array of {objection,response}
+  delivery_workflow                 TEXT NOT NULL,
+  time_to_first_sale_days_estimate  INTEGER NOT NULL,
+  upsells                           TEXT NOT NULL DEFAULT '[]', -- JSON array
+  recurring_revenue_note            TEXT NOT NULL DEFAULT '',
+  expected_profit_first_deal        REAL NOT NULL,
+  can_scale                         INTEGER NOT NULL DEFAULT 0,
+  scale_note                        TEXT NOT NULL DEFAULT '',
+  next_action                       TEXT NOT NULL DEFAULT '',
+  confidence                        REAL NOT NULL DEFAULT 0,
+  generator                         TEXT NOT NULL DEFAULT 'local-rule-engine',
+  generated_at                      TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+  updated_at                        TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
+);
+CREATE INDEX idx_models_agent ON opportunity_models(agent_id);
+
+-- opportunity_decisions --------------------------------------------------------
+-- Commercial core (build-spec §5): append-only KILL/ITERATE/SCALE/CONTINUE
+-- audit log. Every entry explains WHY (reasoning) and WHAT NEXT (next_action).
+
+CREATE TABLE opportunity_decisions (
+  id                TEXT PRIMARY KEY,
+  agent_id          TEXT NOT NULL REFERENCES agents(id) ON DELETE CASCADE,
+  opportunity_id    TEXT NOT NULL REFERENCES opportunities(id) ON DELETE CASCADE,
+  opportunity_name  TEXT NOT NULL DEFAULT '',
+  action            TEXT NOT NULL CHECK (action IN ('KILL','ITERATE','SCALE','CONTINUE')),
+  previous_state    TEXT NOT NULL,
+  new_state         TEXT NOT NULL,
+  reasoning         TEXT NOT NULL,
+  evidence_summary  TEXT NOT NULL,
+  metrics           TEXT NOT NULL DEFAULT '{}', -- JSON: {tests, spent, revenue, realRevenueScore}
+  next_action       TEXT NOT NULL DEFAULT '',
+  created_at        TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
+);
+CREATE INDEX idx_decisions_agent_time ON opportunity_decisions(agent_id, created_at DESC);
+
+-- agent_actions ----------------------------------------------------------------
+-- Commercial core (build-spec §16): "what should I do now?" — derived,
+-- ranked recommendations. Fully replaced every cycle (not accumulated);
+-- history of what was recommended lives implicitly in opportunity_decisions.
+
+CREATE TABLE agent_actions (
+  id                TEXT PRIMARY KEY,
+  agent_id          TEXT NOT NULL REFERENCES agents(id) ON DELETE CASCADE,
+  kind              TEXT NOT NULL,
+  opportunity_id    TEXT REFERENCES opportunities(id),
+  opportunity_name  TEXT,
+  title             TEXT NOT NULL,
+  description       TEXT NOT NULL,
+  expected_value    REAL NOT NULL DEFAULT 0,
+  urgency           INTEGER NOT NULL DEFAULT 1,
+  effort            INTEGER NOT NULL DEFAULT 1,
+  rank              INTEGER NOT NULL DEFAULT 1,
+  created_at        TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
+);
+CREATE INDEX idx_actions_agent_rank ON agent_actions(agent_id, rank);
 
 -- Notes -----------------------------------------------------------------------
 -- * SQLite resolves circular FKs (experiments.cycle_id <-> agent_cycles) fine

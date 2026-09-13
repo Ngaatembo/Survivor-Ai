@@ -13,12 +13,15 @@ import type {
   Agent,
   AgentCycle,
   AgentEvent,
+  BusinessModel,
   CycleStep,
   CycleStepKey,
   EventType,
   Experiment,
   MemoryEntry,
   Opportunity,
+  OpportunityDecision,
+  RecommendedAction,
   ResearchReport,
   Strategy,
   Transaction,
@@ -246,6 +249,7 @@ export class SupabaseRepository implements EngineRepository {
       executionBlocked: Boolean(r.execution_blocked),
       blockReason: r.block_reason ?? undefined,
       score,
+      lifecycleState: (r.lifecycle_state ?? 'DISCOVERED') as Opportunity['lifecycleState'],
     };
   }
 
@@ -287,6 +291,7 @@ export class SupabaseRepository implements EngineRepository {
         ? { factors: o.score.factors, budgetFit: o.score.budgetFit, aiSuitable: o.score.aiSuitable, scoredAt: o.score.scoredAt }
         : {},
       date_researched: o.dateResearched ? new Date(o.dateResearched).toISOString() : null,
+      lifecycle_state: o.lifecycleState ?? 'DISCOVERED',
     };
   }
 
@@ -651,11 +656,185 @@ export class SupabaseRepository implements EngineRepository {
       'agent_events',
       'strategies',
       'agent_cycles',
+      'opportunity_models',
+      'opportunity_decisions',
+      'agent_actions',
     ]) {
       await this.db.from(table).delete().eq('agent_id', this.agentId);
     }
     await this.db.from('agents').delete().eq('id', this.agentId);
     if (seed) await seedSupabase(this.db, this.agentId);
+  }
+
+  /* --------------------------- business models --------------------------- */
+
+  async listBusinessModels(): Promise<BusinessModel[]> {
+    const { data, error } = await this.db.from('opportunity_models').select('*').eq('agent_id', this.agentId);
+    if (error) throw new Error(error.message);
+    return (data ?? []).map((r: any) => this.mapBusinessModel(r));
+  }
+
+  async upsertBusinessModel(model: BusinessModel): Promise<void> {
+    const row = {
+      id: model.id,
+      agent_id: this.agentId,
+      opportunity_id: model.opportunityId,
+      opportunity_name: model.opportunityName,
+      target_customer: model.targetCustomer,
+      problem: model.problem,
+      offer: model.offer,
+      why_they_buy: model.whyTheyBuy,
+      suggested_price: model.suggestedPrice,
+      price_rationale: model.priceRationale,
+      delivery_cost_estimate: model.deliveryCostEstimate,
+      expected_gross_margin_pct: model.expectedGrossMarginPct,
+      acquisition_channel: model.acquisitionChannel,
+      sales_message: model.salesMessage,
+      follow_up_sequence: model.followUpSequence,
+      objection_handling: model.objectionHandling,
+      delivery_workflow: model.deliveryWorkflow,
+      time_to_first_sale_days_estimate: model.timeToFirstSaleDaysEstimate,
+      upsells: model.upsells,
+      recurring_revenue_note: model.recurringRevenueNote,
+      expected_profit_first_deal: model.expectedProfitFirstDeal,
+      can_scale: model.canScale,
+      scale_note: model.scaleNote,
+      next_action: model.nextAction,
+      confidence: model.confidence,
+      generator: model.generator,
+      generated_at: new Date(model.generatedAt).toISOString(),
+      updated_at: new Date(model.updatedAt).toISOString(),
+    };
+    const { error } = await this.db.from('opportunity_models').upsert(row, { onConflict: 'opportunity_id' });
+    if (error) throw new Error(error.message);
+  }
+
+  private mapBusinessModel(r: any): BusinessModel {
+    return {
+      id: r.id,
+      opportunityId: r.opportunity_id,
+      opportunityName: r.opportunity_name ?? '',
+      targetCustomer: r.target_customer,
+      problem: r.problem,
+      offer: r.offer,
+      whyTheyBuy: r.why_they_buy,
+      suggestedPrice: this.n(r.suggested_price),
+      priceRationale: r.price_rationale,
+      deliveryCostEstimate: this.n(r.delivery_cost_estimate),
+      expectedGrossMarginPct: this.n(r.expected_gross_margin_pct),
+      acquisitionChannel: r.acquisition_channel,
+      salesMessage: r.sales_message,
+      followUpSequence: r.follow_up_sequence ?? [],
+      objectionHandling: r.objection_handling ?? [],
+      deliveryWorkflow: r.delivery_workflow,
+      timeToFirstSaleDaysEstimate: r.time_to_first_sale_days_estimate,
+      upsells: r.upsells ?? [],
+      recurringRevenueNote: r.recurring_revenue_note ?? '',
+      expectedProfitFirstDeal: this.n(r.expected_profit_first_deal),
+      canScale: Boolean(r.can_scale),
+      scaleNote: r.scale_note ?? '',
+      nextAction: r.next_action ?? '',
+      confidence: this.n(r.confidence),
+      generator: r.generator ?? 'local-rule-engine',
+      generatedAt: Date.parse(r.generated_at),
+      updatedAt: Date.parse(r.updated_at),
+    };
+  }
+
+  /* ----------------------------- decisions -------------------------------- */
+
+  async listDecisions(): Promise<OpportunityDecision[]> {
+    const { data, error } = await this.db
+      .from('opportunity_decisions')
+      .select('*')
+      .eq('agent_id', this.agentId)
+      .order('created_at', { ascending: false })
+      .limit(500);
+    if (error) throw new Error(error.message);
+    return (data ?? []).map((r: any) => this.mapDecision(r));
+  }
+
+  async appendDecision(decision: OpportunityDecision): Promise<void> {
+    const { error } = await this.db.from('opportunity_decisions').insert({
+      id: decision.id,
+      agent_id: this.agentId,
+      opportunity_id: decision.opportunityId,
+      opportunity_name: decision.opportunityName,
+      action: decision.action,
+      previous_state: decision.previousState,
+      new_state: decision.newState,
+      reasoning: decision.reasoning,
+      evidence_summary: decision.evidenceSummary,
+      metrics: decision.metrics,
+      next_action: decision.nextAction,
+      created_at: new Date(decision.createdAt).toISOString(),
+    });
+    if (error) throw new Error(error.message);
+  }
+
+  private mapDecision(r: any): OpportunityDecision {
+    return {
+      id: r.id,
+      opportunityId: r.opportunity_id,
+      opportunityName: r.opportunity_name ?? '',
+      action: r.action,
+      previousState: r.previous_state,
+      newState: r.new_state,
+      reasoning: r.reasoning,
+      evidenceSummary: r.evidence_summary,
+      metrics: r.metrics ?? { tests: 0, spent: 0, revenue: 0, realRevenueScore: 0 },
+      nextAction: r.next_action ?? '',
+      createdAt: Date.parse(r.created_at),
+    };
+  }
+
+  /* ------------------------------- actions -------------------------------- */
+
+  async listActions(): Promise<RecommendedAction[]> {
+    const { data, error } = await this.db
+      .from('agent_actions')
+      .select('*')
+      .eq('agent_id', this.agentId)
+      .order('rank', { ascending: true });
+    if (error) throw new Error(error.message);
+    return (data ?? []).map((r: any) => this.mapAction(r));
+  }
+
+  async replaceActions(actions: RecommendedAction[]): Promise<void> {
+    await this.db.from('agent_actions').delete().eq('agent_id', this.agentId);
+    if (actions.length === 0) return;
+    const rows = actions.map((a) => ({
+      id: a.id,
+      agent_id: this.agentId,
+      kind: a.kind,
+      opportunity_id: a.opportunityId ?? null,
+      opportunity_name: a.opportunityName ?? null,
+      title: a.title,
+      description: a.description,
+      expected_value: a.expectedValue,
+      urgency: a.urgency,
+      effort: a.effort,
+      rank: a.rank,
+      created_at: new Date(a.createdAt).toISOString(),
+    }));
+    const { error } = await this.db.from('agent_actions').insert(rows);
+    if (error) throw new Error(error.message);
+  }
+
+  private mapAction(r: any): RecommendedAction {
+    return {
+      id: r.id,
+      kind: r.kind,
+      opportunityId: r.opportunity_id ?? undefined,
+      opportunityName: r.opportunity_name ?? undefined,
+      title: r.title,
+      description: r.description,
+      expectedValue: this.n(r.expected_value),
+      urgency: r.urgency,
+      effort: r.effort,
+      rank: r.rank,
+      createdAt: Date.parse(r.created_at),
+    };
   }
 }
 

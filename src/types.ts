@@ -64,6 +64,23 @@ export type EventType =
   | 'MEMORY'
   | 'WARNING';
 
+/* -------------------------- opportunity lifecycle -------------------------- */
+
+/**
+ * Explicit evidence-driven lifecycle. Transitions are decided by
+ * decisionEngine.evaluateOpportunity() — never flipped straight to PROVEN or
+ * SCALING off a single lucky result (see PROOF_THRESHOLD in decisionEngine.ts).
+ */
+export type OpportunityLifecycleState =
+  | 'DISCOVERED'
+  | 'VALIDATING'
+  | 'PROVEN'
+  | 'SCALING'
+  | 'FAILED'
+  | 'ARCHIVED';
+
+export type DecisionAction = 'KILL' | 'ITERATE' | 'SCALE' | 'CONTINUE';
+
 /* ---------------------------------- agents -------------------------------- */
 
 export interface Agent {
@@ -134,6 +151,9 @@ export interface Opportunity {
   blockReason?: string;
 
   score?: ScoreBreakdown;
+
+  /** Evidence-driven commercial status — see decisionEngine.ts. */
+  lifecycleState: OpportunityLifecycleState;
 }
 
 export type ScoreFactorKey =
@@ -300,6 +320,103 @@ export interface AgentCycle {
   selectedOpportunityId?: string;
   experimentId?: string;
   summary?: string;
+}
+
+/* ----------------------------- opportunity_models -------------------------- */
+
+/**
+ * The concrete, sellable business model behind a promising opportunity.
+ * Answers WHO / WHAT PROBLEM / WHAT WE SELL / WHY BUY / PRICE / CHANNEL /
+ * MESSAGE / DELIVERY / PROFIT / SCALE / NEXT ACTION. One per opportunity;
+ * regenerated (upserted) as evidence improves.
+ */
+export interface BusinessModel {
+  id: string;
+  opportunityId: string;
+  opportunityName: string;
+
+  targetCustomer: string; // WHO
+  problem: string; // WHAT PROBLEM
+  offer: string; // WHAT EXACTLY DO WE SELL
+  whyTheyBuy: string; // WHY WOULD THEY BUY
+
+  suggestedPrice: number; // USD, single unit / first engagement
+  priceRationale: string;
+  deliveryCostEstimate: number;
+  expectedGrossMarginPct: number; // 0..100
+
+  acquisitionChannel: string; // HOW DO WE FIND THEM
+  salesMessage: string; // WHAT DO WE SAY
+  followUpSequence: string[];
+  objectionHandling: { objection: string; response: string }[];
+
+  deliveryWorkflow: string; // WHAT DOES DELIVERY REQUIRE
+  timeToFirstSaleDaysEstimate: number; // HOW FAST CAN WE DELIVER
+  upsells: string[];
+  recurringRevenueNote: string;
+
+  expectedProfitFirstDeal: number;
+  canScale: boolean;
+  scaleNote: string;
+  nextAction: string; // WHAT IS THE NEXT ACTION
+
+  confidence: number; // 0..1
+  generator: 'local-rule-engine' | 'llm';
+  generatedAt: number;
+  updatedAt: number;
+}
+
+/* ---------------------------- opportunity_decisions ------------------------ */
+
+/**
+ * Append-only audit log of every KILL / ITERATE / SCALE / CONTINUE decision,
+ * plus the lifecycle transition it drove. Every entry explains WHY.
+ */
+export interface OpportunityDecision {
+  id: string;
+  opportunityId: string;
+  opportunityName: string;
+  action: DecisionAction;
+  previousState: OpportunityLifecycleState;
+  newState: OpportunityLifecycleState;
+  reasoning: string;
+  evidenceSummary: string;
+  metrics: {
+    tests: number;
+    spent: number;
+    revenue: number;
+    realRevenueScore: number;
+  };
+  nextAction: string;
+  createdAt: number;
+}
+
+/* ------------------------------- agent_actions ------------------------------ */
+
+/**
+ * "What should I do now?" — recommended, ranked actions. Recomputed and
+ * fully replaced at the end of every cycle (derived state, not history).
+ */
+export type RecommendedActionKind =
+  | 'REVIEW_PROVEN'
+  | 'PURSUE_MODEL'
+  | 'RUN_EXPERIMENT'
+  | 'STOP_OPPORTUNITY'
+  | 'ITERATE_OFFER'
+  | 'WAIT_FOR_EVIDENCE';
+
+export interface RecommendedAction {
+  id: string;
+  kind: RecommendedActionKind;
+  opportunityId?: string;
+  opportunityName?: string;
+  title: string;
+  description: string;
+  expectedValue: number; // USD, modeled
+  urgency: 1 | 2 | 3 | 4 | 5;
+  effort: 1 | 2 | 3 | 4 | 5;
+  rank: number; // 1 = top action
+  createdAt: number;
 }
 
 /* ------------------------------ service wiring ---------------------------- */

@@ -20,12 +20,15 @@ import type {
   Agent,
   AgentCycle,
   AgentEvent,
+  BusinessModel,
   CycleStep,
   CycleStepKey,
   EventType,
   Experiment,
   MemoryEntry,
   Opportunity,
+  OpportunityDecision,
+  RecommendedAction,
   ResearchReport,
   Strategy,
   Transaction,
@@ -349,6 +352,7 @@ export class D1Repository implements EngineRepository {
       executionBlocked: Boolean(r.execution_blocked),
       blockReason: r.block_reason ?? undefined,
       score,
+      lifecycleState: (r.lifecycle_state ?? 'DISCOVERED') as Opportunity['lifecycleState'],
     };
   }
 
@@ -390,6 +394,7 @@ export class D1Repository implements EngineRepository {
         ? this.j({ factors: o.score.factors, budgetFit: o.score.budgetFit, aiSuitable: o.score.aiSuitable, scoredAt: o.score.scoredAt })
         : '{}',
       date_researched: o.dateResearched ? this.iso(o.dateResearched) : null,
+      lifecycle_state: o.lifecycleState ?? 'DISCOVERED',
     };
   }
 
@@ -796,6 +801,9 @@ export class D1Repository implements EngineRepository {
       'agent_events',
       'strategies',
       'agent_cycles',
+      'opportunity_models',
+      'opportunity_decisions',
+      'agent_actions',
     ];
 
     const stmts = [
@@ -814,6 +822,198 @@ export class D1Repository implements EngineRepository {
     await this.db.batch(stmts);
 
     if (seed) await seedD1(this.db, this.agentId);
+  }
+
+  /* --------------------------- business models --------------------------- */
+
+  async listBusinessModels(): Promise<BusinessModel[]> {
+    const { results } = await this.db
+      .prepare('SELECT * FROM opportunity_models WHERE agent_id = ?')
+      .bind(this.agentId)
+      .all();
+    return results.map((r: any) => this.mapBusinessModel(r));
+  }
+
+  async upsertBusinessModel(model: BusinessModel): Promise<void> {
+    const row = {
+      id: model.id,
+      agent_id: this.agentId,
+      opportunity_id: model.opportunityId,
+      opportunity_name: model.opportunityName,
+      target_customer: model.targetCustomer,
+      problem: model.problem,
+      offer: model.offer,
+      why_they_buy: model.whyTheyBuy,
+      suggested_price: model.suggestedPrice,
+      price_rationale: model.priceRationale,
+      delivery_cost_estimate: model.deliveryCostEstimate,
+      expected_gross_margin_pct: model.expectedGrossMarginPct,
+      acquisition_channel: model.acquisitionChannel,
+      sales_message: model.salesMessage,
+      follow_up_sequence: this.j(model.followUpSequence),
+      objection_handling: this.j(model.objectionHandling),
+      delivery_workflow: model.deliveryWorkflow,
+      time_to_first_sale_days_estimate: model.timeToFirstSaleDaysEstimate,
+      upsells: this.j(model.upsells),
+      recurring_revenue_note: model.recurringRevenueNote,
+      expected_profit_first_deal: model.expectedProfitFirstDeal,
+      can_scale: this.b(model.canScale),
+      scale_note: model.scaleNote,
+      next_action: model.nextAction,
+      confidence: model.confidence,
+      generator: model.generator,
+      generated_at: this.iso(model.generatedAt),
+      updated_at: this.iso(model.updatedAt),
+    };
+    const cols = Object.keys(row);
+    const updateClause = cols
+      .filter((c) => c !== 'opportunity_id')
+      .map((c) => `${c} = excluded.${c}`)
+      .join(', ');
+    await this.db
+      .prepare(
+        `INSERT INTO opportunity_models (${cols.join(', ')}) VALUES (${cols.map(() => '?').join(', ')})
+         ON CONFLICT(opportunity_id) DO UPDATE SET ${updateClause}`,
+      )
+      .bind(...cols.map((c) => (row as any)[c]))
+      .run();
+  }
+
+  private mapBusinessModel(r: any): BusinessModel {
+    return {
+      id: r.id,
+      opportunityId: r.opportunity_id,
+      opportunityName: r.opportunity_name ?? '',
+      targetCustomer: r.target_customer,
+      problem: r.problem,
+      offer: r.offer,
+      whyTheyBuy: r.why_they_buy,
+      suggestedPrice: this.n(r.suggested_price),
+      priceRationale: r.price_rationale,
+      deliveryCostEstimate: this.n(r.delivery_cost_estimate),
+      expectedGrossMarginPct: this.n(r.expected_gross_margin_pct),
+      acquisitionChannel: r.acquisition_channel,
+      salesMessage: r.sales_message,
+      followUpSequence: this.a<string>(r.follow_up_sequence),
+      objectionHandling: this.a<{ objection: string; response: string }>(r.objection_handling),
+      deliveryWorkflow: r.delivery_workflow,
+      timeToFirstSaleDaysEstimate: r.time_to_first_sale_days_estimate,
+      upsells: this.a<string>(r.upsells),
+      recurringRevenueNote: r.recurring_revenue_note ?? '',
+      expectedProfitFirstDeal: this.n(r.expected_profit_first_deal),
+      canScale: Boolean(r.can_scale),
+      scaleNote: r.scale_note ?? '',
+      nextAction: r.next_action ?? '',
+      confidence: this.n(r.confidence),
+      generator: r.generator ?? 'local-rule-engine',
+      generatedAt: this.ms(r.generated_at),
+      updatedAt: this.ms(r.updated_at),
+    };
+  }
+
+  /* ----------------------------- decisions -------------------------------- */
+
+  async listDecisions(): Promise<OpportunityDecision[]> {
+    const { results } = await this.db
+      .prepare('SELECT * FROM opportunity_decisions WHERE agent_id = ? ORDER BY created_at DESC LIMIT 500')
+      .bind(this.agentId)
+      .all();
+    return results.map((r: any) => this.mapDecision(r));
+  }
+
+  async appendDecision(decision: OpportunityDecision): Promise<void> {
+    await this.db
+      .prepare(
+        `INSERT INTO opportunity_decisions
+           (id, agent_id, opportunity_id, opportunity_name, action, previous_state, new_state,
+            reasoning, evidence_summary, metrics, next_action, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      )
+      .bind(
+        decision.id,
+        this.agentId,
+        decision.opportunityId,
+        decision.opportunityName,
+        decision.action,
+        decision.previousState,
+        decision.newState,
+        decision.reasoning,
+        decision.evidenceSummary,
+        this.j(decision.metrics),
+        decision.nextAction,
+        this.iso(decision.createdAt),
+      )
+      .run();
+  }
+
+  private mapDecision(r: any): OpportunityDecision {
+    return {
+      id: r.id,
+      opportunityId: r.opportunity_id,
+      opportunityName: r.opportunity_name ?? '',
+      action: r.action,
+      previousState: r.previous_state,
+      newState: r.new_state,
+      reasoning: r.reasoning,
+      evidenceSummary: r.evidence_summary,
+      metrics: this.o(r.metrics),
+      nextAction: r.next_action ?? '',
+      createdAt: this.ms(r.created_at),
+    };
+  }
+
+  /* ------------------------------- actions -------------------------------- */
+
+  async listActions(): Promise<RecommendedAction[]> {
+    const { results } = await this.db
+      .prepare('SELECT * FROM agent_actions WHERE agent_id = ? ORDER BY rank ASC')
+      .bind(this.agentId)
+      .all();
+    return results.map((r: any) => this.mapAction(r));
+  }
+
+  async replaceActions(actions: RecommendedAction[]): Promise<void> {
+    const deleteStmt = this.db.prepare('DELETE FROM agent_actions WHERE agent_id = ?').bind(this.agentId);
+    const insertStmts = actions.map((a) =>
+      this.db
+        .prepare(
+          `INSERT INTO agent_actions
+             (id, agent_id, kind, opportunity_id, opportunity_name, title, description,
+              expected_value, urgency, effort, rank, created_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        )
+        .bind(
+          a.id,
+          this.agentId,
+          a.kind,
+          a.opportunityId ?? null,
+          a.opportunityName ?? null,
+          a.title,
+          a.description,
+          a.expectedValue,
+          a.urgency,
+          a.effort,
+          a.rank,
+          this.iso(a.createdAt),
+        ),
+    );
+    await this.db.batch([deleteStmt, ...insertStmts]);
+  }
+
+  private mapAction(r: any): RecommendedAction {
+    return {
+      id: r.id,
+      kind: r.kind,
+      opportunityId: r.opportunity_id ?? undefined,
+      opportunityName: r.opportunity_name ?? undefined,
+      title: r.title,
+      description: r.description,
+      expectedValue: this.n(r.expected_value),
+      urgency: r.urgency,
+      effort: r.effort,
+      rank: r.rank,
+      createdAt: this.ms(r.created_at),
+    };
   }
 }
 

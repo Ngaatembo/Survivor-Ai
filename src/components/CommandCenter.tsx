@@ -5,6 +5,16 @@ import { LoopPipeline } from './LoopPipeline';
 import { usd, usdWhole, pct, timeAgo } from '../lib/format';
 import type { View } from '../App';
 
+const LIFECYCLE_ORDER = ['DISCOVERED', 'VALIDATING', 'PROVEN', 'SCALING', 'FAILED'] as const;
+const LIFECYCLE_TONE: Record<string, 'gray' | 'blue' | 'green' | 'purple' | 'red'> = {
+  DISCOVERED: 'gray',
+  VALIDATING: 'blue',
+  PROVEN: 'green',
+  SCALING: 'purple',
+  FAILED: 'red',
+  ARCHIVED: 'red',
+};
+
 export function CommandCenter({ go }: { go: (v: View) => void }) {
   const agent = useStore((s) => s.agent);
   const { balance, revenue, expenses, profit } = useWalletTotals();
@@ -13,7 +23,13 @@ export function CommandCenter({ go }: { go: (v: View) => void }) {
   const events = useStore((s) => s.events);
   const memory = useStore((s) => s.memory);
   const reports = useStore((s) => s.reports);
+  const actions = useStore((s) => s.actions);
   const dead = agent.status === 'DEAD';
+
+  const portfolio = LIFECYCLE_ORDER.map((state) => ({
+    state,
+    count: opportunities.filter((o) => (o.lifecycleState ?? 'DISCOVERED') === state).length,
+  }));
 
   const discovered = opportunities.filter((o) => o.researchStage !== 'UNDISCOVERED');
   const successful = experiments.filter((e) => e.outcome === 'SUCCESS' || e.outcome === 'PARTIAL_SUCCESS').length;
@@ -87,6 +103,48 @@ export function CommandCenter({ go }: { go: (v: View) => void }) {
 
         <Panel title="Survival">
           <SurvivalMeter />
+        </Panel>
+      </div>
+
+      <div className="grid cols-2" style={{ gridTemplateColumns: '1.3fr 1fr', marginBottom: 14 }}>
+        <Panel
+          title="What should I do now?"
+          right={<span className="faint small mono">ranked by expected real-world value</span>}
+        >
+          {actions.length === 0 ? (
+            <div className="empty">
+              No recommended actions yet — these appear once opportunities have been scored and evaluated
+              (business-model output, opportunity lifecycle §4, KILL/ITERATE/SCALE §5). Simulated only until
+              you act on one for real.
+            </div>
+          ) : (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+              {actions.slice(0, 5).map((a) => (
+                <div key={a.id} className="event" style={{ display: 'block' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8, fontWeight: 600 }}>
+                    <span>
+                      #{a.rank} {a.title}
+                    </span>
+                    <span className="faint small mono">value ~${a.expectedValue.toFixed(0)}</span>
+                  </div>
+                  <div className="muted small" style={{ marginTop: 3, lineHeight: 1.5 }}>
+                    {a.description}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </Panel>
+
+        <Panel title="Opportunity portfolio" right={<span className="faint small mono">lifecycle</span>}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+            {portfolio.map((p) => (
+              <div key={p.state} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <Badge tone={LIFECYCLE_TONE[p.state]}>{p.state}</Badge>
+                <span style={{ fontWeight: 700 }}>{p.count}</span>
+              </div>
+            ))}
+          </div>
         </Panel>
       </div>
 

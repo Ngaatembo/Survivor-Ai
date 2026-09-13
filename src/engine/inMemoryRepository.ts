@@ -8,10 +8,13 @@ import type {
   Agent,
   AgentCycle,
   AgentEvent,
+  BusinessModel,
   CycleStepKey,
   Experiment,
   MemoryEntry,
   Opportunity,
+  OpportunityDecision,
+  RecommendedAction,
   ResearchReport,
   Strategy,
   Transaction,
@@ -28,6 +31,9 @@ interface InMemoryState {
   events: AgentEvent[];
   strategies: Strategy[];
   cycles: AgentCycle[];
+  businessModels: BusinessModel[];
+  decisions: OpportunityDecision[];
+  actions: RecommendedAction[];
 }
 
 export class InMemoryRepository implements EngineRepository {
@@ -41,6 +47,9 @@ export class InMemoryRepository implements EngineRepository {
     events: [],
     strategies: [],
     cycles: [],
+    businessModels: [],
+    decisions: [],
+    actions: [],
   };
 
   /** Load a snapshot (e.g. produced by createSeedState). */
@@ -180,6 +189,33 @@ export class InMemoryRepository implements EngineRepository {
       events: [],
       strategies: [],
       cycles: [],
+      businessModels: [],
+      decisions: [],
+      actions: [],
     };
+  }
+
+  async listBusinessModels() {
+    return this.state.businessModels;
+  }
+  async upsertBusinessModel(model: BusinessModel) {
+    this.state.businessModels = [
+      model,
+      ...this.state.businessModels.filter((m) => m.opportunityId !== model.opportunityId),
+    ];
+  }
+
+  async listDecisions() {
+    return this.state.decisions;
+  }
+  async appendDecision(decision: OpportunityDecision) {
+    this.state.decisions = [decision, ...this.state.decisions].slice(0, 500);
+  }
+
+  async listActions() {
+    return this.state.actions;
+  }
+  async replaceActions(actions: RecommendedAction[]) {
+    this.state.actions = actions;
   }
 }

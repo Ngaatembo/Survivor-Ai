@@ -13,9 +13,12 @@ import type {
   Agent,
   AgentCycle,
   AgentEvent,
+  BusinessModel,
   Experiment,
   MemoryEntry,
   Opportunity,
+  OpportunityDecision,
+  RecommendedAction,
   ResearchReport,
   Strategy,
   Transaction,
@@ -46,6 +49,9 @@ export interface BackendState {
   cycles: AgentCycle[];
   reports: ResearchReport[];
   strategies: Strategy[];
+  businessModels: BusinessModel[];
+  decisions: OpportunityDecision[];
+  actions: RecommendedAction[];
 }
 
 export class BackendError extends Error {

@@ -25,6 +25,8 @@ create type experiment_outcome as enum ('SUCCESS', 'PARTIAL_SUCCESS', 'FAILED', 
 create type memory_conclusion as enum ('PROMISING', 'VIABLE', 'MIXED', 'AVOID', 'UNTESTED', 'WATCH');
 create type memory_kind as enum ('opportunity', 'category', 'lesson', 'assumption');
 create type transaction_type as enum ('DEPOSIT', 'REVENUE', 'EXPENSE', 'REFUND', 'PROFIT', 'LOSS');
+create type opportunity_lifecycle_state as enum ('DISCOVERED', 'VALIDATING', 'PROVEN', 'SCALING', 'FAILED', 'ARCHIVED');
+create type decision_action as enum ('KILL', 'ITERATE', 'SCALE', 'CONTINUE');
 create type event_type as enum (
   'SYSTEM', 'CYCLE', 'DISCOVERY', 'RESEARCH', 'VERIFY', 'SCORE',
   'DECISION', 'REJECTION', 'EXPERIMENT', 'WALLET', 'MEMORY', 'WARNING'
@@ -89,9 +91,81 @@ create table opportunities (
   score_recommendation         recommendation,
   score_factors               jsonb not null default '{}',  -- full 9-factor breakdown
   date_researched             timestamptz,
-  created_at                  timestamptz not null default now()
+  created_at                  timestamptz not null default now(),
+  lifecycle_state             opportunity_lifecycle_state not null default 'DISCOVERED'
 );
 create index idx_opp_agent_stage on opportunities(agent_id, research_stage);
+
+-- opportunity_models — commercial core (build-spec §3): the concrete,
+-- sellable business model behind a promising opportunity. One per
+-- opportunity, upserted (onConflict opportunity_id) as evidence improves.
+create table opportunity_models (
+  id                                text primary key,
+  agent_id                          text not null references agents(id) on delete cascade,
+  opportunity_id                    text not null unique references opportunities(id) on delete cascade,
+  opportunity_name                  text not null default '',
+  target_customer                   text not null,
+  problem                           text not null,
+  offer                             text not null,
+  why_they_buy                      text not null,
+  suggested_price                   numeric(12,2) not null,
+  price_rationale                   text not null,
+  delivery_cost_estimate            numeric(12,2) not null,
+  expected_gross_margin_pct         numeric(5,2) not null,
+  acquisition_channel               text not null,
+  sales_message                     text not null,
+  follow_up_sequence                jsonb not null default '[]',
+  objection_handling                jsonb not null default '[]',
+  delivery_workflow                 text not null,
+  time_to_first_sale_days_estimate  int not null,
+  upsells                           jsonb not null default '[]',
+  recurring_revenue_note            text not null default '',
+  expected_profit_first_deal        numeric(12,2) not null,
+  can_scale                         boolean not null default false,
+  scale_note                        text not null default '',
+  next_action                       text not null default '',
+  confidence                        numeric(4,3) not null default 0,
+  generator                         text not null default 'local-rule-engine',
+  generated_at                      timestamptz not null default now(),
+  updated_at                        timestamptz not null default now()
+);
+create index idx_models_agent on opportunity_models(agent_id);
+
+-- opportunity_decisions — commercial core (build-spec §5): append-only
+-- KILL/ITERATE/SCALE/CONTINUE audit log. Every entry explains why.
+create table opportunity_decisions (
+  id                text primary key,
+  agent_id          text not null references agents(id) on delete cascade,
+  opportunity_id    text not null references opportunities(id) on delete cascade,
+  opportunity_name  text not null default '',
+  action            decision_action not null,
+  previous_state    opportunity_lifecycle_state not null,
+  new_state         opportunity_lifecycle_state not null,
+  reasoning         text not null,
+  evidence_summary  text not null,
+  metrics           jsonb not null default '{}',
+  next_action       text not null default '',
+  created_at        timestamptz not null default now()
+);
+create index idx_decisions_agent_time on opportunity_decisions(agent_id, created_at desc);
+
+-- agent_actions — commercial core (build-spec §16): "what should I do
+-- now?" — derived, ranked recommendations, fully replaced every cycle.
+create table agent_actions (
+  id                text primary key,
+  agent_id          text not null references agents(id) on delete cascade,
+  kind              text not null,
+  opportunity_id    text references opportunities(id),
+  opportunity_name  text,
+  title             text not null,
+  description       text not null,
+  expected_value    numeric(12,2) not null default 0,
+  urgency           int not null default 1,
+  effort            int not null default 1,
+  rank              int not null default 1,
+  created_at        timestamptz not null default now()
+);
+create index idx_actions_agent_rank on agent_actions(agent_id, rank);
 create index idx_opp_score on opportunities(agent_id, score_total desc);
 
 -- research_sources -----------------------------------------------------------

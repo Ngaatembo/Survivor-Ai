@@ -12,10 +12,13 @@ import type {
   Agent,
   AgentCycle,
   AgentEvent,
+  BusinessModel,
   CycleStepKey,
   Experiment,
   MemoryEntry,
   Opportunity,
+  OpportunityDecision,
+  RecommendedAction,
   ResearchReport,
   Strategy,
   Transaction,
@@ -48,6 +51,14 @@ function seedInitialState() {
     events: snap.events,
     strategies: snap.strategies,
     cycles: [] as AgentCycle[],
+    // Commercial core (build-spec §3/§5/§16) — populated from the live
+    // backend in backend mode; the standalone browser demo leaves these
+    // empty (the engine still computes them via StoreRepository, but they
+    // are intentionally not round-tripped into persisted Zustand state —
+    // see storeRepository.ts's comment on this scoping decision).
+    businessModels: [] as BusinessModel[],
+    decisions: [] as OpportunityDecision[],
+    actions: [] as RecommendedAction[],
   };
 }
 
@@ -78,6 +89,9 @@ interface SurviveState {
   events: AgentEvent[];
   strategies: Strategy[];
   cycles: AgentCycle[];
+  businessModels: BusinessModel[];
+  decisions: OpportunityDecision[];
+  actions: RecommendedAction[];
   loop: LoopState;
   backend: BackendSyncState;
 
@@ -184,6 +198,9 @@ export const useStore = create<SurviveState>()(
               cycles: state.cycles,
               reports: state.reports,
               strategies: state.strategies,
+              businessModels: state.businessModels,
+              decisions: state.decisions,
+              actions: state.actions,
               backend: {
                 connected: true,
                 syncing: false,

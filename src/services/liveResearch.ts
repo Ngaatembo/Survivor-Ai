@@ -106,6 +106,7 @@ export async function discoverLive(
       tags: ['live research', category.toLowerCase()],
       dataSource,
       researchStage: 'DISCOVERED',
+      lifecycleState: 'DISCOVERED',
       description:
         analysis?.summary ||
         `Opportunity surfaced by live web research in the ${category} category. Attributes extracted by ${llm?.label ?? 'rule engine'} from ${results.length} sources pending verification.`,

@@ -29,7 +29,7 @@ const src = (
 
 type Seed = Omit<
   Opportunity,
-  'dataSource' | 'researchStage' | 'dateResearched' | 'score' | 'executionBlocked'
+  'dataSource' | 'researchStage' | 'dateResearched' | 'score' | 'executionBlocked' | 'lifecycleState'
 > & { executionBlocked?: boolean; blockReason?: string };
 
 const SAMPLE_SEED: Seed[] = [
@@ -1121,6 +1121,7 @@ export const SAMPLE_OPPORTUNITIES: Opportunity[] = SAMPLE_SEED.map((s) => ({
   researchStage: 'UNDISCOVERED' as const,
   dateResearched: null,
   executionBlocked: s.executionBlocked ?? false,
+  lifecycleState: 'DISCOVERED' as const,
 }));
 
 /* The first research cycle "discovers" a realistic starting batch from the

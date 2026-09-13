@@ -11,10 +11,13 @@ import type {
   Agent,
   AgentCycle,
   AgentEvent,
+  BusinessModel,
   CycleStepKey,
   Experiment,
   MemoryEntry,
   Opportunity,
+  OpportunityDecision,
+  RecommendedAction,
   ResearchReport,
   Strategy,
   Transaction,
@@ -82,6 +85,21 @@ export interface EngineRepository {
 
   // hard reset (used by browser "RESET"; worker does not expose this)
   reset?(opts?: { seed: boolean }): Promise<void>;
+
+  // business models (commercial core — build-spec §3) — one per opportunity,
+  // regenerated as evidence improves.
+  listBusinessModels(): Promise<BusinessModel[]>;
+  upsertBusinessModel(model: BusinessModel): Promise<void>;
+
+  // opportunity decisions (commercial core — build-spec §5) — append-only
+  // KILL/ITERATE/SCALE/CONTINUE audit log.
+  listDecisions(): Promise<OpportunityDecision[]>;
+  appendDecision(decision: OpportunityDecision): Promise<void>;
+
+  // recommended actions (commercial core — build-spec §16) — derived state,
+  // fully replaced every cycle rather than accumulated.
+  listActions(): Promise<RecommendedAction[]>;
+  replaceActions(actions: RecommendedAction[]): Promise<void>;
 }
 
 /** Engine callbacks so the host can render progress / stay in sync. */

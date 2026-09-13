@@ -33,6 +33,9 @@ import { discoverLive } from '../services/liveResearch';
 import type { EngineHooks, EngineRepository } from './repository';
 import { createSeedSnapshot, SURVIVAL_THRESHOLD } from './seed';
 import type { LLMProvider, SearchProvider } from '../services/providers/types';
+import { evaluateOpportunity, VALIDATION_SCORE_THRESHOLD } from '../lib/decisionEngine';
+import { generateBusinessModel } from '../lib/businessModel';
+import { computeRecommendedActions } from '../lib/recommendedActions';
 
 export const STEP_ORDER: CycleStepKey[] = [
   'RESEARCH',
@@ -477,6 +480,68 @@ export class AgentEngine {
       });
       await this.repo.updateAgent({ currentStrategy: strategy, currentObjective: objective });
       await hooks.log('MEMORY', `Agent updated strategy: ${strategy}`);
+
+      /* --- Commercial core (build-spec §4/§5/§16): evidence-driven lifecycle,
+       * KILL/ITERATE/SCALE decisions, business models, recommended actions.
+       * Runs every cycle over every researched-and-not-blocked opportunity —
+       * cheap pure functions; only writes when something actually changed,
+       * so a healthy system does not flood the decision log with repeats. */
+      try {
+        const researched = (await this.repo.listOpportunities()).filter(
+          (o) => o.researchStage !== 'UNDISCOVERED',
+        );
+        const allExperiments = await this.repo.listExperiments();
+        const changedOpps: Opportunity[] = [];
+        let promotions = 0;
+        let kills = 0;
+
+        for (const o of researched) {
+          const { decision, newLifecycleState } = evaluateOpportunity(o, memory, allExperiments);
+          const stateChanged = newLifecycleState !== (o.lifecycleState ?? 'DISCOVERED');
+          if (stateChanged) {
+            changedOpps.push({ ...o, lifecycleState: newLifecycleState });
+            if (decision.action === 'SCALE') promotions++;
+            if (decision.action === 'KILL') kills++;
+          }
+          // Persist a decision record whenever something material happened —
+          // a state change, or an explicit KILL/SCALE/ITERATE verdict — but
+          // not for a plain "not enough evidence yet" CONTINUE every cycle.
+          if (stateChanged || decision.action !== 'CONTINUE') {
+            await this.repo.appendDecision(decision);
+          }
+        }
+        if (changedOpps.length) {
+          await this.repo.upsertOpportunities(changedOpps);
+          if (promotions) await hooks.log('DECISION', `${promotions} opportunity(ies) promoted (PROVEN/SCALING) this cycle.`);
+          if (kills) await hooks.log('DECISION', `${kills} opportunity(ies) marked FAILED this cycle — evidence did not support them.`);
+        }
+
+        // Business models: generate/refresh for high-value candidates —
+        // scored above the validation threshold, not execution-blocked.
+        // Capped so this stays cheap even with a large opportunity set.
+        const freshOpps = await this.repo.listOpportunities();
+        const highValue = freshOpps
+          .filter((o) => !o.executionBlocked && o.score && o.score.total >= VALIDATION_SCORE_THRESHOLD)
+          .sort((a, b) => (b.score?.total ?? 0) - (a.score?.total ?? 0))
+          .slice(0, 5);
+        for (const o of highValue) {
+          await this.repo.upsertBusinessModel(generateBusinessModel(o, memory));
+        }
+
+        // "What should I do now?" — recomputed and fully replaced every cycle.
+        const decisions = await this.repo.listDecisions();
+        const businessModels = await this.repo.listBusinessModels();
+        const actions = computeRecommendedActions(freshOpps, decisions, businessModels, memory);
+        await this.repo.replaceActions(actions);
+        if (actions[0]) {
+          await hooks.log('DECISION', `Top recommended action: ${actions[0].title}`);
+        }
+      } catch (e) {
+        // Commercial-core evaluation must never take down the core research
+        // loop — log and continue; the next cycle will re-evaluate anyway.
+        await hooks.log('WARNING', `Commercial-core evaluation failed this cycle: ${(e as Error).message}`);
+      }
+
       await this.repo.completeCycle(cycle.id, {
         completedAt: Date.now(),
         summary: `Cycle #${index}: balance $${finalBalance.toFixed(2)}, ${experiment ? `experiment ${experiment.outcome}` : 'no experiment'}.`,

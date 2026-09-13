@@ -185,17 +185,31 @@ export default {
       try {
         const { repo } = buildEngine(env);
         const agent = await repo.getAgent();
-        const [opportunities, experiments, transactions, memory, events, cycles, reports, strategies] =
-          await Promise.all([
-            repo.listOpportunities(),
-            repo.listExperiments(),
-            repo.listTransactions(),
-            repo.listMemory(),
-            repo.listEvents(),
-            repo.listCycles(),
-            repo.listReports(),
-            repo.listStrategies(),
-          ]);
+        const [
+          opportunities,
+          experiments,
+          transactions,
+          memory,
+          events,
+          cycles,
+          reports,
+          strategies,
+          businessModels,
+          decisions,
+          actions,
+        ] = await Promise.all([
+          repo.listOpportunities(),
+          repo.listExperiments(),
+          repo.listTransactions(),
+          repo.listMemory(),
+          repo.listEvents(),
+          repo.listCycles(),
+          repo.listReports(),
+          repo.listStrategies(),
+          repo.listBusinessModels(),
+          repo.listDecisions(),
+          repo.listActions(),
+        ]);
         return json({
           ok: true,
           fetchedAt: new Date().toISOString(),
@@ -210,6 +224,10 @@ export default {
           cycles: cycles.slice(-150),
           reports,
           strategies,
+          // Commercial core (build-spec §3/§5/§16).
+          businessModels,
+          decisions: decisions.slice(0, 200),
+          actions,
         });
       } catch (e) {
         return json({ ok: false, error: (e as Error).message }, { status: 500 });
