@@ -4,6 +4,7 @@ import { AgentStatusPill } from './components/AgentStatusPill';
 import { CommandCenter } from './components/CommandCenter';
 import { ResearchEngine } from './components/ResearchEngine';
 import { OpportunityExplorer } from './components/OpportunityExplorer';
+import { Prospects } from './components/Prospects';
 import { DecisionCenter } from './components/DecisionCenter';
 import { Experiments } from './components/Experiments';
 import { MemoryView } from './components/MemoryView';
@@ -17,6 +18,7 @@ export type View =
   | 'command'
   | 'research'
   | 'explorer'
+  | 'prospects'
   | 'decision'
   | 'experiments'
   | 'memory'
@@ -29,6 +31,7 @@ const NAV: { id: View; label: string; icon: string; section: string }[] = [
   { id: 'command', label: 'Command Center', icon: '▣', section: 'OVERVIEW' },
   { id: 'research', label: 'Research Engine', icon: '◎', section: 'OVERVIEW' },
   { id: 'explorer', label: 'Opportunity Explorer', icon: '▤', section: 'DISCOVERY' },
+  { id: 'prospects', label: 'Prospects / CRM', icon: '☎', section: 'DISCOVERY' },
   { id: 'decision', label: 'Decision Center', icon: '➤', section: 'DISCOVERY' },
   { id: 'reports', label: 'Research Reports', icon: '▦', section: 'DISCOVERY' },
   { id: 'experiments', label: 'Experiments', icon: '▶', section: 'OPERATIONS' },
@@ -42,6 +45,7 @@ const TITLES: Record<View, string> = {
   command: 'Command Center',
   research: 'AI Research Engine',
   explorer: 'Opportunity Explorer',
+  prospects: 'Prospects / CRM',
   decision: 'AI Decision Center',
   experiments: 'Experiment System',
   memory: 'Agent Memory',
@@ -67,6 +71,7 @@ export function App() {
   const opportunities = useStore((s) => s.opportunities);
   const experiments = useStore((s) => s.experiments);
   const events = useStore((s) => s.events);
+  const prospects = useStore((s) => s.prospects);
   const backend = useStore((s) => s.backend);
 
   const drawerOpp = drawerId ? opportunities.find((o) => o.id === drawerId) ?? null : null;
@@ -103,6 +108,9 @@ export function App() {
                   {n.label}
                   {n.id === 'explorer' && (
                     <span className="badge-count">{opportunities.filter((o) => o.researchStage !== 'UNDISCOVERED').length}</span>
+                  )}
+                  {n.id === 'prospects' && prospects.length > 0 && (
+                    <span className="badge-count">{prospects.length}</span>
                   )}
                   {n.id === 'experiments' && experiments.length > 0 && (
                     <span className="badge-count">{experiments.length}</span>
@@ -194,6 +202,7 @@ export function App() {
           {view === 'command' && <CommandCenter go={setView} />}
           {view === 'research' && <ResearchEngine onOpenOpp={openOpp} />}
           {view === 'explorer' && <OpportunityExplorer />}
+          {view === 'prospects' && <Prospects />}
           {view === 'decision' && <DecisionCenter />}
           {view === 'experiments' && <Experiments />}
           {view === 'memory' && <MemoryView />}

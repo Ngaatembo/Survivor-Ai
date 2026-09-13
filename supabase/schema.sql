@@ -31,6 +31,16 @@ create type event_type as enum (
   'SYSTEM', 'CYCLE', 'DISCOVERY', 'RESEARCH', 'VERIFY', 'SCORE',
   'DECISION', 'REJECTION', 'EXPERIMENT', 'WALLET', 'MEMORY', 'WARNING'
 );
+create type website_presence as enum ('NONE_FOUND', 'SOCIAL_ONLY', 'WEAK_OR_OUTDATED', 'ADEQUATE', 'UNKNOWN');
+create type contact_channel as enum ('PHONE', 'WHATSAPP', 'EMAIL', 'FACEBOOK', 'INSTAGRAM', 'WEBSITE_FORM', 'UNKNOWN');
+create type prospect_priority as enum ('HIGH', 'MEDIUM', 'LOW', 'DO_NOT_CONTACT');
+create type prospect_status as enum (
+  'DISCOVERED', 'QUALIFIED', 'CONTACTED', 'REPLIED', 'INTERESTED',
+  'PROPOSAL_SENT', 'NEGOTIATING', 'WON', 'LOST', 'NOT_INTERESTED', 'FOLLOW_UP'
+);
+create type prospect_interaction_kind as enum (
+  'DISCOVERED', 'QUALIFIED', 'OUTREACH_GENERATED', 'STATUS_CHANGE', 'NOTE', 'FOLLOW_UP_SET'
+);
 
 -- agents ---------------------------------------------------------------------
 
@@ -157,6 +167,8 @@ create table agent_actions (
   kind              text not null,
   opportunity_id    text references opportunities(id),
   opportunity_name  text,
+  prospect_id       text,
+  prospect_name     text,
   title             text not null,
   description       text not null,
   expected_value    numeric(12,2) not null default 0,
@@ -167,6 +179,88 @@ create table agent_actions (
 );
 create index idx_actions_agent_rank on agent_actions(agent_id, rank);
 create index idx_opp_score on opportunities(agent_id, score_total desc);
+
+-- prospects — real-world pipeline (build-spec §7/§8). Always traces back to
+-- an opportunity; website_presence defaults to UNKNOWN and is only set to a
+-- stronger claim when the cited source actually supports it (never fabricated).
+create table prospects (
+  id                          text primary key,
+  agent_id                    text not null references agents(id) on delete cascade,
+  opportunity_id              text not null references opportunities(id) on delete cascade,
+  opportunity_name            text not null default '',
+  business_name               text not null,
+  category                    text not null default '',
+  location                    text not null default '',
+  website_presence            website_presence not null default 'UNKNOWN',
+  website_url                 text,
+  social_links                text[] not null default '{}',
+  contact_channel              contact_channel not null default 'UNKNOWN',
+  contact_value                text,
+  evidence_notes               text not null default '',
+  priority                    prospect_priority not null default 'LOW',
+  score                       jsonb not null default '{}', -- LeadScoreBreakdown
+  status                      prospect_status not null default 'DISCOVERED',
+  data_source                 data_source not null default 'LIVE',
+  date_discovered              timestamptz not null default now(),
+  last_contact_at              timestamptz,
+  next_follow_up_at            timestamptz,
+  messages_sent_count          int not null default 0,
+  responses_received_count     int not null default 0,
+  actual_revenue                numeric(12,2) not null default 0,
+  notes                        text[] not null default '{}',
+  reason_lost                  text,
+  created_at                   timestamptz not null default now(),
+  updated_at                   timestamptz not null default now()
+);
+create index idx_prospects_agent on prospects(agent_id);
+create index idx_prospects_opportunity on prospects(opportunity_id);
+create index idx_prospects_priority on prospects(agent_id, priority);
+
+create table prospect_sources (
+  id            text primary key,
+  prospect_id   text not null references prospects(id) on delete cascade,
+  title         text not null,
+  url           text,
+  kind          text not null,
+  note          text
+);
+create index idx_prospect_sources_prospect on prospect_sources(prospect_id);
+
+-- prospect_interactions — append-only observability trail (build-spec §23).
+create table prospect_interactions (
+  id            text primary key,
+  prospect_id   text not null references prospects(id) on delete cascade,
+  kind          prospect_interaction_kind not null,
+  summary       text not null,
+  created_at    timestamptz not null default now()
+);
+create index idx_prospect_interactions_prospect on prospect_interactions(prospect_id, created_at desc);
+
+-- outreach_messages — AI outreach assistant output (build-spec §9). One row
+-- per prospect, upserted (onConflict prospect_id). Prepared for human
+-- approval/execution — never sent automatically by this system.
+create table outreach_messages (
+  id                     text primary key,
+  prospect_id            text not null unique references prospects(id) on delete cascade,
+  opportunity_id         text not null references opportunities(id) on delete cascade,
+  business_model_id      text,
+  whatsapp               text not null,
+  sms                    text not null,
+  email                  jsonb not null default '{}', -- {subject, body}
+  short_version          text not null,
+  professional_version   text not null,
+  follow_up_1            text not null,
+  follow_up_2            text not null,
+  objection_responses    jsonb not null default '[]',
+  price_explanation      text not null,
+  call_script            jsonb not null default '[]',
+  meeting_agenda         jsonb not null default '[]',
+  proposal_outline       jsonb not null default '[]',
+  generator              text not null default 'local-rule-engine',
+  generated_at           timestamptz not null default now(),
+  updated_at             timestamptz not null default now()
+);
+create index idx_outreach_prospect on outreach_messages(prospect_id);
 
 -- research_sources -----------------------------------------------------------
 

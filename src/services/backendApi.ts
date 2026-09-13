@@ -18,6 +18,9 @@ import type {
   MemoryEntry,
   Opportunity,
   OpportunityDecision,
+  OutreachMessageSet,
+  Prospect,
+  ProspectInteraction,
   RecommendedAction,
   ResearchReport,
   Strategy,
@@ -52,6 +55,9 @@ export interface BackendState {
   businessModels: BusinessModel[];
   decisions: OpportunityDecision[];
   actions: RecommendedAction[];
+  prospects: Prospect[];
+  prospectInteractions: ProspectInteraction[];
+  outreachMessages: OutreachMessageSet[];
 }
 
 export class BackendError extends Error {

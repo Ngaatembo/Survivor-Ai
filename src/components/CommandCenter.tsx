@@ -24,7 +24,14 @@ export function CommandCenter({ go }: { go: (v: View) => void }) {
   const memory = useStore((s) => s.memory);
   const reports = useStore((s) => s.reports);
   const actions = useStore((s) => s.actions);
+  const prospects = useStore((s) => s.prospects);
   const dead = agent.status === 'DEAD';
+
+  const highPriorityProspects = prospects.filter((p) => p.priority === 'HIGH').length;
+  const dueFollowUps = prospects.filter((p) => p.nextFollowUpAt && p.nextFollowUpAt <= Date.now()).length;
+  const pipelineCounts = ['QUALIFIED', 'CONTACTED', 'REPLIED', 'INTERESTED', 'PROPOSAL_SENT', 'NEGOTIATING', 'WON'].map(
+    (status) => ({ status, count: prospects.filter((p) => p.status === status).length }),
+  );
 
   const portfolio = LIFECYCLE_ORDER.map((state) => ({
     state,
@@ -145,6 +152,38 @@ export function CommandCenter({ go }: { go: (v: View) => void }) {
               </div>
             ))}
           </div>
+        </Panel>
+      </div>
+
+      <div className="grid" style={{ marginBottom: 14 }}>
+        <Panel
+          title="Sales pipeline"
+          right={
+            <button className="btn small" onClick={() => go('prospects')}>
+              Open CRM →
+            </button>
+          }
+        >
+          {prospects.length === 0 ? (
+            <div className="empty">
+              No prospects yet — discovered automatically once a Local / Real-World opportunity has a
+              business model and evidence of real demand (needs a connected live search provider).
+            </div>
+          ) : (
+            <>
+              <div className="faint small mono" style={{ marginBottom: 10 }}>
+                {prospects.length} discovered · {highPriorityProspects} high priority · {dueFollowUps} follow-up(s) due
+              </div>
+              <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap' }}>
+                {pipelineCounts.map((p) => (
+                  <div key={p.status} style={{ textAlign: 'center', minWidth: 64 }}>
+                    <div style={{ fontSize: 20, fontWeight: 700 }}>{p.count}</div>
+                    <div className="faint small mono">{p.status.replace('_', ' ')}</div>
+                  </div>
+                ))}
+              </div>
+            </>
+          )}
         </Panel>
       </div>
 

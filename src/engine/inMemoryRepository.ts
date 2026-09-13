@@ -14,6 +14,9 @@ import type {
   MemoryEntry,
   Opportunity,
   OpportunityDecision,
+  OutreachMessageSet,
+  Prospect,
+  ProspectInteraction,
   RecommendedAction,
   ResearchReport,
   Strategy,
@@ -34,6 +37,9 @@ interface InMemoryState {
   businessModels: BusinessModel[];
   decisions: OpportunityDecision[];
   actions: RecommendedAction[];
+  prospects: Prospect[];
+  prospectInteractions: ProspectInteraction[];
+  outreachMessages: OutreachMessageSet[];
 }
 
 export class InMemoryRepository implements EngineRepository {
@@ -50,6 +56,9 @@ export class InMemoryRepository implements EngineRepository {
     businessModels: [],
     decisions: [],
     actions: [],
+    prospects: [],
+    prospectInteractions: [],
+    outreachMessages: [],
   };
 
   /** Load a snapshot (e.g. produced by createSeedState). */
@@ -192,6 +201,9 @@ export class InMemoryRepository implements EngineRepository {
       businessModels: [],
       decisions: [],
       actions: [],
+      prospects: [],
+      prospectInteractions: [],
+      outreachMessages: [],
     };
   }
 
@@ -217,5 +229,31 @@ export class InMemoryRepository implements EngineRepository {
   }
   async replaceActions(actions: RecommendedAction[]) {
     this.state.actions = actions;
+  }
+
+  async listProspects() {
+    return this.state.prospects;
+  }
+  async upsertProspects(prospects: Prospect[]) {
+    const byKey = new Map(this.state.prospects.map((p) => [`${p.opportunityId}::${p.businessName.toLowerCase()}`, p]));
+    for (const p of prospects) byKey.set(`${p.opportunityId}::${p.businessName.toLowerCase()}`, p);
+    this.state.prospects = [...byKey.values()];
+  }
+
+  async listProspectInteractions() {
+    return this.state.prospectInteractions;
+  }
+  async appendProspectInteraction(interaction: ProspectInteraction) {
+    this.state.prospectInteractions = [interaction, ...this.state.prospectInteractions].slice(0, 1000);
+  }
+
+  async listOutreachMessages() {
+    return this.state.outreachMessages;
+  }
+  async upsertOutreachMessages(set: OutreachMessageSet) {
+    this.state.outreachMessages = [
+      set,
+      ...this.state.outreachMessages.filter((m) => m.prospectId !== set.prospectId),
+    ];
   }
 }

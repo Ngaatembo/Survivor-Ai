@@ -197,6 +197,9 @@ export default {
           businessModels,
           decisions,
           actions,
+          prospects,
+          prospectInteractions,
+          outreachMessages,
         ] = await Promise.all([
           repo.listOpportunities(),
           repo.listExperiments(),
@@ -209,6 +212,9 @@ export default {
           repo.listBusinessModels(),
           repo.listDecisions(),
           repo.listActions(),
+          repo.listProspects(),
+          repo.listProspectInteractions(),
+          repo.listOutreachMessages(),
         ]);
         return json({
           ok: true,
@@ -228,6 +234,10 @@ export default {
           businessModels,
           decisions: decisions.slice(0, 200),
           actions,
+          // Real-world pipeline (build-spec §7/§8/§9).
+          prospects,
+          prospectInteractions: prospectInteractions.slice(0, 300),
+          outreachMessages,
         });
       } catch (e) {
         return json({ ok: false, error: (e as Error).message }, { status: 500 });

@@ -25,9 +25,13 @@ import type {
   CycleStepKey,
   EventType,
   Experiment,
+  LeadScoreBreakdown,
   MemoryEntry,
   Opportunity,
   OpportunityDecision,
+  OutreachMessageSet,
+  Prospect,
+  ProspectInteraction,
   RecommendedAction,
   ResearchReport,
   Strategy,
@@ -804,6 +808,9 @@ export class D1Repository implements EngineRepository {
       'opportunity_models',
       'opportunity_decisions',
       'agent_actions',
+      'prospect_interactions', // no agent_id column; deleted via prospects join below
+      'outreach_messages', // no agent_id column; deleted via prospects join below
+      'prospects',
     ];
 
     const stmts = [
@@ -814,8 +821,14 @@ export class D1Repository implements EngineRepository {
       this.db.prepare(
         `DELETE FROM research_sources WHERE opportunity_id IN (SELECT id FROM opportunities WHERE agent_id = ?)`,
       ).bind(this.agentId),
+      this.db.prepare(
+        `DELETE FROM prospect_interactions WHERE prospect_id IN (SELECT id FROM prospects WHERE agent_id = ?)`,
+      ).bind(this.agentId),
+      this.db.prepare(
+        `DELETE FROM outreach_messages WHERE prospect_id IN (SELECT id FROM prospects WHERE agent_id = ?)`,
+      ).bind(this.agentId),
       ...tables
-        .filter((t) => t !== 'experiment_results' && t !== 'research_sources')
+        .filter((t) => !['experiment_results', 'research_sources', 'prospect_interactions', 'outreach_messages'].includes(t))
         .map((t) => this.db.prepare(`DELETE FROM ${t} WHERE agent_id = ?`).bind(this.agentId)),
       this.db.prepare('DELETE FROM agents WHERE id = ?').bind(this.agentId),
     ];
@@ -978,9 +991,9 @@ export class D1Repository implements EngineRepository {
       this.db
         .prepare(
           `INSERT INTO agent_actions
-             (id, agent_id, kind, opportunity_id, opportunity_name, title, description,
-              expected_value, urgency, effort, rank, created_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+             (id, agent_id, kind, opportunity_id, opportunity_name, prospect_id, prospect_name,
+              title, description, expected_value, urgency, effort, rank, created_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         )
         .bind(
           a.id,
@@ -988,6 +1001,8 @@ export class D1Repository implements EngineRepository {
           a.kind,
           a.opportunityId ?? null,
           a.opportunityName ?? null,
+          a.prospectId ?? null,
+          a.prospectName ?? null,
           a.title,
           a.description,
           a.expectedValue,
@@ -1006,6 +1021,8 @@ export class D1Repository implements EngineRepository {
       kind: r.kind,
       opportunityId: r.opportunity_id ?? undefined,
       opportunityName: r.opportunity_name ?? undefined,
+      prospectId: r.prospect_id ?? undefined,
+      prospectName: r.prospect_name ?? undefined,
       title: r.title,
       description: r.description,
       expectedValue: this.n(r.expected_value),
@@ -1013,6 +1030,242 @@ export class D1Repository implements EngineRepository {
       effort: r.effort,
       rank: r.rank,
       createdAt: this.ms(r.created_at),
+    };
+  }
+
+  /* ------------------------------- prospects ------------------------------ */
+
+  async listProspects(): Promise<Prospect[]> {
+    const { results: rows } = await this.db
+      .prepare('SELECT * FROM prospects WHERE agent_id = ? ORDER BY created_at DESC')
+      .bind(this.agentId)
+      .all();
+    if (!rows.length) return [];
+    const ids = rows.map((r: any) => r.id);
+    const placeholders = ids.map(() => '?').join(',');
+    const { results: sourceRows } = await this.db
+      .prepare(`SELECT * FROM prospect_sources WHERE prospect_id IN (${placeholders})`)
+      .bind(...ids)
+      .all();
+    const sourcesByProspect = new Map<string, any[]>();
+    for (const s of sourceRows) {
+      const list = sourcesByProspect.get(s.prospect_id as string) ?? [];
+      list.push(s);
+      sourcesByProspect.set(s.prospect_id as string, list);
+    }
+    return rows.map((r: any) => this.mapProspect(r, sourcesByProspect.get(r.id) ?? []));
+  }
+
+  async upsertProspects(prospects: Prospect[]): Promise<void> {
+    if (prospects.length === 0) return;
+    const stmts = prospects.map((p) => {
+      const row = this.prospectRow(p);
+      const cols = Object.keys(row);
+      const updateClause = cols
+        .filter((c) => c !== 'id')
+        .map((c) => `${c} = excluded.${c}`)
+        .join(', ');
+      return this.db
+        .prepare(
+          `INSERT INTO prospects (${cols.join(', ')}) VALUES (${cols.map(() => '?').join(', ')})
+           ON CONFLICT(id) DO UPDATE SET ${updateClause}`,
+        )
+        .bind(...cols.map((c) => row[c]));
+    });
+    await this.db.batch(stmts);
+
+    const ids = prospects.map((p) => p.id);
+    const placeholders = ids.map(() => '?').join(',');
+    const deleteStmt = this.db
+      .prepare(`DELETE FROM prospect_sources WHERE prospect_id IN (${placeholders})`)
+      .bind(...ids);
+    const sourceStmts = prospects.flatMap((p) =>
+      p.sources.map((s) =>
+        this.db
+          .prepare(
+            `INSERT INTO prospect_sources (id, prospect_id, title, url, kind, note)
+             VALUES (?, ?, ?, ?, ?, ?)
+             ON CONFLICT(id) DO UPDATE SET
+               prospect_id = excluded.prospect_id, title = excluded.title,
+               url = excluded.url, kind = excluded.kind, note = excluded.note`,
+          )
+          .bind(s.id, p.id, s.title, s.url ?? null, s.kind, s.note ?? null),
+      ),
+    );
+    await this.db.batch([deleteStmt, ...sourceStmts]);
+  }
+
+  private prospectRow(p: Prospect): Record<string, unknown> {
+    return {
+      id: p.id,
+      agent_id: this.agentId,
+      opportunity_id: p.opportunityId,
+      opportunity_name: p.opportunityName,
+      business_name: p.businessName,
+      category: p.category,
+      location: p.location,
+      website_presence: p.websitePresence,
+      website_url: p.websiteUrl ?? null,
+      social_links: this.j(p.socialLinks),
+      contact_channel: p.contactChannel,
+      contact_value: p.contactValue ?? null,
+      evidence_notes: p.evidenceNotes,
+      priority: p.priority,
+      score: this.j(p.score),
+      status: p.status,
+      data_source: p.dataSource,
+      date_discovered: this.iso(p.dateDiscovered),
+      last_contact_at: p.lastContactAt ? this.iso(p.lastContactAt) : null,
+      next_follow_up_at: p.nextFollowUpAt ? this.iso(p.nextFollowUpAt) : null,
+      messages_sent_count: p.messagesSentCount,
+      responses_received_count: p.responsesReceivedCount,
+      actual_revenue: p.actualRevenue,
+      notes: this.j(p.notes),
+      reason_lost: p.reasonLost ?? null,
+      created_at: this.iso(p.createdAt),
+      updated_at: this.iso(p.updatedAt),
+    };
+  }
+
+  private mapProspect(r: any, sourceRows: any[]): Prospect {
+    return {
+      id: r.id,
+      opportunityId: r.opportunity_id,
+      opportunityName: r.opportunity_name ?? '',
+      businessName: r.business_name,
+      category: r.category ?? '',
+      location: r.location ?? '',
+      websitePresence: r.website_presence ?? 'UNKNOWN',
+      websiteUrl: r.website_url ?? undefined,
+      socialLinks: this.a<string>(r.social_links),
+      contactChannel: r.contact_channel ?? 'UNKNOWN',
+      contactValue: r.contact_value ?? undefined,
+      sources: sourceRows.map((s: any) => ({
+        id: s.id,
+        title: s.title,
+        url: s.url ?? undefined,
+        kind: s.kind,
+        note: s.note ?? undefined,
+      })),
+      evidenceNotes: r.evidence_notes ?? '',
+      priority: r.priority,
+      score: this.o<LeadScoreBreakdown>(r.score),
+      status: r.status,
+      dataSource: r.data_source,
+      dateDiscovered: this.ms(r.date_discovered),
+      lastContactAt: r.last_contact_at ? this.ms(r.last_contact_at) : undefined,
+      nextFollowUpAt: r.next_follow_up_at ? this.ms(r.next_follow_up_at) : undefined,
+      messagesSentCount: r.messages_sent_count ?? 0,
+      responsesReceivedCount: r.responses_received_count ?? 0,
+      actualRevenue: this.n(r.actual_revenue),
+      notes: this.a<string>(r.notes),
+      reasonLost: r.reason_lost ?? undefined,
+      createdAt: this.ms(r.created_at),
+      updatedAt: this.ms(r.updated_at),
+    };
+  }
+
+  /* --------------------------- prospect interactions ----------------------- */
+
+  async listProspectInteractions(): Promise<ProspectInteraction[]> {
+    const { results } = await this.db
+      .prepare(
+        `SELECT pi.* FROM prospect_interactions pi
+         JOIN prospects p ON p.id = pi.prospect_id
+         WHERE p.agent_id = ? ORDER BY pi.created_at DESC LIMIT 1000`,
+      )
+      .bind(this.agentId)
+      .all();
+    return results.map((r: any) => ({
+      id: r.id,
+      prospectId: r.prospect_id,
+      kind: r.kind,
+      summary: r.summary,
+      createdAt: this.ms(r.created_at),
+    }));
+  }
+
+  async appendProspectInteraction(interaction: ProspectInteraction): Promise<void> {
+    await this.db
+      .prepare(
+        `INSERT INTO prospect_interactions (id, prospect_id, kind, summary, created_at)
+         VALUES (?, ?, ?, ?, ?)`,
+      )
+      .bind(interaction.id, interaction.prospectId, interaction.kind, interaction.summary, this.iso(interaction.createdAt))
+      .run();
+  }
+
+  /* ----------------------------- outreach messages -------------------------- */
+
+  async listOutreachMessages(): Promise<OutreachMessageSet[]> {
+    const { results } = await this.db
+      .prepare(
+        `SELECT om.* FROM outreach_messages om
+         JOIN prospects p ON p.id = om.prospect_id
+         WHERE p.agent_id = ?`,
+      )
+      .bind(this.agentId)
+      .all();
+    return results.map((r: any) => this.mapOutreach(r));
+  }
+
+  async upsertOutreachMessages(set: OutreachMessageSet): Promise<void> {
+    const row = {
+      id: set.id,
+      prospect_id: set.prospectId,
+      opportunity_id: set.opportunityId,
+      business_model_id: set.businessModelId ?? null,
+      whatsapp: set.whatsapp,
+      sms: set.sms,
+      email: this.j(set.email),
+      short_version: set.shortVersion,
+      professional_version: set.professionalVersion,
+      follow_up_1: set.followUp1,
+      follow_up_2: set.followUp2,
+      objection_responses: this.j(set.objectionResponses),
+      price_explanation: set.priceExplanation,
+      call_script: this.j(set.callScript),
+      meeting_agenda: this.j(set.meetingAgenda),
+      proposal_outline: this.j(set.proposalOutline),
+      generator: set.generator,
+      generated_at: this.iso(set.generatedAt),
+      updated_at: this.iso(set.updatedAt),
+    };
+    const cols = Object.keys(row);
+    const updateClause = cols
+      .filter((c) => c !== 'prospect_id')
+      .map((c) => `${c} = excluded.${c}`)
+      .join(', ');
+    await this.db
+      .prepare(
+        `INSERT INTO outreach_messages (${cols.join(', ')}) VALUES (${cols.map(() => '?').join(', ')})
+         ON CONFLICT(prospect_id) DO UPDATE SET ${updateClause}`,
+      )
+      .bind(...cols.map((c) => (row as any)[c]))
+      .run();
+  }
+
+  private mapOutreach(r: any): OutreachMessageSet {
+    return {
+      id: r.id,
+      prospectId: r.prospect_id,
+      opportunityId: r.opportunity_id,
+      businessModelId: r.business_model_id ?? undefined,
+      whatsapp: r.whatsapp,
+      sms: r.sms,
+      email: this.o<{ subject: string; body: string }>(r.email),
+      shortVersion: r.short_version,
+      professionalVersion: r.professional_version,
+      followUp1: r.follow_up_1,
+      followUp2: r.follow_up_2,
+      objectionResponses: this.a<{ objection: string; response: string }>(r.objection_responses),
+      priceExplanation: r.price_explanation,
+      callScript: this.a<string>(r.call_script),
+      meetingAgenda: this.a<string>(r.meeting_agenda),
+      proposalOutline: this.a<string>(r.proposal_outline),
+      generator: r.generator ?? 'local-rule-engine',
+      generatedAt: this.ms(r.generated_at),
+      updatedAt: this.ms(r.updated_at),
     };
   }
 }

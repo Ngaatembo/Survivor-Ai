@@ -403,13 +403,17 @@ export type RecommendedActionKind =
   | 'RUN_EXPERIMENT'
   | 'STOP_OPPORTUNITY'
   | 'ITERATE_OFFER'
-  | 'WAIT_FOR_EVIDENCE';
+  | 'WAIT_FOR_EVIDENCE'
+  | 'CONTACT_PROSPECT'
+  | 'FOLLOW_UP_PROSPECT';
 
 export interface RecommendedAction {
   id: string;
   kind: RecommendedActionKind;
   opportunityId?: string;
   opportunityName?: string;
+  prospectId?: string;
+  prospectName?: string;
   title: string;
   description: string;
   expectedValue: number; // USD, modeled
@@ -417,6 +421,142 @@ export interface RecommendedAction {
   effort: 1 | 2 | 3 | 4 | 5;
   rank: number; // 1 = top action
   createdAt: number;
+}
+
+/* -------------------------------- prospects -------------------------------- */
+
+/**
+ * CRM pipeline states for a real-world prospect (build-spec §8). A prospect
+ * always traces back to the opportunity/business model it was discovered
+ * for — this is real-world execution of a validated model, not a parallel
+ * simulation.
+ */
+export type ProspectStatus =
+  | 'DISCOVERED'
+  | 'QUALIFIED'
+  | 'CONTACTED'
+  | 'REPLIED'
+  | 'INTERESTED'
+  | 'PROPOSAL_SENT'
+  | 'NEGOTIATING'
+  | 'WON'
+  | 'LOST'
+  | 'NOT_INTERESTED'
+  | 'FOLLOW_UP';
+
+export type ProspectPriority = 'HIGH' | 'MEDIUM' | 'LOW' | 'DO_NOT_CONTACT';
+
+/**
+ * What the evidence actually shows about the prospect's web presence.
+ * Defaults to UNKNOWN — the discovery engine never claims NONE/OUTDATED
+ * unless the cited source actually supports that conclusion (build-spec §7:
+ * "Never claim that a business has no website unless the available
+ * evidence supports that conclusion").
+ */
+export type WebsitePresence = 'NONE_FOUND' | 'SOCIAL_ONLY' | 'WEAK_OR_OUTDATED' | 'ADEQUATE' | 'UNKNOWN';
+
+export type ContactChannel = 'PHONE' | 'WHATSAPP' | 'EMAIL' | 'FACEBOOK' | 'INSTAGRAM' | 'WEBSITE_FORM' | 'UNKNOWN';
+
+/** Explainable lead-scoring breakdown (build-spec §12). Every number here is
+ *  derived from a field already stored on the prospect — no opaque score. */
+export interface LeadScoreBreakdown {
+  total: number; // 0..100
+  factors: string[]; // short plain-language reasons, most-significant first
+  expectedDealValue: number;
+  expectedAcquisitionCost: number;
+  expectedProfit: number;
+  expectedTimeToRevenueDays: number;
+  probabilityOfClose: number; // 0..1
+  expectedValue: number; // expectedProfit * probabilityOfClose
+  scoredAt: number;
+}
+
+export interface Prospect {
+  id: string;
+  opportunityId: string;
+  opportunityName: string;
+
+  businessName: string;
+  category: string; // free-text business category (e.g. "Local service business")
+  location: string;
+
+  websitePresence: WebsitePresence;
+  websiteUrl?: string;
+  socialLinks: string[];
+
+  contactChannel: ContactChannel;
+  contactValue?: string; // phone number, page URL, etc. — only if publicly found
+
+  sources: ResearchSource[];
+  evidenceNotes: string;
+
+  priority: ProspectPriority;
+  score: LeadScoreBreakdown;
+
+  status: ProspectStatus;
+  dataSource: DataSource;
+
+  dateDiscovered: number;
+  lastContactAt?: number;
+  nextFollowUpAt?: number;
+  messagesSentCount: number;
+  responsesReceivedCount: number;
+
+  actualRevenue: number; // only ever set from real_revenue records (build-spec §13)
+  notes: string[];
+  reasonLost?: string;
+
+  createdAt: number;
+  updatedAt: number;
+}
+
+export type ProspectInteractionKind =
+  | 'DISCOVERED'
+  | 'QUALIFIED'
+  | 'OUTREACH_GENERATED'
+  | 'STATUS_CHANGE'
+  | 'NOTE'
+  | 'FOLLOW_UP_SET';
+
+/** Append-only observability trail for a prospect (build-spec §23). */
+export interface ProspectInteraction {
+  id: string;
+  prospectId: string;
+  kind: ProspectInteractionKind;
+  summary: string;
+  createdAt: number;
+}
+
+/* --------------------------- outreach_messages ------------------------------ */
+
+/**
+ * AI outreach assistant output (build-spec §9) — prepared for human
+ * approval/execution; SURVIVE AI never sends these automatically. Every
+ * field is generated only from the prospect's own stored, verified fields
+ * and the linked business model — never invented facts about the business.
+ */
+export interface OutreachMessageSet {
+  id: string;
+  prospectId: string;
+  opportunityId: string;
+  businessModelId?: string;
+
+  whatsapp: string;
+  sms: string;
+  email: { subject: string; body: string };
+  shortVersion: string;
+  professionalVersion: string;
+  followUp1: string;
+  followUp2: string;
+  objectionResponses: { objection: string; response: string }[];
+  priceExplanation: string;
+  callScript: string[];
+  meetingAgenda: string[];
+  proposalOutline: string[];
+
+  generator: 'local-rule-engine' | 'llm';
+  generatedAt: number;
+  updatedAt: number;
 }
 
 /* ------------------------------ service wiring ---------------------------- */

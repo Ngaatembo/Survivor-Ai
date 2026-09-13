@@ -11,7 +11,7 @@
  * ========================================================================== */
 
 import type { BusinessModel, MemoryEntry, Opportunity } from '../types';
-import { capRange, dayRange, uid } from './format';
+import { dayRange, uid } from './format';
 
 const CHANNEL_BY_CATEGORY: Record<Opportunity['category'], string> = {
   'Local / Real-World':
@@ -120,7 +120,7 @@ export function generateBusinessModel(opp: Opportunity, memory: MemoryEntry[], n
     followUpSequence,
     objectionHandling: objectionsFor(opp, price),
 
-    deliveryWorkflow: `Scope the specific request → confirm price and timeline → deliver within ${capRange(
+    deliveryWorkflow: `Scope the specific request → confirm price and timeline → deliver within ${dayRange(
       opp.timeToRevenueDaysMin,
       opp.timeToRevenueDaysMax,
     )} → collect payment on delivery (or a deposit up front for larger engagements) → ask for a testimonial/referral.`,

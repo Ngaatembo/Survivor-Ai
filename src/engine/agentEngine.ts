@@ -30,11 +30,13 @@ import { discoverFromKnowledgeBase, advanceStage, scoreAll, rankOpportunities } 
 import { decide, generateReport, strategyFromMemory, type Decision } from '../services/ai';
 import { recordResult, lessonFromExperiment } from '../services/memory';
 import { discoverLive } from '../services/liveResearch';
+import { discoverProspects } from '../services/prospectDiscovery';
 import type { EngineHooks, EngineRepository } from './repository';
 import { createSeedSnapshot, SURVIVAL_THRESHOLD } from './seed';
 import type { LLMProvider, SearchProvider } from '../services/providers/types';
 import { evaluateOpportunity, VALIDATION_SCORE_THRESHOLD } from '../lib/decisionEngine';
 import { generateBusinessModel } from '../lib/businessModel';
+import { generateOutreachMessages } from '../lib/outreachGenerator';
 import { computeRecommendedActions } from '../lib/recommendedActions';
 
 export const STEP_ORDER: CycleStepKey[] = [
@@ -487,6 +489,7 @@ export class AgentEngine {
        * cheap pure functions; only writes when something actually changed,
        * so a healthy system does not flood the decision log with repeats. */
       try {
+        const now = Date.now();
         const researched = (await this.repo.listOpportunities()).filter(
           (o) => o.researchStage !== 'UNDISCOVERED',
         );
@@ -527,11 +530,94 @@ export class AgentEngine {
         for (const o of highValue) {
           await this.repo.upsertBusinessModel(generateBusinessModel(o, memory));
         }
+        let businessModels = await this.repo.listBusinessModels();
+
+        /* --- Real-world pipeline (build-spec §7/§8/§9): dedicated local-
+         * business prospect discovery for the strongest practical route to
+         * revenue — validated Local/Real-World opportunities with a business
+         * model behind them. Only runs when a live search provider is
+         * connected; fails soft to nothing otherwise (never fabricated
+         * prospects). Bounded per cycle so it stays cheap alongside
+         * opportunity discovery in the same cycle. */
+        const pursuable = freshOpps
+          .filter(
+            (o) =>
+              !o.executionBlocked &&
+              o.category === 'Local / Real-World' &&
+              (o.lifecycleState === 'VALIDATING' || o.lifecycleState === 'PROVEN' || o.lifecycleState === 'SCALING'),
+          )
+          .sort((a, b) => (b.score?.total ?? 0) - (a.score?.total ?? 0))
+          .slice(0, 2);
+
+        if (liveSearch?.connected && pursuable.length > 0) {
+          const existingProspects = await this.repo.listProspects();
+          let newProspectsCount = 0;
+          let highPriorityCount = 0;
+          for (const opp of pursuable) {
+            const model = businessModels.find((m) => m.opportunityId === opp.id);
+            const existingNames = existingProspects
+              .filter((p) => p.opportunityId === opp.id)
+              .map((p) => p.businessName);
+            const { prospects, sourcesCount } = await discoverProspects(liveSearch, opp, model, existingNames);
+            if (prospects.length === 0) continue;
+            await this.repo.upsertProspects(prospects);
+            for (const p of prospects) {
+              await this.repo.appendProspectInteraction({
+                id: uid('pint'),
+                prospectId: p.id,
+                kind: p.status === 'QUALIFIED' ? 'QUALIFIED' : 'DISCOVERED',
+                summary: `Discovered via live search (${p.category}) — ${p.priority} priority, lead score ${p.score.total}/100. ${sourcesCount} source(s) reviewed this pass.`,
+                createdAt: now,
+              });
+            }
+            newProspectsCount += prospects.length;
+            highPriorityCount += prospects.filter((p) => p.priority === 'HIGH').length;
+          }
+          if (newProspectsCount > 0) {
+            await hooks.log(
+              'DISCOVERY',
+              `Prospect discovery: found ${newProspectsCount} new local business(es) for "${pursuable[0].name}"${pursuable.length > 1 ? ` and ${pursuable.length - 1} other opportunity(ies)` : ''}${highPriorityCount ? ` — ${highPriorityCount} high priority` : ''}.`,
+            );
+          }
+        }
+
+        // AI outreach assistant (build-spec §9): generate the message set for
+        // any QUALIFIED-or-better prospect that doesn't have one yet. Capped
+        // per cycle; messages are prepared for human approval only — nothing
+        // here sends anything.
+        const allProspects = await this.repo.listProspects();
+        const existingOutreach = await this.repo.listOutreachMessages();
+        const needsOutreach = allProspects
+          .filter(
+            (p) =>
+              p.priority !== 'DO_NOT_CONTACT' &&
+              p.status !== 'WON' &&
+              p.status !== 'LOST' &&
+              p.status !== 'NOT_INTERESTED' &&
+              !existingOutreach.some((m) => m.prospectId === p.id),
+          )
+          .sort((a, b) => b.score.expectedValue - a.score.expectedValue)
+          .slice(0, 5);
+        for (const p of needsOutreach) {
+          const model = businessModels.find((m) => m.opportunityId === p.opportunityId);
+          await this.repo.upsertOutreachMessages(generateOutreachMessages(p, model));
+          await this.repo.appendProspectInteraction({
+            id: uid('pint'),
+            prospectId: p.id,
+            kind: 'OUTREACH_GENERATED',
+            summary: 'Outreach message set generated (WhatsApp/SMS/email/call script) — pending human review and send.',
+            createdAt: now,
+          });
+        }
+        if (needsOutreach.length > 0) {
+          await hooks.log('DECISION', `Prepared outreach messages for ${needsOutreach.length} prospect(s) — review before sending.`);
+        }
 
         // "What should I do now?" — recomputed and fully replaced every cycle.
         const decisions = await this.repo.listDecisions();
-        const businessModels = await this.repo.listBusinessModels();
-        const actions = computeRecommendedActions(freshOpps, decisions, businessModels, memory);
+        businessModels = await this.repo.listBusinessModels();
+        const finalProspects = await this.repo.listProspects();
+        const actions = computeRecommendedActions(freshOpps, decisions, businessModels, memory, finalProspects);
         await this.repo.replaceActions(actions);
         if (actions[0]) {
           await hooks.log('DECISION', `Top recommended action: ${actions[0].title}`);

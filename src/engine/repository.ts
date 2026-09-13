@@ -17,6 +17,9 @@ import type {
   MemoryEntry,
   Opportunity,
   OpportunityDecision,
+  OutreachMessageSet,
+  Prospect,
+  ProspectInteraction,
   RecommendedAction,
   ResearchReport,
   Strategy,
@@ -100,6 +103,20 @@ export interface EngineRepository {
   // fully replaced every cycle rather than accumulated.
   listActions(): Promise<RecommendedAction[]>;
   replaceActions(actions: RecommendedAction[]): Promise<void>;
+
+  // prospects (real-world pipeline — build-spec §7/§8) — upserted by
+  // (opportunityId, businessName) as discovery finds/re-confirms them.
+  listProspects(): Promise<Prospect[]>;
+  upsertProspects(prospects: Prospect[]): Promise<void>;
+
+  // prospect interactions (build-spec §23) — append-only observability trail.
+  listProspectInteractions(): Promise<ProspectInteraction[]>;
+  appendProspectInteraction(interaction: ProspectInteraction): Promise<void>;
+
+  // outreach message sets (AI outreach assistant — build-spec §9) — one per
+  // prospect, regenerated (upserted) as the linked business model improves.
+  listOutreachMessages(): Promise<OutreachMessageSet[]>;
+  upsertOutreachMessages(set: OutreachMessageSet): Promise<void>;
 }
 
 /** Engine callbacks so the host can render progress / stay in sync. */

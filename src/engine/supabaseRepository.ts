@@ -21,6 +21,9 @@ import type {
   MemoryEntry,
   Opportunity,
   OpportunityDecision,
+  OutreachMessageSet,
+  Prospect,
+  ProspectInteraction,
   RecommendedAction,
   ResearchReport,
   Strategy,
@@ -662,6 +665,14 @@ export class SupabaseRepository implements EngineRepository {
     ]) {
       await this.db.from(table).delete().eq('agent_id', this.agentId);
     }
+    // Child tables without their own agent_id column: scope by prospect ids.
+    const { data: prospectRows } = await this.db.from('prospects').select('id').eq('agent_id', this.agentId);
+    const prospectIds = (prospectRows ?? []).map((r: any) => r.id);
+    if (prospectIds.length) {
+      await this.db.from('prospect_interactions').delete().in('prospect_id', prospectIds);
+      await this.db.from('outreach_messages').delete().in('prospect_id', prospectIds);
+    }
+    await this.db.from('prospects').delete().eq('agent_id', this.agentId);
     await this.db.from('agents').delete().eq('id', this.agentId);
     if (seed) await seedSupabase(this.db, this.agentId);
   }
@@ -809,6 +820,8 @@ export class SupabaseRepository implements EngineRepository {
       kind: a.kind,
       opportunity_id: a.opportunityId ?? null,
       opportunity_name: a.opportunityName ?? null,
+      prospect_id: a.prospectId ?? null,
+      prospect_name: a.prospectName ?? null,
       title: a.title,
       description: a.description,
       expected_value: a.expectedValue,
@@ -827,6 +840,8 @@ export class SupabaseRepository implements EngineRepository {
       kind: r.kind,
       opportunityId: r.opportunity_id ?? undefined,
       opportunityName: r.opportunity_name ?? undefined,
+      prospectId: r.prospect_id ?? undefined,
+      prospectName: r.prospect_name ?? undefined,
       title: r.title,
       description: r.description,
       expectedValue: this.n(r.expected_value),
@@ -834,6 +849,214 @@ export class SupabaseRepository implements EngineRepository {
       effort: r.effort,
       rank: r.rank,
       createdAt: Date.parse(r.created_at),
+    };
+  }
+
+  /* ------------------------------- prospects ------------------------------ */
+
+  async listProspects(): Promise<Prospect[]> {
+    const { data, error } = await this.db
+      .from('prospects')
+      .select('*, prospect_sources(*)')
+      .eq('agent_id', this.agentId)
+      .order('created_at', { ascending: false });
+    if (error) throw new Error(error.message);
+    return (data ?? []).map((r: any) => this.mapProspect(r));
+  }
+
+  async upsertProspects(prospects: Prospect[]): Promise<void> {
+    if (prospects.length === 0) return;
+    const rows = prospects.map((p) => this.prospectRow(p));
+    const { error } = await this.db.from('prospects').upsert(rows, { onConflict: 'id' });
+    if (error) throw new Error(error.message);
+
+    const ids = prospects.map((p) => p.id);
+    await this.db.from('prospect_sources').delete().in('prospect_id', ids);
+    const sourceRows = prospects.flatMap((p) =>
+      p.sources.map((s) => ({
+        id: s.id,
+        prospect_id: p.id,
+        title: s.title,
+        url: s.url ?? null,
+        kind: s.kind,
+        note: s.note ?? null,
+      })),
+    );
+    if (sourceRows.length) {
+      const { error: se } = await this.db.from('prospect_sources').upsert(sourceRows, { onConflict: 'id' });
+      if (se) throw new Error(se.message);
+    }
+  }
+
+  private prospectRow(p: Prospect): Record<string, unknown> {
+    return {
+      id: p.id,
+      agent_id: this.agentId,
+      opportunity_id: p.opportunityId,
+      opportunity_name: p.opportunityName,
+      business_name: p.businessName,
+      category: p.category,
+      location: p.location,
+      website_presence: p.websitePresence,
+      website_url: p.websiteUrl ?? null,
+      social_links: p.socialLinks,
+      contact_channel: p.contactChannel,
+      contact_value: p.contactValue ?? null,
+      evidence_notes: p.evidenceNotes,
+      priority: p.priority,
+      score: p.score,
+      status: p.status,
+      data_source: p.dataSource,
+      date_discovered: new Date(p.dateDiscovered).toISOString(),
+      last_contact_at: p.lastContactAt ? new Date(p.lastContactAt).toISOString() : null,
+      next_follow_up_at: p.nextFollowUpAt ? new Date(p.nextFollowUpAt).toISOString() : null,
+      messages_sent_count: p.messagesSentCount,
+      responses_received_count: p.responsesReceivedCount,
+      actual_revenue: p.actualRevenue,
+      notes: p.notes,
+      reason_lost: p.reasonLost ?? null,
+      created_at: new Date(p.createdAt).toISOString(),
+      updated_at: new Date(p.updatedAt).toISOString(),
+    };
+  }
+
+  private mapProspect(r: any): Prospect {
+    return {
+      id: r.id,
+      opportunityId: r.opportunity_id,
+      opportunityName: r.opportunity_name ?? '',
+      businessName: r.business_name,
+      category: r.category ?? '',
+      location: r.location ?? '',
+      websitePresence: r.website_presence ?? 'UNKNOWN',
+      websiteUrl: r.website_url ?? undefined,
+      socialLinks: r.social_links ?? [],
+      contactChannel: r.contact_channel ?? 'UNKNOWN',
+      contactValue: r.contact_value ?? undefined,
+      sources: (r.prospect_sources ?? []).map((s: any) => ({
+        id: s.id,
+        title: s.title,
+        url: s.url ?? undefined,
+        kind: s.kind,
+        note: s.note ?? undefined,
+      })),
+      evidenceNotes: r.evidence_notes ?? '',
+      priority: r.priority,
+      score: r.score ?? { total: 0, factors: [], expectedDealValue: 0, expectedAcquisitionCost: 0, expectedProfit: 0, expectedTimeToRevenueDays: 0, probabilityOfClose: 0, expectedValue: 0, scoredAt: Date.now() },
+      status: r.status,
+      dataSource: r.data_source,
+      dateDiscovered: Date.parse(r.date_discovered) || Date.now(),
+      lastContactAt: r.last_contact_at ? Date.parse(r.last_contact_at) : undefined,
+      nextFollowUpAt: r.next_follow_up_at ? Date.parse(r.next_follow_up_at) : undefined,
+      messagesSentCount: r.messages_sent_count ?? 0,
+      responsesReceivedCount: r.responses_received_count ?? 0,
+      actualRevenue: this.n(r.actual_revenue),
+      notes: r.notes ?? [],
+      reasonLost: r.reason_lost ?? undefined,
+      createdAt: Date.parse(r.created_at) || Date.now(),
+      updatedAt: Date.parse(r.updated_at) || Date.now(),
+    };
+  }
+
+  /* --------------------------- prospect interactions ----------------------- */
+
+  async listProspectInteractions(): Promise<ProspectInteraction[]> {
+    const { data: prospectRows, error: pe } = await this.db
+      .from('prospects')
+      .select('id')
+      .eq('agent_id', this.agentId);
+    if (pe) throw new Error(pe.message);
+    const ids = (prospectRows ?? []).map((r: any) => r.id);
+    if (!ids.length) return [];
+    const { data, error } = await this.db
+      .from('prospect_interactions')
+      .select('*')
+      .in('prospect_id', ids)
+      .order('created_at', { ascending: false })
+      .limit(1000);
+    if (error) throw new Error(error.message);
+    return (data ?? []).map((r: any) => ({
+      id: r.id,
+      prospectId: r.prospect_id,
+      kind: r.kind,
+      summary: r.summary,
+      createdAt: Date.parse(r.created_at) || Date.now(),
+    }));
+  }
+
+  async appendProspectInteraction(interaction: ProspectInteraction): Promise<void> {
+    const { error } = await this.db.from('prospect_interactions').insert({
+      id: interaction.id,
+      prospect_id: interaction.prospectId,
+      kind: interaction.kind,
+      summary: interaction.summary,
+      created_at: new Date(interaction.createdAt).toISOString(),
+    });
+    if (error) throw new Error(error.message);
+  }
+
+  /* ----------------------------- outreach messages -------------------------- */
+
+  async listOutreachMessages(): Promise<OutreachMessageSet[]> {
+    const { data: prospectRows, error: pe } = await this.db
+      .from('prospects')
+      .select('id')
+      .eq('agent_id', this.agentId);
+    if (pe) throw new Error(pe.message);
+    const ids = (prospectRows ?? []).map((r: any) => r.id);
+    if (!ids.length) return [];
+    const { data, error } = await this.db.from('outreach_messages').select('*').in('prospect_id', ids);
+    if (error) throw new Error(error.message);
+    return (data ?? []).map((r: any) => this.mapOutreach(r));
+  }
+
+  async upsertOutreachMessages(set: OutreachMessageSet): Promise<void> {
+    const row = {
+      id: set.id,
+      prospect_id: set.prospectId,
+      opportunity_id: set.opportunityId,
+      business_model_id: set.businessModelId ?? null,
+      whatsapp: set.whatsapp,
+      sms: set.sms,
+      email: set.email,
+      short_version: set.shortVersion,
+      professional_version: set.professionalVersion,
+      follow_up_1: set.followUp1,
+      follow_up_2: set.followUp2,
+      objection_responses: set.objectionResponses,
+      price_explanation: set.priceExplanation,
+      call_script: set.callScript,
+      meeting_agenda: set.meetingAgenda,
+      proposal_outline: set.proposalOutline,
+      generator: set.generator,
+      generated_at: new Date(set.generatedAt).toISOString(),
+      updated_at: new Date(set.updatedAt).toISOString(),
+    };
+    const { error } = await this.db.from('outreach_messages').upsert(row, { onConflict: 'prospect_id' });
+    if (error) throw new Error(error.message);
+  }
+
+  private mapOutreach(r: any): OutreachMessageSet {
+    return {
+      id: r.id,
+      prospectId: r.prospect_id,
+      opportunityId: r.opportunity_id,
+      businessModelId: r.business_model_id ?? undefined,
+      whatsapp: r.whatsapp,
+      sms: r.sms,
+      email: r.email ?? { subject: '', body: '' },
+      shortVersion: r.short_version,
+      professionalVersion: r.professional_version,
+      followUp1: r.follow_up_1,
+      followUp2: r.follow_up_2,
+      objectionResponses: r.objection_responses ?? [],
+      priceExplanation: r.price_explanation,
+      callScript: r.call_script ?? [],
+      meetingAgenda: r.meeting_agenda ?? [],
+      proposalOutline: r.proposal_outline ?? [],
+      generator: r.generator ?? 'local-rule-engine',
+      generatedAt: Date.parse(r.generated_at) || Date.now(),
+      updatedAt: Date.parse(r.updated_at) || Date.now(),
     };
   }
 }

@@ -18,6 +18,9 @@ import type {
   MemoryEntry,
   Opportunity,
   OpportunityDecision,
+  OutreachMessageSet,
+  Prospect,
+  ProspectInteraction,
   RecommendedAction,
   ResearchReport,
   Strategy,
@@ -59,6 +62,9 @@ function seedInitialState() {
     businessModels: [] as BusinessModel[],
     decisions: [] as OpportunityDecision[],
     actions: [] as RecommendedAction[],
+    prospects: [] as Prospect[],
+    prospectInteractions: [] as ProspectInteraction[],
+    outreachMessages: [] as OutreachMessageSet[],
   };
 }
 
@@ -92,6 +98,9 @@ interface SurviveState {
   businessModels: BusinessModel[];
   decisions: OpportunityDecision[];
   actions: RecommendedAction[];
+  prospects: Prospect[];
+  prospectInteractions: ProspectInteraction[];
+  outreachMessages: OutreachMessageSet[];
   loop: LoopState;
   backend: BackendSyncState;
 
@@ -201,6 +210,9 @@ export const useStore = create<SurviveState>()(
               businessModels: state.businessModels,
               decisions: state.decisions,
               actions: state.actions,
+              prospects: state.prospects,
+              prospectInteractions: state.prospectInteractions,
+              outreachMessages: state.outreachMessages,
               backend: {
                 connected: true,
                 syncing: false,

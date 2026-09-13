@@ -17,6 +17,9 @@ import type {
   MemoryEntry,
   Opportunity,
   OpportunityDecision,
+  OutreachMessageSet,
+  Prospect,
+  ProspectInteraction,
   RecommendedAction,
   ResearchReport,
   Strategy,
@@ -52,6 +55,9 @@ export function createStoreRepository(get: Get, set: Set, reseed: () => StateSha
   let businessModels: BusinessModel[] = [];
   let decisions: OpportunityDecision[] = [];
   let actions: RecommendedAction[] = [];
+  let prospects: Prospect[] = [];
+  let prospectInteractions: ProspectInteraction[] = [];
+  let outreachMessages: OutreachMessageSet[] = [];
   return {
     async getAgent() {
       return get().agent;
@@ -186,6 +192,9 @@ export function createStoreRepository(get: Get, set: Set, reseed: () => StateSha
       businessModels = [];
       decisions = [];
       actions = [];
+      prospects = [];
+      prospectInteractions = [];
+      outreachMessages = [];
       set(reseed() as any);
     },
 
@@ -208,6 +217,29 @@ export function createStoreRepository(get: Get, set: Set, reseed: () => StateSha
     },
     async replaceActions(next) {
       actions = next;
+    },
+
+    async listProspects() {
+      return prospects;
+    },
+    async upsertProspects(next) {
+      const byKey = new Map(prospects.map((p) => [`${p.opportunityId}::${p.businessName.toLowerCase()}`, p]));
+      for (const p of next) byKey.set(`${p.opportunityId}::${p.businessName.toLowerCase()}`, p);
+      prospects = [...byKey.values()];
+    },
+
+    async listProspectInteractions() {
+      return prospectInteractions;
+    },
+    async appendProspectInteraction(interaction) {
+      prospectInteractions = [interaction, ...prospectInteractions].slice(0, 1000);
+    },
+
+    async listOutreachMessages() {
+      return outreachMessages;
+    },
+    async upsertOutreachMessages(setMsg) {
+      outreachMessages = [setMsg, ...outreachMessages.filter((m) => m.prospectId !== setMsg.prospectId)];
     },
   };
 }

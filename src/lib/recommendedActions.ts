@@ -11,6 +11,7 @@ import type {
   BusinessModel,
   Opportunity,
   OpportunityDecision,
+  Prospect,
   RecommendedAction,
   RecommendedActionKind,
 } from '../types';
@@ -27,6 +28,7 @@ function latestDecisionFor(opportunityId: string, decisions: OpportunityDecision
 interface ActionInput {
   kind: RecommendedActionKind;
   opportunity?: Opportunity;
+  prospect?: Prospect;
   title: string;
   description: string;
   expectedValue: number;
@@ -34,11 +36,14 @@ interface ActionInput {
   effort: RecommendedAction['effort'];
 }
 
+const DAY_MS = 24 * 60 * 60 * 1000;
+
 export function computeRecommendedActions(
   opportunities: Opportunity[],
   decisions: OpportunityDecision[],
   businessModels: BusinessModel[],
   memory: MemoryEntry[],
+  prospects: Prospect[] = [],
   now: number = Date.now(),
   recentWindowMs: number = 2 * 60 * 60 * 1000,
 ): RecommendedAction[] {
@@ -111,13 +116,54 @@ export function computeRecommendedActions(
     }
   }
 
+  // Prospect-driven actions (build-spec §16 examples: "Contact Business X",
+  // "Follow up with Business Y"). Never suggests contacting a DO_NOT_CONTACT
+  // prospect or one already past outreach without a due follow-up.
+  for (const p of prospects) {
+    if (p.priority === 'DO_NOT_CONTACT' || p.status === 'WON' || p.status === 'LOST' || p.status === 'NOT_INTERESTED') continue;
+
+    if (p.status === 'DISCOVERED' || p.status === 'QUALIFIED') {
+      inputs.push({
+        kind: 'CONTACT_PROSPECT',
+        prospect: p,
+        title: `Contact ${p.businessName}`,
+        description: `${p.priority} priority — ${p.evidenceNotes} Estimated deal $${p.score.expectedDealValue.toFixed(0)}, ~${Math.round(p.score.probabilityOfClose * 100)}% probability of close.`,
+        expectedValue: p.score.expectedValue,
+        urgency: p.priority === 'HIGH' ? 5 : p.priority === 'MEDIUM' ? 3 : 1,
+        effort: 1,
+      });
+    } else if (p.nextFollowUpAt && p.nextFollowUpAt <= now) {
+      inputs.push({
+        kind: 'FOLLOW_UP_PROSPECT',
+        prospect: p,
+        title: `Follow up with ${p.businessName}`,
+        description: `Status ${p.status.replace('_', ' ').toLowerCase()} — follow-up was due ${new Date(p.nextFollowUpAt).toLocaleDateString()}.`,
+        expectedValue: p.score.expectedValue * 0.8,
+        urgency: 4,
+        effort: 1,
+      });
+    } else if (p.status === 'CONTACTED' && p.lastContactAt && now - p.lastContactAt > 3 * DAY_MS) {
+      inputs.push({
+        kind: 'FOLLOW_UP_PROSPECT',
+        prospect: p,
+        title: `Follow up with ${p.businessName}`,
+        description: `Contacted ${Math.round((now - p.lastContactAt) / DAY_MS)} day(s) ago with no recorded reply yet.`,
+        expectedValue: p.score.expectedValue * 0.6,
+        urgency: 2,
+        effort: 1,
+      });
+    }
+  }
+
   inputs.sort((a, b) => b.expectedValue - a.expectedValue || b.urgency - a.urgency);
 
-  return inputs.slice(0, 8).map((input, i) => ({
+  return inputs.slice(0, 10).map((input, i) => ({
     id: uid('act'),
     kind: input.kind,
     opportunityId: input.opportunity?.id,
     opportunityName: input.opportunity?.name,
+    prospectId: input.prospect?.id,
+    prospectName: input.prospect?.businessName,
     title: input.title,
     description: input.description,
     expectedValue: Math.round(input.expectedValue * 100) / 100,
