@@ -5,6 +5,7 @@ import { CommandCenter } from './components/CommandCenter';
 import { ResearchEngine } from './components/ResearchEngine';
 import { OpportunityExplorer } from './components/OpportunityExplorer';
 import { Prospects } from './components/Prospects';
+import { Projects } from './components/Projects';
 import { DecisionCenter } from './components/DecisionCenter';
 import { Experiments } from './components/Experiments';
 import { MemoryView } from './components/MemoryView';
@@ -19,6 +20,7 @@ export type View =
   | 'research'
   | 'explorer'
   | 'prospects'
+  | 'projects'
   | 'decision'
   | 'experiments'
   | 'memory'
@@ -32,6 +34,7 @@ const NAV: { id: View; label: string; icon: string; section: string }[] = [
   { id: 'research', label: 'Research Engine', icon: '◎', section: 'OVERVIEW' },
   { id: 'explorer', label: 'Opportunity Explorer', icon: '▤', section: 'DISCOVERY' },
   { id: 'prospects', label: 'Prospects / CRM', icon: '☎', section: 'DISCOVERY' },
+  { id: 'projects', label: 'Delivery Projects', icon: '🛠', section: 'DISCOVERY' },
   { id: 'decision', label: 'Decision Center', icon: '➤', section: 'DISCOVERY' },
   { id: 'reports', label: 'Research Reports', icon: '▦', section: 'DISCOVERY' },
   { id: 'experiments', label: 'Experiments', icon: '▶', section: 'OPERATIONS' },
@@ -46,6 +49,7 @@ const TITLES: Record<View, string> = {
   research: 'AI Research Engine',
   explorer: 'Opportunity Explorer',
   prospects: 'Prospects / CRM',
+  projects: 'Delivery Projects',
   decision: 'AI Decision Center',
   experiments: 'Experiment System',
   memory: 'Agent Memory',
@@ -72,6 +76,7 @@ export function App() {
   const experiments = useStore((s) => s.experiments);
   const events = useStore((s) => s.events);
   const prospects = useStore((s) => s.prospects);
+  const projects = useStore((s) => s.projects);
   const backend = useStore((s) => s.backend);
 
   const drawerOpp = drawerId ? opportunities.find((o) => o.id === drawerId) ?? null : null;
@@ -111,6 +116,9 @@ export function App() {
                   )}
                   {n.id === 'prospects' && prospects.length > 0 && (
                     <span className="badge-count">{prospects.length}</span>
+                  )}
+                  {n.id === 'projects' && projects.filter((p) => p.status === 'ACTIVE').length > 0 && (
+                    <span className="badge-count">{projects.filter((p) => p.status === 'ACTIVE').length}</span>
                   )}
                   {n.id === 'experiments' && experiments.length > 0 && (
                     <span className="badge-count">{experiments.length}</span>
@@ -203,6 +211,7 @@ export function App() {
           {view === 'research' && <ResearchEngine onOpenOpp={openOpp} />}
           {view === 'explorer' && <OpportunityExplorer />}
           {view === 'prospects' && <Prospects />}
+          {view === 'projects' && <Projects />}
           {view === 'decision' && <DecisionCenter />}
           {view === 'experiments' && <Experiments />}
           {view === 'memory' && <MemoryView />}

@@ -1,8 +1,12 @@
 /* ============================================================================
  * Backend API client — the frontend's ONLY connection to the Cloudflare
- * Worker backend. Read-only: this file intentionally exposes no way to
- * write wallet balance, experiment allocation, or any financial record from
- * the browser (see PHASE 30 / "Never allow frontend to directly control...").
+ * Worker backend. Mostly read-only: this file intentionally exposes no way
+ * to write wallet balance, experiment allocation, or any financial record
+ * from the browser (see PHASE 30 / "Never allow frontend to directly
+ * control..."). The three narrow exceptions (Phase 3 CRM/offer/project
+ * write paths below) touch only their own single table each and never
+ * wallet/experiment data — the autonomous loop itself never calls these;
+ * they exist so a human can record real-world outcomes from the dashboard.
  *
  * TRIGGER_SECRET is never referenced here and never sent from the browser —
  * the /cycles/run endpoint is not called from the frontend at all. The
@@ -14,13 +18,18 @@ import type {
   AgentCycle,
   AgentEvent,
   BusinessModel,
+  DesignBrief,
   Experiment,
   MemoryEntry,
+  Offer,
   Opportunity,
   OpportunityDecision,
   OutreachMessageSet,
+  Project,
+  ProjectMilestoneKey,
   Prospect,
   ProspectInteraction,
+  ProspectStatus,
   RecommendedAction,
   ResearchReport,
   Strategy,
@@ -58,6 +67,9 @@ export interface BackendState {
   prospects: Prospect[];
   prospectInteractions: ProspectInteraction[];
   outreachMessages: OutreachMessageSet[];
+  offers: Offer[];
+  designBriefs: DesignBrief[];
+  projects: Project[];
 }
 
 export class BackendError extends Error {
@@ -112,4 +124,67 @@ export function fetchBackendHealth(): Promise<BackendHealth> {
 
 export function fetchBackendState(): Promise<BackendState> {
   return getJson<BackendState>('/state');
+}
+
+async function postJson<T>(path: string, body: unknown): Promise<T> {
+  if (!env.apiBaseUrl) throw new BackendError('VITE_API_BASE_URL is not configured');
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), TIMEOUT_MS);
+  try {
+    const res = await fetch(`${env.apiBaseUrl}${path}`, {
+      method: 'POST',
+      signal: controller.signal,
+      headers: { accept: 'application/json', 'content-type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    let responseBody: any = null;
+    try {
+      responseBody = await res.json();
+    } catch {
+      // fall through — body stays null, handled below
+    }
+    if (!res.ok) {
+      throw new BackendError(responseBody?.error ?? `Backend returned HTTP ${res.status}`, responseBody);
+    }
+    if (responseBody && responseBody.ok === false) {
+      throw new BackendError(responseBody.error ?? 'Backend reported an error', responseBody);
+    }
+    return responseBody as T;
+  } catch (e) {
+    if (e instanceof BackendError) throw e;
+    if ((e as Error)?.name === 'AbortError') {
+      throw new BackendError(`Backend request timed out after ${TIMEOUT_MS}ms (${path})`, e);
+    }
+    throw new BackendError(`Could not reach backend at ${env.apiBaseUrl}${path}: ${(e as Error).message}`, e);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/** CRM write path (Phase 3): record a real-world status change for a
+ *  prospect. This is the only way a prospect ever advances past QUALIFIED —
+ *  SURVIVE AI never contacts anyone or observes real replies itself. */
+export function updateProspectStatus(
+  prospectId: string,
+  status: ProspectStatus,
+  reasonLost?: string,
+): Promise<{ ok: true; prospectId: string; status: ProspectStatus }> {
+  return postJson('/prospects/status', { prospectId, status, reasonLost });
+}
+
+/** Mark a drafted offer sent/accepted/declined — a human sends it, this app
+ *  never does. */
+export function updateOfferStatus(
+  offerId: string,
+  status: Offer['status'],
+): Promise<{ ok: true; offerId: string; status: Offer['status'] }> {
+  return postJson('/offers/status', { offerId, status });
+}
+
+/** Advance a delivery project's milestone. */
+export function advanceProjectMilestone(
+  projectId: string,
+  milestone: ProjectMilestoneKey,
+): Promise<{ ok: true; projectId: string; milestone: ProjectMilestoneKey }> {
+  return postJson('/projects/milestone', { projectId, milestone });
 }

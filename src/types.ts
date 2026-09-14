@@ -405,7 +405,9 @@ export type RecommendedActionKind =
   | 'ITERATE_OFFER'
   | 'WAIT_FOR_EVIDENCE'
   | 'CONTACT_PROSPECT'
-  | 'FOLLOW_UP_PROSPECT';
+  | 'FOLLOW_UP_PROSPECT'
+  | 'SEND_OFFER'
+  | 'ADVANCE_PROJECT';
 
 export interface RecommendedAction {
   id: string;
@@ -516,7 +518,9 @@ export type ProspectInteractionKind =
   | 'OUTREACH_GENERATED'
   | 'STATUS_CHANGE'
   | 'NOTE'
-  | 'FOLLOW_UP_SET';
+  | 'FOLLOW_UP_SET'
+  | 'OFFER_DRAFTED'
+  | 'PROJECT_STARTED';
 
 /** Append-only observability trail for a prospect (build-spec §23). */
 export interface ProspectInteraction {
@@ -556,6 +560,118 @@ export interface OutreachMessageSet {
 
   generator: 'local-rule-engine' | 'llm';
   generatedAt: number;
+  updatedAt: number;
+}
+
+/* --------------------------------- offers ----------------------------------- */
+
+/**
+ * A concrete, sendable package generated once a prospect is engaged
+ * (INTERESTED or further) and a business model exists for its opportunity
+ * (Phase 3 — offer + delivery). Never fabricates a fact about the
+ * business: everything here is derived from the prospect's own stored
+ * fields and the linked business model. Never sent automatically — a
+ * human reviews and sends it (spec §20, carried forward).
+ */
+export type OfferStatus = 'DRAFT' | 'SENT' | 'ACCEPTED' | 'DECLINED';
+
+export interface WebsiteBrief {
+  sitemap: string[];
+  copyDirection: string;
+  ctaStrategy: string;
+  brandDirection: string;
+  seoBasics: string[];
+  requiredSections: string[];
+  requiredAssets: string[];
+}
+
+export interface Offer {
+  id: string;
+  prospectId: string;
+  prospectName: string;
+  opportunityId: string;
+  businessModelId?: string;
+
+  price: number;
+  timelineDaysMin: number;
+  timelineDaysMax: number;
+  deliverables: string[];
+  gapAnalysis?: string; // only included when the evidence actually supports one
+
+  websiteBrief: WebsiteBrief;
+
+  status: OfferStatus;
+  generator: 'local-rule-engine' | 'llm';
+  generatedAt: number;
+  updatedAt: number;
+}
+
+/* ------------------------------ design briefs ------------------------------- */
+
+/**
+ * Structured design brief generated alongside every drafted offer (Phase 3).
+ * No image-generation integration is wired into this deployment, so
+ * `assetStatus` stays NOT_CONFIGURED — the brief itself is complete and
+ * human-usable regardless, and nothing here fabricates an asset URL.
+ */
+export type DesignAssetStatus = 'NOT_CONFIGURED' | 'GENERATING' | 'READY';
+
+export interface DesignBrief {
+  id: string;
+  offerId: string;
+  prospectId: string;
+
+  homepageConcept: string;
+  heroSection: string;
+  logoDirection: string;
+  socialGraphics: string[];
+  colorDirectionNote: string;
+
+  assetStatus: DesignAssetStatus;
+  generatedAt: number;
+  updatedAt: number;
+}
+
+/* --------------------------------- projects ---------------------------------- */
+
+/**
+ * A lightweight delivery project, created automatically the moment a
+ * prospect reaches WON against a drafted offer (Phase 3). Tracks agreed
+ * price/timeline and standard milestones so "what's next to deliver" is a
+ * simple query — this is delivery tracking, never a second wallet: real
+ * money is recorded separately in the Phase 4 revenue ledger, not here.
+ */
+export type ProjectMilestoneKey =
+  | 'KICKOFF'
+  | 'CONTENT_COLLECTED'
+  | 'DESIGN_APPROVED'
+  | 'BUILD'
+  | 'REVIEW'
+  | 'DELIVERED';
+
+export interface ProjectMilestone {
+  key: ProjectMilestoneKey;
+  label: string;
+  status: 'pending' | 'active' | 'done';
+  completedAt?: number;
+}
+
+export type ProjectStatus = 'ACTIVE' | 'DELIVERED' | 'CANCELLED';
+
+export interface Project {
+  id: string;
+  prospectId: string;
+  prospectName: string;
+  offerId: string;
+  opportunityId: string;
+
+  agreedPrice: number;
+  agreedTimelineDaysMax: number;
+  milestones: ProjectMilestone[];
+  status: ProjectStatus;
+
+  startedAt: number;
+  deliveredAt?: number;
   updatedAt: number;
 }
 

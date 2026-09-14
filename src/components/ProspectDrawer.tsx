@@ -1,7 +1,8 @@
+import { useState } from 'react';
 import { useStore } from '../store';
 import { Badge, DataSourceBadge, KV } from './ui';
 import { dateTime } from '../lib/format';
-import type { Prospect } from '../types';
+import type { Prospect, ProspectStatus } from '../types';
 
 const PRIORITY_TONE: Record<Prospect['priority'], 'green' | 'blue' | 'amber' | 'gray'> = {
   HIGH: 'green',
@@ -18,11 +19,40 @@ const PRESENCE_LABEL: Record<Prospect['websitePresence'], string> = {
   UNKNOWN: 'Website status not yet determined',
 };
 
+/** Quick-action next statuses shown as buttons — the full state machine
+ *  still allows any status via the CRM write path; these are just the
+ *  common forward moves from wherever the prospect currently sits. */
+const NEXT_STATUS_OPTIONS: Partial<Record<ProspectStatus, ProspectStatus[]>> = {
+  DISCOVERED: ['CONTACTED', 'NOT_INTERESTED'],
+  QUALIFIED: ['CONTACTED', 'NOT_INTERESTED'],
+  CONTACTED: ['REPLIED', 'FOLLOW_UP', 'NOT_INTERESTED'],
+  REPLIED: ['INTERESTED', 'NOT_INTERESTED'],
+  INTERESTED: ['PROPOSAL_SENT', 'NOT_INTERESTED'],
+  PROPOSAL_SENT: ['NEGOTIATING', 'WON', 'LOST'],
+  NEGOTIATING: ['WON', 'LOST'],
+  FOLLOW_UP: ['REPLIED', 'NOT_INTERESTED'],
+};
+
 export function ProspectDrawer({ prospect, onClose }: { prospect: Prospect; onClose: () => void }) {
   const outreach = useStore((s) => s.outreachMessages.find((m) => m.prospectId === prospect.id));
+  const offer = useStore((s) => s.offers.find((o) => o.prospectId === prospect.id));
+  const brief = useStore((s) => (offer ? s.designBriefs.find((b) => b.offerId === offer.id) : undefined));
+  const project = useStore((s) => s.projects.find((p) => p.prospectId === prospect.id));
   const interactions = useStore((s) =>
     s.prospectInteractions.filter((i) => i.prospectId === prospect.id).slice(0, 10),
   );
+  const updateProspectStatus = useStore((s) => s.updateProspectStatus);
+  const updateOfferStatus = useStore((s) => s.updateOfferStatus);
+  const [updating, setUpdating] = useState(false);
+
+  const setStatus = async (status: ProspectStatus) => {
+    setUpdating(true);
+    try {
+      await updateProspectStatus(prospect.id, status);
+    } finally {
+      setUpdating(false);
+    }
+  };
 
   return (
     <>
@@ -50,6 +80,24 @@ export function ProspectDrawer({ prospect, onClose }: { prospect: Prospect; onCl
             <strong>Not recommended for outreach.</strong> {prospect.evidenceNotes}
           </div>
         )}
+
+        <div className="drawer-section">
+          <h3>Record outcome</h3>
+          <p className="faint small" style={{ marginBottom: 8 }}>
+            This is the only way a prospect advances — SURVIVE AI never contacts anyone or observes real
+            replies itself.
+          </p>
+          <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+            {(NEXT_STATUS_OPTIONS[prospect.status] ?? []).map((s) => (
+              <button key={s} className="btn small" disabled={updating} onClick={() => setStatus(s)}>
+                Mark {s.replace('_', ' ').toLowerCase()}
+              </button>
+            ))}
+            {(NEXT_STATUS_OPTIONS[prospect.status] ?? []).length === 0 && (
+              <span className="faint small">No further status changes suggested from here.</span>
+            )}
+          </div>
+        </div>
 
         <div className="drawer-section">
           <h3>Why this prospect</h3>
@@ -86,6 +134,77 @@ export function ProspectDrawer({ prospect, onClose }: { prospect: Prospect; onCl
             <KV k="Value" v={prospect.contactValue ?? 'not found'} />
           </div>
         </div>
+
+        {offer ? (
+          <div className="drawer-section">
+            <h3>Offer — ${offer.price} · {offer.timelineDaysMin}-{offer.timelineDaysMax} days</h3>
+            <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 10 }}>
+              <span className="stage-badge lit small">{offer.status}</span>
+              {offer.status === 'DRAFT' && (
+                <button className="btn small" onClick={() => updateOfferStatus(offer.id, 'SENT')}>
+                  Mark sent
+                </button>
+              )}
+            </div>
+            {offer.gapAnalysis && (
+              <p className="small" style={{ marginBottom: 8 }}>
+                <span className="mono-label">Gap analysis — </span>
+                {offer.gapAnalysis}
+              </p>
+            )}
+            <h4 className="small" style={{ marginBottom: 4 }}>Deliverables</h4>
+            <ul style={{ paddingLeft: 18, marginBottom: 10 }}>
+              {offer.deliverables.map((d, i) => (
+                <li key={i} className="small muted" style={{ marginBottom: 3 }}>{d}</li>
+              ))}
+            </ul>
+            <h4 className="small" style={{ marginBottom: 4 }}>Website brief</h4>
+            <p className="small" style={{ marginBottom: 6 }}>
+              <span className="mono-label">Sitemap — </span>
+              {offer.websiteBrief.sitemap.join(' · ')}
+            </p>
+            <p className="small" style={{ marginBottom: 6 }}>
+              <span className="mono-label">Copy direction — </span>
+              {offer.websiteBrief.copyDirection}
+            </p>
+            <p className="small" style={{ marginBottom: 6 }}>
+              <span className="mono-label">CTA strategy — </span>
+              {offer.websiteBrief.ctaStrategy}
+            </p>
+            {brief && (
+              <>
+                <h4 className="small" style={{ marginTop: 10, marginBottom: 4 }}>Design brief</h4>
+                <p className="small" style={{ marginBottom: 6 }}>
+                  <span className="mono-label">Homepage concept — </span>
+                  {brief.homepageConcept}
+                </p>
+                <p className="small" style={{ marginBottom: 6 }}>
+                  <span className="mono-label">Hero section — </span>
+                  {brief.heroSection}
+                </p>
+                <p className="faint small">Asset generation: {brief.assetStatus.replace('_', ' ').toLowerCase()}</p>
+              </>
+            )}
+          </div>
+        ) : (
+          ['INTERESTED', 'PROPOSAL_SENT', 'NEGOTIATING', 'WON'].includes(prospect.status) && (
+            <div className="drawer-section">
+              <div className="empty">
+                An offer + design brief will be drafted automatically on the next research cycle.
+              </div>
+            </div>
+          )
+        )}
+
+        {project && (
+          <div className="drawer-section">
+            <h3>Delivery project — {project.status}</h3>
+            <p className="faint small" style={{ marginBottom: 8 }}>
+              Agreed ${project.agreedPrice} over ~{project.agreedTimelineDaysMax} days. Manage milestones from
+              the Delivery Projects view.
+            </p>
+          </div>
+        )}
 
         {outreach ? (
           <div className="drawer-section">

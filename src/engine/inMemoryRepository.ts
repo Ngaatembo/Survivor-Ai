@@ -10,11 +10,15 @@ import type {
   AgentEvent,
   BusinessModel,
   CycleStepKey,
+  DesignBrief,
   Experiment,
   MemoryEntry,
+  Offer,
   Opportunity,
   OpportunityDecision,
   OutreachMessageSet,
+  Project,
+  ProjectMilestoneKey,
   Prospect,
   ProspectInteraction,
   RecommendedAction,
@@ -22,6 +26,7 @@ import type {
   Strategy,
   Transaction,
 } from '../types';
+import { advanceMilestone } from '../lib/projectTracker';
 import type { EngineRepository } from './repository';
 
 interface InMemoryState {
@@ -40,6 +45,9 @@ interface InMemoryState {
   prospects: Prospect[];
   prospectInteractions: ProspectInteraction[];
   outreachMessages: OutreachMessageSet[];
+  offers: Offer[];
+  designBriefs: DesignBrief[];
+  projects: Project[];
 }
 
 export class InMemoryRepository implements EngineRepository {
@@ -59,6 +67,9 @@ export class InMemoryRepository implements EngineRepository {
     prospects: [],
     prospectInteractions: [],
     outreachMessages: [],
+    offers: [],
+    designBriefs: [],
+    projects: [],
   };
 
   /** Load a snapshot (e.g. produced by createSeedState). */
@@ -204,6 +215,9 @@ export class InMemoryRepository implements EngineRepository {
       prospects: [],
       prospectInteractions: [],
       outreachMessages: [],
+      offers: [],
+      designBriefs: [],
+      projects: [],
     };
   }
 
@@ -255,5 +269,38 @@ export class InMemoryRepository implements EngineRepository {
       set,
       ...this.state.outreachMessages.filter((m) => m.prospectId !== set.prospectId),
     ];
+  }
+
+  async listOffers() {
+    return this.state.offers;
+  }
+  async upsertOffer(offer: Offer) {
+    this.state.offers = [offer, ...this.state.offers.filter((o) => o.prospectId !== offer.prospectId)];
+  }
+  async updateOfferStatus(offerId: string, status: Offer['status']) {
+    this.state.offers = this.state.offers.map((o) => (o.id === offerId ? { ...o, status, updatedAt: Date.now() } : o));
+  }
+
+  async listDesignBriefs() {
+    return this.state.designBriefs;
+  }
+  async upsertDesignBrief(brief: DesignBrief) {
+    this.state.designBriefs = [brief, ...this.state.designBriefs.filter((b) => b.offerId !== brief.offerId)];
+  }
+
+  async listProjects() {
+    return this.state.projects;
+  }
+  async upsertProject(project: Project) {
+    this.state.projects = [project, ...this.state.projects.filter((p) => p.prospectId !== project.prospectId)];
+  }
+  async advanceProjectMilestone(projectId: string, milestone: ProjectMilestoneKey) {
+    this.state.projects = this.state.projects.map((p) => (p.id === projectId ? advanceMilestone(p, milestone) : p));
+  }
+
+  async updateProspectStatus(prospectId: string, status: Prospect['status'], reasonLost?: string) {
+    this.state.prospects = this.state.prospects.map((p) =>
+      p.id === prospectId ? { ...p, status, reasonLost: reasonLost ?? p.reasonLost, updatedAt: Date.now() } : p,
+    );
   }
 }

@@ -16,12 +16,17 @@ import type {
   BusinessModel,
   CycleStep,
   CycleStepKey,
+  DesignBrief,
   EventType,
   Experiment,
   MemoryEntry,
+  Offer,
   Opportunity,
   OpportunityDecision,
   OutreachMessageSet,
+  Project,
+  ProjectMilestone,
+  ProjectMilestoneKey,
   Prospect,
   ProspectInteraction,
   RecommendedAction,
@@ -29,8 +34,10 @@ import type {
   Strategy,
   Transaction,
   ScoreBreakdown,
+  WebsiteBrief,
 } from '../types';
 import type { EngineRepository } from './repository';
+import { advanceMilestone } from '../lib/projectTracker';
 import { createSeedSnapshot, AGENT_ID } from './seed';
 
 export interface SupabaseClientLike {
@@ -671,6 +678,11 @@ export class SupabaseRepository implements EngineRepository {
     if (prospectIds.length) {
       await this.db.from('prospect_interactions').delete().in('prospect_id', prospectIds);
       await this.db.from('outreach_messages').delete().in('prospect_id', prospectIds);
+      const { data: offerRows } = await this.db.from('offers').select('id').in('prospect_id', prospectIds);
+      const offerIds = (offerRows ?? []).map((r: any) => r.id);
+      if (offerIds.length) await this.db.from('design_briefs').delete().in('offer_id', offerIds);
+      await this.db.from('projects').delete().in('prospect_id', prospectIds);
+      await this.db.from('offers').delete().in('prospect_id', prospectIds);
     }
     await this.db.from('prospects').delete().eq('agent_id', this.agentId);
     await this.db.from('agents').delete().eq('id', this.agentId);
@@ -1058,6 +1070,189 @@ export class SupabaseRepository implements EngineRepository {
       generatedAt: Date.parse(r.generated_at) || Date.now(),
       updatedAt: Date.parse(r.updated_at) || Date.now(),
     };
+  }
+
+  /* --------------------------------- offers --------------------------------- */
+
+  async listOffers(): Promise<Offer[]> {
+    const { data: prospectRows, error: pe } = await this.db.from('prospects').select('id').eq('agent_id', this.agentId);
+    if (pe) throw new Error(pe.message);
+    const ids = (prospectRows ?? []).map((r: any) => r.id);
+    if (!ids.length) return [];
+    const { data, error } = await this.db.from('offers').select('*').in('prospect_id', ids);
+    if (error) throw new Error(error.message);
+    return (data ?? []).map((r: any) => this.mapOffer(r));
+  }
+
+  async upsertOffer(offer: Offer): Promise<void> {
+    const row = {
+      id: offer.id,
+      prospect_id: offer.prospectId,
+      prospect_name: offer.prospectName,
+      opportunity_id: offer.opportunityId,
+      business_model_id: offer.businessModelId ?? null,
+      price: offer.price,
+      timeline_days_min: offer.timelineDaysMin,
+      timeline_days_max: offer.timelineDaysMax,
+      deliverables: offer.deliverables,
+      gap_analysis: offer.gapAnalysis ?? null,
+      website_brief: offer.websiteBrief,
+      status: offer.status,
+      generator: offer.generator,
+      generated_at: new Date(offer.generatedAt).toISOString(),
+      updated_at: new Date(offer.updatedAt).toISOString(),
+    };
+    const { error } = await this.db.from('offers').upsert(row, { onConflict: 'prospect_id' });
+    if (error) throw new Error(error.message);
+  }
+
+  async updateOfferStatus(offerId: string, status: Offer['status']): Promise<void> {
+    const { error } = await this.db
+      .from('offers')
+      .update({ status, updated_at: new Date().toISOString() })
+      .eq('id', offerId);
+    if (error) throw new Error(error.message);
+  }
+
+  private mapOffer(r: any): Offer {
+    return {
+      id: r.id,
+      prospectId: r.prospect_id,
+      prospectName: r.prospect_name ?? '',
+      opportunityId: r.opportunity_id,
+      businessModelId: r.business_model_id ?? undefined,
+      price: this.n(r.price),
+      timelineDaysMin: r.timeline_days_min,
+      timelineDaysMax: r.timeline_days_max,
+      deliverables: r.deliverables ?? [],
+      gapAnalysis: r.gap_analysis ?? undefined,
+      websiteBrief: r.website_brief as WebsiteBrief,
+      status: r.status,
+      generator: r.generator ?? 'local-rule-engine',
+      generatedAt: Date.parse(r.generated_at) || Date.now(),
+      updatedAt: Date.parse(r.updated_at) || Date.now(),
+    };
+  }
+
+  /* ------------------------------ design briefs ------------------------------ */
+
+  async listDesignBriefs(): Promise<DesignBrief[]> {
+    const { data: prospectRows, error: pe } = await this.db.from('prospects').select('id').eq('agent_id', this.agentId);
+    if (pe) throw new Error(pe.message);
+    const ids = (prospectRows ?? []).map((r: any) => r.id);
+    if (!ids.length) return [];
+    const { data, error } = await this.db.from('design_briefs').select('*').in('prospect_id', ids);
+    if (error) throw new Error(error.message);
+    return (data ?? []).map((r: any) => this.mapDesignBrief(r));
+  }
+
+  async upsertDesignBrief(brief: DesignBrief): Promise<void> {
+    const row = {
+      id: brief.id,
+      offer_id: brief.offerId,
+      prospect_id: brief.prospectId,
+      homepage_concept: brief.homepageConcept,
+      hero_section: brief.heroSection,
+      logo_direction: brief.logoDirection,
+      social_graphics: brief.socialGraphics,
+      color_direction_note: brief.colorDirectionNote,
+      asset_status: brief.assetStatus,
+      generated_at: new Date(brief.generatedAt).toISOString(),
+      updated_at: new Date(brief.updatedAt).toISOString(),
+    };
+    const { error } = await this.db.from('design_briefs').upsert(row, { onConflict: 'offer_id' });
+    if (error) throw new Error(error.message);
+  }
+
+  private mapDesignBrief(r: any): DesignBrief {
+    return {
+      id: r.id,
+      offerId: r.offer_id,
+      prospectId: r.prospect_id,
+      homepageConcept: r.homepage_concept,
+      heroSection: r.hero_section,
+      logoDirection: r.logo_direction,
+      socialGraphics: r.social_graphics ?? [],
+      colorDirectionNote: r.color_direction_note ?? '',
+      assetStatus: r.asset_status ?? 'NOT_CONFIGURED',
+      generatedAt: Date.parse(r.generated_at) || Date.now(),
+      updatedAt: Date.parse(r.updated_at) || Date.now(),
+    };
+  }
+
+  /* --------------------------------- projects --------------------------------- */
+
+  async listProjects(): Promise<Project[]> {
+    const { data: prospectRows, error: pe } = await this.db.from('prospects').select('id').eq('agent_id', this.agentId);
+    if (pe) throw new Error(pe.message);
+    const ids = (prospectRows ?? []).map((r: any) => r.id);
+    if (!ids.length) return [];
+    const { data, error } = await this.db.from('projects').select('*').in('prospect_id', ids);
+    if (error) throw new Error(error.message);
+    return (data ?? []).map((r: any) => this.mapProject(r));
+  }
+
+  async upsertProject(project: Project): Promise<void> {
+    const row = {
+      id: project.id,
+      prospect_id: project.prospectId,
+      prospect_name: project.prospectName,
+      offer_id: project.offerId,
+      opportunity_id: project.opportunityId,
+      agreed_price: project.agreedPrice,
+      agreed_timeline_days_max: project.agreedTimelineDaysMax,
+      milestones: project.milestones,
+      status: project.status,
+      started_at: new Date(project.startedAt).toISOString(),
+      delivered_at: project.deliveredAt ? new Date(project.deliveredAt).toISOString() : null,
+      updated_at: new Date(project.updatedAt).toISOString(),
+    };
+    const { error } = await this.db.from('projects').upsert(row, { onConflict: 'prospect_id' });
+    if (error) throw new Error(error.message);
+  }
+
+  async advanceProjectMilestone(projectId: string, milestone: ProjectMilestoneKey): Promise<void> {
+    const { data, error } = await this.db.from('projects').select('*').eq('id', projectId).maybeSingle();
+    if (error) throw new Error(error.message);
+    if (!data) return;
+    const project = this.mapProject(data);
+    const updated = advanceMilestone(project, milestone);
+    const { error: ue } = await this.db
+      .from('projects')
+      .update({
+        milestones: updated.milestones,
+        status: updated.status,
+        delivered_at: updated.deliveredAt ? new Date(updated.deliveredAt).toISOString() : null,
+        updated_at: new Date(updated.updatedAt).toISOString(),
+      })
+      .eq('id', projectId);
+    if (ue) throw new Error(ue.message);
+  }
+
+  private mapProject(r: any): Project {
+    return {
+      id: r.id,
+      prospectId: r.prospect_id,
+      prospectName: r.prospect_name ?? '',
+      offerId: r.offer_id,
+      opportunityId: r.opportunity_id,
+      agreedPrice: this.n(r.agreed_price),
+      agreedTimelineDaysMax: r.agreed_timeline_days_max,
+      milestones: (r.milestones ?? []) as ProjectMilestone[],
+      status: r.status,
+      startedAt: Date.parse(r.started_at) || Date.now(),
+      deliveredAt: r.delivered_at ? Date.parse(r.delivered_at) : undefined,
+      updatedAt: Date.parse(r.updated_at) || Date.now(),
+    };
+  }
+
+  /* ------------------------------ CRM write path ------------------------------ */
+
+  async updateProspectStatus(prospectId: string, status: Prospect['status'], reasonLost?: string): Promise<void> {
+    const patch: Record<string, unknown> = { status, updated_at: new Date().toISOString() };
+    if (reasonLost !== undefined) patch.reason_lost = reasonLost;
+    const { error } = await this.db.from('prospects').update(patch).eq('id', prospectId);
+    if (error) throw new Error(error.message);
   }
 }
 

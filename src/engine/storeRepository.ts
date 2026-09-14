@@ -13,11 +13,15 @@ import type {
   AgentEvent,
   BusinessModel,
   CycleStepKey,
+  DesignBrief,
   Experiment,
   MemoryEntry,
+  Offer,
   Opportunity,
   OpportunityDecision,
   OutreachMessageSet,
+  Project,
+  ProjectMilestoneKey,
   Prospect,
   ProspectInteraction,
   RecommendedAction,
@@ -25,6 +29,7 @@ import type {
   Strategy,
   Transaction,
 } from '../types';
+import { advanceMilestone } from '../lib/projectTracker';
 import type { EngineRepository } from './repository';
 import { createSeedSnapshot } from './seed';
 
@@ -58,6 +63,9 @@ export function createStoreRepository(get: Get, set: Set, reseed: () => StateSha
   let prospects: Prospect[] = [];
   let prospectInteractions: ProspectInteraction[] = [];
   let outreachMessages: OutreachMessageSet[] = [];
+  let offers: Offer[] = [];
+  let designBriefs: DesignBrief[] = [];
+  let projects: Project[] = [];
   return {
     async getAgent() {
       return get().agent;
@@ -195,6 +203,9 @@ export function createStoreRepository(get: Get, set: Set, reseed: () => StateSha
       prospects = [];
       prospectInteractions = [];
       outreachMessages = [];
+      offers = [];
+      designBriefs = [];
+      projects = [];
       set(reseed() as any);
     },
 
@@ -240,6 +251,39 @@ export function createStoreRepository(get: Get, set: Set, reseed: () => StateSha
     },
     async upsertOutreachMessages(setMsg) {
       outreachMessages = [setMsg, ...outreachMessages.filter((m) => m.prospectId !== setMsg.prospectId)];
+    },
+
+    async listOffers() {
+      return offers;
+    },
+    async upsertOffer(offer) {
+      offers = [offer, ...offers.filter((o) => o.prospectId !== offer.prospectId)];
+    },
+    async updateOfferStatus(offerId, status) {
+      offers = offers.map((o) => (o.id === offerId ? { ...o, status, updatedAt: Date.now() } : o));
+    },
+
+    async listDesignBriefs() {
+      return designBriefs;
+    },
+    async upsertDesignBrief(brief) {
+      designBriefs = [brief, ...designBriefs.filter((b) => b.offerId !== brief.offerId)];
+    },
+
+    async listProjects() {
+      return projects;
+    },
+    async upsertProject(project) {
+      projects = [project, ...projects.filter((p) => p.prospectId !== project.prospectId)];
+    },
+    async advanceProjectMilestone(projectId, milestone: ProjectMilestoneKey) {
+      projects = projects.map((p) => (p.id === projectId ? advanceMilestone(p, milestone) : p));
+    },
+
+    async updateProspectStatus(prospectId, status, reasonLost) {
+      prospects = prospects.map((p) =>
+        p.id === prospectId ? { ...p, status, reasonLost: reasonLost ?? p.reasonLost, updatedAt: Date.now() } : p,
+      );
     },
   };
 }

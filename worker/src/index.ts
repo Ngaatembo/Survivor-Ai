@@ -17,6 +17,7 @@ import { AgentEngine } from '../../src/engine/agentEngine';
 import { SupabaseRepository } from '../../src/engine/supabaseRepository';
 import { D1Repository } from '../../src/engine/d1Repository';
 import type { EngineRepository } from '../../src/engine/repository';
+import type { ProspectStatus, OfferStatus, ProjectMilestoneKey } from '../../src/types';
 import { createLLMProvider } from '../../src/services/providers/llm';
 import { createSearchProvider } from '../../src/services/providers/search';
 import { balanceFrom } from '../../src/services/wallet';
@@ -200,6 +201,9 @@ export default {
           prospects,
           prospectInteractions,
           outreachMessages,
+          offers,
+          designBriefs,
+          projects,
         ] = await Promise.all([
           repo.listOpportunities(),
           repo.listExperiments(),
@@ -215,6 +219,9 @@ export default {
           repo.listProspects(),
           repo.listProspectInteractions(),
           repo.listOutreachMessages(),
+          repo.listOffers(),
+          repo.listDesignBriefs(),
+          repo.listProjects(),
         ]);
         return json({
           ok: true,
@@ -238,7 +245,112 @@ export default {
           prospects,
           prospectInteractions: prospectInteractions.slice(0, 300),
           outreachMessages,
+          // Offer + delivery (Phase 3).
+          offers,
+          designBriefs,
+          projects,
         });
+      } catch (e) {
+        return json({ ok: false, error: (e as Error).message }, { status: 500 });
+      }
+    }
+
+    if (url.pathname === '/prospects/status' && req.method === 'POST') {
+      // The CRM write path (Phase 3, carried forward from the original
+      // build spec): a human records a real-world outcome for a prospect.
+      // Narrow and unauthenticated like the rest of this single-operator
+      // system — touches only the prospects table, never wallet/experiment
+      // data. This is the only way a prospect ever advances past
+      // QUALIFIED, since SURVIVE AI never contacts anyone or observes real
+      // replies itself.
+      let body: any;
+      try {
+        body = await req.json();
+      } catch {
+        return json({ ok: false, error: 'invalid JSON body' }, { status: 400 });
+      }
+      const { prospectId, status, reasonLost } = body ?? {};
+      const VALID_STATUSES = new Set([
+        'DISCOVERED',
+        'QUALIFIED',
+        'CONTACTED',
+        'REPLIED',
+        'INTERESTED',
+        'PROPOSAL_SENT',
+        'NEGOTIATING',
+        'WON',
+        'LOST',
+        'NOT_INTERESTED',
+        'FOLLOW_UP',
+      ]);
+      if (typeof prospectId !== 'string' || !prospectId) {
+        return json({ ok: false, error: 'prospectId is required' }, { status: 400 });
+      }
+      if (typeof status !== 'string' || !VALID_STATUSES.has(status)) {
+        return json({ ok: false, error: `status must be one of: ${[...VALID_STATUSES].join(', ')}` }, { status: 400 });
+      }
+      try {
+        const { repo } = buildEngine(env);
+        await repo.updateProspectStatus(prospectId, status as ProspectStatus, typeof reasonLost === 'string' ? reasonLost : undefined);
+        await repo.appendProspectInteraction({
+          id: `pint_${crypto.randomUUID()}`,
+          prospectId,
+          kind: 'STATUS_CHANGE',
+          summary: `Status updated to ${status} by operator.${reasonLost ? ` Reason: ${reasonLost}` : ''}`,
+          createdAt: Date.now(),
+        });
+        return json({ ok: true, prospectId, status });
+      } catch (e) {
+        return json({ ok: false, error: (e as Error).message }, { status: 500 });
+      }
+    }
+
+    if (url.pathname === '/offers/status' && req.method === 'POST') {
+      // Same pattern as /prospects/status — a human marks a drafted offer
+      // sent/accepted/declined. Never called autonomously.
+      let body: any;
+      try {
+        body = await req.json();
+      } catch {
+        return json({ ok: false, error: 'invalid JSON body' }, { status: 400 });
+      }
+      const { offerId, status } = body ?? {};
+      const VALID = new Set(['DRAFT', 'SENT', 'ACCEPTED', 'DECLINED']);
+      if (typeof offerId !== 'string' || !offerId) {
+        return json({ ok: false, error: 'offerId is required' }, { status: 400 });
+      }
+      if (typeof status !== 'string' || !VALID.has(status)) {
+        return json({ ok: false, error: `status must be one of: ${[...VALID].join(', ')}` }, { status: 400 });
+      }
+      try {
+        const { repo } = buildEngine(env);
+        await repo.updateOfferStatus(offerId, status as OfferStatus);
+        return json({ ok: true, offerId, status });
+      } catch (e) {
+        return json({ ok: false, error: (e as Error).message }, { status: 500 });
+      }
+    }
+
+    if (url.pathname === '/projects/milestone' && req.method === 'POST') {
+      // Same pattern — a human advances a delivery project's milestone.
+      let body: any;
+      try {
+        body = await req.json();
+      } catch {
+        return json({ ok: false, error: 'invalid JSON body' }, { status: 400 });
+      }
+      const { projectId, milestone } = body ?? {};
+      const VALID = new Set(['KICKOFF', 'CONTENT_COLLECTED', 'DESIGN_APPROVED', 'BUILD', 'REVIEW', 'DELIVERED']);
+      if (typeof projectId !== 'string' || !projectId) {
+        return json({ ok: false, error: 'projectId is required' }, { status: 400 });
+      }
+      if (typeof milestone !== 'string' || !VALID.has(milestone)) {
+        return json({ ok: false, error: `milestone must be one of: ${[...VALID].join(', ')}` }, { status: 400 });
+      }
+      try {
+        const { repo } = buildEngine(env);
+        await repo.advanceProjectMilestone(projectId, milestone as ProjectMilestoneKey);
+        return json({ ok: true, projectId, milestone });
       } catch (e) {
         return json({ ok: false, error: (e as Error).message }, { status: 500 });
       }

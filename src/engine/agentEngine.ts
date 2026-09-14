@@ -37,6 +37,9 @@ import type { LLMProvider, SearchProvider } from '../services/providers/types';
 import { evaluateOpportunity, VALIDATION_SCORE_THRESHOLD } from '../lib/decisionEngine';
 import { generateBusinessModel } from '../lib/businessModel';
 import { generateOutreachMessages } from '../lib/outreachGenerator';
+import { generateOffer } from '../lib/offerGenerator';
+import { generateDesignBrief } from '../lib/designBriefGenerator';
+import { createProjectFromWonOffer } from '../lib/projectTracker';
 import { computeRecommendedActions } from '../lib/recommendedActions';
 
 export const STEP_ORDER: CycleStepKey[] = [
@@ -613,11 +616,68 @@ export class AgentEngine {
           await hooks.log('DECISION', `Prepared outreach messages for ${needsOutreach.length} prospect(s) — review before sending.`);
         }
 
+        // Phase 3 (offer + delivery): draft an offer + design brief for any
+        // engaged prospect (INTERESTED or further along) that doesn't have
+        // one yet. Capped per cycle. Nothing here sends anything — an
+        // offer stays DRAFT until a human moves it via the CRM write path.
+        const ENGAGED_STATUSES = new Set(['INTERESTED', 'PROPOSAL_SENT', 'NEGOTIATING', 'WON']);
+        const existingOffers = await this.repo.listOffers();
+        const needsOffer = allProspects
+          .filter((p) => ENGAGED_STATUSES.has(p.status) && !existingOffers.some((o) => o.prospectId === p.id))
+          .sort((a, b) => b.score.expectedValue - a.score.expectedValue)
+          .slice(0, 5);
+        for (const p of needsOffer) {
+          const model = businessModels.find((m) => m.opportunityId === p.opportunityId);
+          const offer = generateOffer(p, model);
+          await this.repo.upsertOffer(offer);
+          const brief = generateDesignBrief(offer, p);
+          await this.repo.upsertDesignBrief(brief);
+          await this.repo.appendProspectInteraction({
+            id: uid('pint'),
+            prospectId: p.id,
+            kind: 'OFFER_DRAFTED',
+            summary: `Offer drafted: $${offer.price} over ${offer.timelineDaysMin}-${offer.timelineDaysMax} days, with a design brief — pending human review and send.`,
+            createdAt: now,
+          });
+        }
+        if (needsOffer.length > 0) {
+          await hooks.log('DECISION', `Drafted offer + design brief for ${needsOffer.length} engaged prospect(s) — review before sending.`);
+        }
+
+        // Auto-create a delivery project the moment a prospect reaches WON
+        // against a drafted offer (Phase 3). CRM status changes are always
+        // human-driven (repo.updateProspectStatus) — this only reacts to a
+        // WON status that already exists, it never sets one itself.
+        const allOffers = await this.repo.listOffers();
+        const existingProjects = await this.repo.listProjects();
+        const wonNeedingProject = allProspects.filter(
+          (p) => p.status === 'WON' && !existingProjects.some((pr) => pr.prospectId === p.id),
+        );
+        for (const p of wonNeedingProject) {
+          const offer = allOffers.find((o) => o.prospectId === p.id);
+          if (!offer) continue; // no offer on record yet — nothing to build a project from
+          const project = createProjectFromWonOffer(p, offer, now);
+          await this.repo.upsertProject(project);
+          if (offer.status !== 'ACCEPTED') await this.repo.updateOfferStatus(offer.id, 'ACCEPTED');
+          await this.repo.appendProspectInteraction({
+            id: uid('pint'),
+            prospectId: p.id,
+            kind: 'PROJECT_STARTED',
+            summary: `Delivery project started — agreed $${project.agreedPrice} over ~${project.agreedTimelineDaysMax} days.`,
+            createdAt: now,
+          });
+        }
+        if (wonNeedingProject.length > 0) {
+          await hooks.log('DECISION', `Started ${wonNeedingProject.length} delivery project(s) for won prospect(s).`);
+        }
+
         // "What should I do now?" — recomputed and fully replaced every cycle.
         const decisions = await this.repo.listDecisions();
         businessModels = await this.repo.listBusinessModels();
         const finalProspects = await this.repo.listProspects();
-        const actions = computeRecommendedActions(freshOpps, decisions, businessModels, memory, finalProspects);
+        const finalOffers = await this.repo.listOffers();
+        const finalProjects = await this.repo.listProjects();
+        const actions = computeRecommendedActions(freshOpps, decisions, businessModels, memory, finalProspects, finalOffers, finalProjects);
         await this.repo.replaceActions(actions);
         if (actions[0]) {
           await hooks.log('DECISION', `Top recommended action: ${actions[0].title}`);

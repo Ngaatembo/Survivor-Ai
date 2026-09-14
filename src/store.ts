@@ -14,13 +14,18 @@ import type {
   AgentEvent,
   BusinessModel,
   CycleStepKey,
+  DesignBrief,
   Experiment,
   MemoryEntry,
+  Offer,
   Opportunity,
   OpportunityDecision,
   OutreachMessageSet,
+  Project,
+  ProjectMilestoneKey,
   Prospect,
   ProspectInteraction,
+  ProspectStatus,
   RecommendedAction,
   ResearchReport,
   Strategy,
@@ -38,7 +43,14 @@ import { createSeedSnapshot } from './engine/seed';
 import { createLLMProvider } from './services/providers/llm';
 import { createSearchProvider } from './services/providers/search';
 import { env, featureFlags } from './config/env';
-import { fetchBackendState, fetchBackendHealth, BackendError } from './services/backendApi';
+import {
+  fetchBackendState,
+  fetchBackendHealth,
+  BackendError,
+  updateProspectStatus as apiUpdateProspectStatus,
+  updateOfferStatus as apiUpdateOfferStatus,
+  advanceProjectMilestone as apiAdvanceProjectMilestone,
+} from './services/backendApi';
 
 const delay = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
@@ -65,6 +77,10 @@ function seedInitialState() {
     prospects: [] as Prospect[],
     prospectInteractions: [] as ProspectInteraction[],
     outreachMessages: [] as OutreachMessageSet[],
+    // Offer + delivery (Phase 3) — same scoping note as above.
+    offers: [] as Offer[],
+    designBriefs: [] as DesignBrief[],
+    projects: [] as Project[],
   };
 }
 
@@ -101,6 +117,9 @@ interface SurviveState {
   prospects: Prospect[];
   prospectInteractions: ProspectInteraction[];
   outreachMessages: OutreachMessageSet[];
+  offers: Offer[];
+  designBriefs: DesignBrief[];
+  projects: Project[];
   loop: LoopState;
   backend: BackendSyncState;
 
@@ -112,6 +131,12 @@ interface SurviveState {
   runManualExperiment: (opportunityId: string) => void;
   generateReportFor: (opportunityId: string) => void;
   syncFromBackend: () => Promise<void>;
+  /** Human-driven CRM write path (Phase 3). Backend mode calls the Worker
+   *  endpoint (never called by the autonomous loop); demo mode writes
+   *  straight through the local StoreRepository. */
+  updateProspectStatus: (prospectId: string, status: ProspectStatus, reasonLost?: string) => Promise<void>;
+  updateOfferStatus: (offerId: string, status: Offer['status']) => Promise<void>;
+  advanceProjectMilestone: (projectId: string, milestone: ProjectMilestoneKey) => Promise<void>;
   _runAuto: () => Promise<void>;
 }
 
@@ -213,6 +238,9 @@ export const useStore = create<SurviveState>()(
               prospects: state.prospects,
               prospectInteractions: state.prospectInteractions,
               outreachMessages: state.outreachMessages,
+              offers: state.offers,
+              designBriefs: state.designBriefs,
+              projects: state.projects,
               backend: {
                 connected: true,
                 syncing: false,
@@ -227,6 +255,51 @@ export const useStore = create<SurviveState>()(
               backend: { ...s.backend, syncing: false, connected: false, error: message },
             }));
           }
+        },
+
+        updateProspectStatus: async (prospectId: string, status: ProspectStatus, reasonLost?: string) => {
+          if (featureFlags.backend) {
+            try {
+              await apiUpdateProspectStatus(prospectId, status, reasonLost);
+              await get().syncFromBackend();
+            } catch (e) {
+              const message = e instanceof BackendError ? e.message : (e as Error).message;
+              get().logEvent('WARNING', `Failed to update prospect status: ${message}`);
+            }
+            return;
+          }
+          await repo.updateProspectStatus(prospectId, status, reasonLost);
+          set({ prospects: await repo.listProspects() } as any);
+        },
+
+        updateOfferStatus: async (offerId: string, status: Offer['status']) => {
+          if (featureFlags.backend) {
+            try {
+              await apiUpdateOfferStatus(offerId, status);
+              await get().syncFromBackend();
+            } catch (e) {
+              const message = e instanceof BackendError ? e.message : (e as Error).message;
+              get().logEvent('WARNING', `Failed to update offer status: ${message}`);
+            }
+            return;
+          }
+          await repo.updateOfferStatus(offerId, status);
+          set({ offers: await repo.listOffers() } as any);
+        },
+
+        advanceProjectMilestone: async (projectId: string, milestone: ProjectMilestoneKey) => {
+          if (featureFlags.backend) {
+            try {
+              await apiAdvanceProjectMilestone(projectId, milestone);
+              await get().syncFromBackend();
+            } catch (e) {
+              const message = e instanceof BackendError ? e.message : (e as Error).message;
+              get().logEvent('WARNING', `Failed to advance project milestone: ${message}`);
+            }
+            return;
+          }
+          await repo.advanceProjectMilestone(projectId, milestone);
+          set({ projects: await repo.listProjects() } as any);
         },
 
         logEvent: (type: AgentEvent['type'], message: string) =>

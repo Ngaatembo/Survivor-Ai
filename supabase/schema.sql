@@ -262,6 +262,63 @@ create table outreach_messages (
 );
 create index idx_outreach_prospect on outreach_messages(prospect_id);
 
+-- offers, design_briefs, projects — Phase 3 (offer + delivery).
+create type offer_status as enum ('DRAFT', 'SENT', 'ACCEPTED', 'DECLINED');
+create type design_asset_status as enum ('NOT_CONFIGURED', 'GENERATING', 'READY');
+create type project_status as enum ('ACTIVE', 'DELIVERED', 'CANCELLED');
+
+create table offers (
+  id                     text primary key,
+  prospect_id            text not null unique references prospects(id) on delete cascade,
+  prospect_name          text not null default '',
+  opportunity_id         text not null references opportunities(id) on delete cascade,
+  business_model_id      text,
+  price                  numeric(12,2) not null default 0,
+  timeline_days_min      int not null default 0,
+  timeline_days_max      int not null default 0,
+  deliverables           jsonb not null default '[]',
+  gap_analysis           text,
+  website_brief          jsonb not null default '{}',
+  status                 offer_status not null default 'DRAFT',
+  generator              text not null default 'local-rule-engine',
+  generated_at           timestamptz not null default now(),
+  updated_at             timestamptz not null default now()
+);
+create index idx_offers_prospect on offers(prospect_id);
+create index idx_offers_opportunity on offers(opportunity_id);
+
+create table design_briefs (
+  id                     text primary key,
+  offer_id               text not null unique references offers(id) on delete cascade,
+  prospect_id            text not null references prospects(id) on delete cascade,
+  homepage_concept       text not null default '',
+  hero_section           text not null default '',
+  logo_direction         text not null default '',
+  social_graphics        jsonb not null default '[]',
+  color_direction_note   text not null default '',
+  asset_status           design_asset_status not null default 'NOT_CONFIGURED',
+  generated_at           timestamptz not null default now(),
+  updated_at             timestamptz not null default now()
+);
+create index idx_design_briefs_prospect on design_briefs(prospect_id);
+
+create table projects (
+  id                          text primary key,
+  prospect_id                 text not null unique references prospects(id) on delete cascade,
+  prospect_name               text not null default '',
+  offer_id                    text not null references offers(id) on delete cascade,
+  opportunity_id              text not null references opportunities(id) on delete cascade,
+  agreed_price                numeric(12,2) not null default 0,
+  agreed_timeline_days_max    int not null default 0,
+  milestones                  jsonb not null default '[]',
+  status                      project_status not null default 'ACTIVE',
+  started_at                  timestamptz not null default now(),
+  delivered_at                timestamptz,
+  updated_at                  timestamptz not null default now()
+);
+create index idx_projects_prospect on projects(prospect_id);
+create index idx_projects_opportunity on projects(opportunity_id);
+
 -- research_sources -----------------------------------------------------------
 
 create table research_sources (

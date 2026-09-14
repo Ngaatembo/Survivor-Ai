@@ -23,13 +23,18 @@ import type {
   BusinessModel,
   CycleStep,
   CycleStepKey,
+  DesignBrief,
   EventType,
   Experiment,
   LeadScoreBreakdown,
   MemoryEntry,
+  Offer,
   Opportunity,
   OpportunityDecision,
   OutreachMessageSet,
+  Project,
+  ProjectMilestone,
+  ProjectMilestoneKey,
   Prospect,
   ProspectInteraction,
   RecommendedAction,
@@ -37,8 +42,10 @@ import type {
   Strategy,
   Transaction,
   ScoreBreakdown,
+  WebsiteBrief,
 } from '../types';
 import type { EngineRepository } from './repository';
+import { advanceMilestone } from '../lib/projectTracker';
 import { createSeedSnapshot, AGENT_ID } from './seed';
 
 /* Minimal structural subset of Cloudflare's D1Database/D1PreparedStatement,
@@ -810,6 +817,9 @@ export class D1Repository implements EngineRepository {
       'agent_actions',
       'prospect_interactions', // no agent_id column; deleted via prospects join below
       'outreach_messages', // no agent_id column; deleted via prospects join below
+      'design_briefs', // no agent_id column; deleted via prospects/offers join below
+      'offers', // no agent_id column; deleted via prospects join below
+      'projects', // no agent_id column; deleted via prospects join below
       'prospects',
     ];
 
@@ -827,8 +837,20 @@ export class D1Repository implements EngineRepository {
       this.db.prepare(
         `DELETE FROM outreach_messages WHERE prospect_id IN (SELECT id FROM prospects WHERE agent_id = ?)`,
       ).bind(this.agentId),
+      this.db.prepare(
+        `DELETE FROM design_briefs WHERE offer_id IN (SELECT o.id FROM offers o JOIN prospects p ON p.id = o.prospect_id WHERE p.agent_id = ?)`,
+      ).bind(this.agentId),
+      this.db.prepare(
+        `DELETE FROM offers WHERE prospect_id IN (SELECT id FROM prospects WHERE agent_id = ?)`,
+      ).bind(this.agentId),
+      this.db.prepare(
+        `DELETE FROM projects WHERE prospect_id IN (SELECT id FROM prospects WHERE agent_id = ?)`,
+      ).bind(this.agentId),
       ...tables
-        .filter((t) => !['experiment_results', 'research_sources', 'prospect_interactions', 'outreach_messages'].includes(t))
+        .filter(
+          (t) =>
+            !['experiment_results', 'research_sources', 'prospect_interactions', 'outreach_messages', 'design_briefs', 'offers', 'projects'].includes(t),
+        )
         .map((t) => this.db.prepare(`DELETE FROM ${t} WHERE agent_id = ?`).bind(this.agentId)),
       this.db.prepare('DELETE FROM agents WHERE id = ?').bind(this.agentId),
     ];
@@ -1267,6 +1289,226 @@ export class D1Repository implements EngineRepository {
       generatedAt: this.ms(r.generated_at),
       updatedAt: this.ms(r.updated_at),
     };
+  }
+
+  /* --------------------------------- offers --------------------------------- */
+
+  async listOffers(): Promise<Offer[]> {
+    const { results } = await this.db
+      .prepare(
+        `SELECT o.* FROM offers o JOIN prospects p ON p.id = o.prospect_id WHERE p.agent_id = ? ORDER BY o.created_at DESC`,
+      )
+      .bind(this.agentId)
+      .all();
+    return results.map((r: any) => this.mapOffer(r));
+  }
+
+  async upsertOffer(offer: Offer): Promise<void> {
+    const row = {
+      id: offer.id,
+      prospect_id: offer.prospectId,
+      prospect_name: offer.prospectName,
+      opportunity_id: offer.opportunityId,
+      business_model_id: offer.businessModelId ?? null,
+      price: offer.price,
+      timeline_days_min: offer.timelineDaysMin,
+      timeline_days_max: offer.timelineDaysMax,
+      deliverables: this.j(offer.deliverables),
+      gap_analysis: offer.gapAnalysis ?? null,
+      website_brief: this.j(offer.websiteBrief),
+      status: offer.status,
+      generator: offer.generator,
+      generated_at: this.iso(offer.generatedAt),
+      updated_at: this.iso(offer.updatedAt),
+      created_at: this.iso(offer.generatedAt),
+    };
+    const cols = Object.keys(row);
+    const updateClause = cols
+      .filter((c) => c !== 'prospect_id' && c !== 'created_at')
+      .map((c) => `${c} = excluded.${c}`)
+      .join(', ');
+    await this.db
+      .prepare(
+        `INSERT INTO offers (${cols.join(', ')}) VALUES (${cols.map(() => '?').join(', ')})
+         ON CONFLICT(prospect_id) DO UPDATE SET ${updateClause}`,
+      )
+      .bind(...cols.map((c) => (row as any)[c]))
+      .run();
+  }
+
+  async updateOfferStatus(offerId: string, status: Offer['status']): Promise<void> {
+    await this.db
+      .prepare(`UPDATE offers SET status = ?, updated_at = ? WHERE id = ?`)
+      .bind(status, this.iso(Date.now()), offerId)
+      .run();
+  }
+
+  private mapOffer(r: any): Offer {
+    return {
+      id: r.id,
+      prospectId: r.prospect_id,
+      prospectName: r.prospect_name ?? '',
+      opportunityId: r.opportunity_id,
+      businessModelId: r.business_model_id ?? undefined,
+      price: this.n(r.price),
+      timelineDaysMin: r.timeline_days_min,
+      timelineDaysMax: r.timeline_days_max,
+      deliverables: this.a<string>(r.deliverables),
+      gapAnalysis: r.gap_analysis ?? undefined,
+      websiteBrief: this.o<WebsiteBrief>(r.website_brief),
+      status: r.status,
+      generator: r.generator ?? 'local-rule-engine',
+      generatedAt: this.ms(r.generated_at),
+      updatedAt: this.ms(r.updated_at),
+    };
+  }
+
+  /* ------------------------------ design briefs ------------------------------ */
+
+  async listDesignBriefs(): Promise<DesignBrief[]> {
+    const { results } = await this.db
+      .prepare(
+        `SELECT db.* FROM design_briefs db
+         JOIN offers o ON o.id = db.offer_id
+         JOIN prospects p ON p.id = o.prospect_id
+         WHERE p.agent_id = ?`,
+      )
+      .bind(this.agentId)
+      .all();
+    return results.map((r: any) => this.mapDesignBrief(r));
+  }
+
+  async upsertDesignBrief(brief: DesignBrief): Promise<void> {
+    const row = {
+      id: brief.id,
+      offer_id: brief.offerId,
+      prospect_id: brief.prospectId,
+      homepage_concept: brief.homepageConcept,
+      hero_section: brief.heroSection,
+      logo_direction: brief.logoDirection,
+      social_graphics: this.j(brief.socialGraphics),
+      color_direction_note: brief.colorDirectionNote,
+      asset_status: brief.assetStatus,
+      generated_at: this.iso(brief.generatedAt),
+      updated_at: this.iso(brief.updatedAt),
+    };
+    const cols = Object.keys(row);
+    const updateClause = cols
+      .filter((c) => c !== 'offer_id')
+      .map((c) => `${c} = excluded.${c}`)
+      .join(', ');
+    await this.db
+      .prepare(
+        `INSERT INTO design_briefs (${cols.join(', ')}) VALUES (${cols.map(() => '?').join(', ')})
+         ON CONFLICT(offer_id) DO UPDATE SET ${updateClause}`,
+      )
+      .bind(...cols.map((c) => (row as any)[c]))
+      .run();
+  }
+
+  private mapDesignBrief(r: any): DesignBrief {
+    return {
+      id: r.id,
+      offerId: r.offer_id,
+      prospectId: r.prospect_id,
+      homepageConcept: r.homepage_concept,
+      heroSection: r.hero_section,
+      logoDirection: r.logo_direction,
+      socialGraphics: this.a<string>(r.social_graphics),
+      colorDirectionNote: r.color_direction_note ?? '',
+      assetStatus: r.asset_status ?? 'NOT_CONFIGURED',
+      generatedAt: this.ms(r.generated_at),
+      updatedAt: this.ms(r.updated_at),
+    };
+  }
+
+  /* --------------------------------- projects --------------------------------- */
+
+  async listProjects(): Promise<Project[]> {
+    const { results } = await this.db
+      .prepare(
+        `SELECT pr.* FROM projects pr JOIN prospects p ON p.id = pr.prospect_id WHERE p.agent_id = ? ORDER BY pr.created_at DESC`,
+      )
+      .bind(this.agentId)
+      .all();
+    return results.map((r: any) => this.mapProject(r));
+  }
+
+  async upsertProject(project: Project): Promise<void> {
+    const row = {
+      id: project.id,
+      prospect_id: project.prospectId,
+      prospect_name: project.prospectName,
+      offer_id: project.offerId,
+      opportunity_id: project.opportunityId,
+      agreed_price: project.agreedPrice,
+      agreed_timeline_days_max: project.agreedTimelineDaysMax,
+      milestones: this.j(project.milestones),
+      status: project.status,
+      started_at: this.iso(project.startedAt),
+      delivered_at: project.deliveredAt ? this.iso(project.deliveredAt) : null,
+      updated_at: this.iso(project.updatedAt),
+      created_at: this.iso(project.startedAt),
+    };
+    const cols = Object.keys(row);
+    const updateClause = cols
+      .filter((c) => c !== 'prospect_id' && c !== 'created_at')
+      .map((c) => `${c} = excluded.${c}`)
+      .join(', ');
+    await this.db
+      .prepare(
+        `INSERT INTO projects (${cols.join(', ')}) VALUES (${cols.map(() => '?').join(', ')})
+         ON CONFLICT(prospect_id) DO UPDATE SET ${updateClause}`,
+      )
+      .bind(...cols.map((c) => (row as any)[c]))
+      .run();
+  }
+
+  async advanceProjectMilestone(projectId: string, milestone: ProjectMilestoneKey): Promise<void> {
+    const row = await this.db.prepare(`SELECT * FROM projects WHERE id = ?`).bind(projectId).first<any>();
+    if (!row) return;
+    const project = this.mapProject(row);
+    const updated = advanceMilestone(project, milestone);
+    await this.db
+      .prepare(
+        `UPDATE projects SET milestones = ?, status = ?, delivered_at = ?, updated_at = ? WHERE id = ?`,
+      )
+      .bind(
+        this.j(updated.milestones),
+        updated.status,
+        updated.deliveredAt ? this.iso(updated.deliveredAt) : null,
+        this.iso(updated.updatedAt),
+        projectId,
+      )
+      .run();
+  }
+
+  private mapProject(r: any): Project {
+    return {
+      id: r.id,
+      prospectId: r.prospect_id,
+      prospectName: r.prospect_name ?? '',
+      offerId: r.offer_id,
+      opportunityId: r.opportunity_id,
+      agreedPrice: this.n(r.agreed_price),
+      agreedTimelineDaysMax: r.agreed_timeline_days_max,
+      milestones: this.a<ProjectMilestone>(r.milestones),
+      status: r.status,
+      startedAt: this.ms(r.started_at),
+      deliveredAt: r.delivered_at ? this.ms(r.delivered_at) : undefined,
+      updatedAt: this.ms(r.updated_at),
+    };
+  }
+
+  /* ------------------------------ CRM write path ------------------------------ */
+
+  async updateProspectStatus(prospectId: string, status: Prospect['status'], reasonLost?: string): Promise<void> {
+    await this.db
+      .prepare(
+        `UPDATE prospects SET status = ?, reason_lost = COALESCE(?, reason_lost), updated_at = ? WHERE id = ?`,
+      )
+      .bind(status, reasonLost ?? null, this.iso(Date.now()), prospectId)
+      .run();
   }
 }
 

@@ -9,13 +9,16 @@
 
 import type {
   BusinessModel,
+  Offer,
   Opportunity,
   OpportunityDecision,
+  Project,
   Prospect,
   RecommendedAction,
   RecommendedActionKind,
 } from '../types';
 import { realRevenueScore } from './decisionEngine';
+import { nextIncompleteMilestone, isOverdue } from './projectTracker';
 import { uid } from './format';
 import type { MemoryEntry } from '../types';
 
@@ -44,6 +47,8 @@ export function computeRecommendedActions(
   businessModels: BusinessModel[],
   memory: MemoryEntry[],
   prospects: Prospect[] = [],
+  offers: Offer[] = [],
+  projects: Project[] = [],
   now: number = Date.now(),
   recentWindowMs: number = 2 * 60 * 60 * 1000,
 ): RecommendedAction[] {
@@ -153,6 +158,43 @@ export function computeRecommendedActions(
         effort: 1,
       });
     }
+  }
+
+  // Offer-driven actions (Phase 3): a drafted-but-unsent offer is always
+  // the single highest-leverage next step for an engaged prospect.
+  for (const offer of offers) {
+    if (offer.status !== 'DRAFT') continue;
+    const prospect = prospects.find((p) => p.id === offer.prospectId);
+    if (!prospect || prospect.status === 'LOST' || prospect.status === 'NOT_INTERESTED') continue;
+    inputs.push({
+      kind: 'SEND_OFFER',
+      prospect,
+      title: `Send offer to ${offer.prospectName}`,
+      description: `Drafted offer: $${offer.price} over ${offer.timelineDaysMin}-${offer.timelineDaysMax} days, with a design brief ready. Review and send.`,
+      expectedValue: prospect.score.expectedValue || offer.price,
+      urgency: 4,
+      effort: 1,
+    });
+  }
+
+  // Delivery-project actions (Phase 3): surface the next incomplete
+  // milestone, with urgency escalating once the project runs past its
+  // agreed timeline without being delivered.
+  for (const project of projects) {
+    if (project.status !== 'ACTIVE') continue;
+    const milestone = nextIncompleteMilestone(project);
+    if (!milestone) continue;
+    const overdue = isOverdue(project, now);
+    const prospect = prospects.find((p) => p.id === project.prospectId);
+    inputs.push({
+      kind: 'ADVANCE_PROJECT',
+      prospect,
+      title: `${overdue ? 'Overdue — ' : ''}Advance project: ${project.prospectName}`,
+      description: `Next milestone: ${milestone.label}.${overdue ? ` Past the agreed ~${project.agreedTimelineDaysMax}-day timeline.` : ''}`,
+      expectedValue: project.agreedPrice * 0.5,
+      urgency: overdue ? 5 : 3,
+      effort: 2,
+    });
   }
 
   inputs.sort((a, b) => b.expectedValue - a.expectedValue || b.urgency - a.urgency);

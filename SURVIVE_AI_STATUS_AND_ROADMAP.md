@@ -1,7 +1,25 @@
 # SURVIVE AI — Status & Path to Real Revenue
 
-**As of:** September 13, 2026
+**As of:** September 14, 2026
 **Purpose:** a working reference for what's done, what's live, and what remains before this project can generate real income — so you can hand out or prioritize the remaining work.
+
+---
+
+## 0. Phase 3 — Offer + Delivery (COMPLETE, this session)
+
+Built, verified, and pushed:
+
+- **Offer generation** (`src/lib/offerGenerator.ts`) — turns an engaged prospect + its opportunity's business model into a priced package (price, timeline, deliverables) and a full website brief. A gap analysis is included only when the prospect's own website-presence evidence actually supports one.
+- **Design brief generation** (`src/lib/designBriefGenerator.ts`) — homepage concept, hero section, logo direction, social graphics for every drafted offer. No image-generation integration is wired in, so `assetStatus` stays `NOT_CONFIGURED` — briefs are complete and human-usable regardless.
+- **Delivery project tracking** (`src/lib/projectTracker.ts`) — a project with 6 standard milestones (KICKOFF → CONTENT_COLLECTED → DESIGN_APPROVED → BUILD → REVIEW → DELIVERED) is created automatically the moment a prospect is marked WON.
+- **CRM + write paths**: `POST /prospects/status` (record real-world outcomes — the only way a prospect advances past QUALIFIED), `POST /offers/status` (mark an offer sent/accepted/declined), `POST /projects/milestone` (advance delivery).
+- New `agent_actions` kinds: `SEND_OFFER` (a drafted-but-unsent offer) and `ADVANCE_PROJECT` (next incomplete milestone, urgency escalates when overdue).
+- Persistence across all four `EngineRepository` implementations (D1, Supabase, InMemory, browser Store), a new **Delivery Projects** dashboard view, and offer/design-brief/project display + status controls in `ProspectDrawer`.
+- New D1 migration `0004_offer_delivery.sql` (applied automatically by `.github/workflows/deploy.yml`, same pattern as 0001–0003) and matching Supabase schema additions.
+
+Verified: a pure-function/repository smoke suite (`scripts/offerDelivery.smoke.ts`), a clean `tsc --noEmit` on both tsconfigs, a clean `vite build`, and a live integration pass — a real `wrangler dev` Worker against a real local D1, run through several cycles: an INTERESTED prospect correctly got an auto-generated offer + design brief tailored to its actual category, marking it WON auto-created a delivery project with the offer's real price/timeline, and `/projects/milestone` correctly advanced KICKOFF → CONTENT_COLLECTED.
+
+**What remains for Phase 3 to matter in practice:** same as before — it activates once real prospects exist and a human is recording outcomes through the CRM.
 
 ---
 

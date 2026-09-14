@@ -13,11 +13,15 @@ import type {
   AgentEvent,
   BusinessModel,
   CycleStepKey,
+  DesignBrief,
   Experiment,
   MemoryEntry,
+  Offer,
   Opportunity,
   OpportunityDecision,
   OutreachMessageSet,
+  Project,
+  ProjectMilestoneKey,
   Prospect,
   ProspectInteraction,
   RecommendedAction,
@@ -117,6 +121,33 @@ export interface EngineRepository {
   // prospect, regenerated (upserted) as the linked business model improves.
   listOutreachMessages(): Promise<OutreachMessageSet[]>;
   upsertOutreachMessages(set: OutreachMessageSet): Promise<void>;
+
+  // offers (Phase 3: offer + delivery) — one per prospect, regenerated
+  // (upserted) as the linked business model or prospect evidence improves.
+  listOffers(): Promise<Offer[]>;
+  upsertOffer(offer: Offer): Promise<void>;
+  /** Human-driven: mark an offer sent/accepted/declined via the CRM write path. */
+  updateOfferStatus(offerId: string, status: Offer['status']): Promise<void>;
+
+  // design briefs (Phase 3) — one per offer.
+  listDesignBriefs(): Promise<DesignBrief[]>;
+  upsertDesignBrief(brief: DesignBrief): Promise<void>;
+
+  // delivery projects (Phase 3) — one per WON prospect/offer.
+  listProjects(): Promise<Project[]>;
+  upsertProject(project: Project): Promise<void>;
+  /** Advance a project's milestone; the human-driven counterpart to
+   *  projectTracker.advanceMilestone() for implementations that persist
+   *  milestones server-side rather than round-tripping the full object. */
+  advanceProjectMilestone(projectId: string, milestone: ProjectMilestoneKey): Promise<void>;
+
+  /**
+   * Human-driven CRM write path (Phase 3): record a real-world status
+   * change for a prospect. Never called by the autonomous loop itself —
+   * SURVIVE AI never contacts anyone or observes real replies; this is the
+   * only way a prospect ever advances past QUALIFIED.
+   */
+  updateProspectStatus(prospectId: string, status: Prospect['status'], reasonLost?: string): Promise<void>;
 }
 
 /** Engine callbacks so the host can render progress / stay in sync. */
