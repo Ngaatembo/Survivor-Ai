@@ -15,6 +15,7 @@ import type {
   CycleStepKey,
   DesignBrief,
   Experiment,
+  LearningEvent,
   MemoryEntry,
   Offer,
   Opportunity,
@@ -24,6 +25,7 @@ import type {
   ProjectMilestoneKey,
   Prospect,
   ProspectInteraction,
+  RealRevenueEntry,
   RecommendedAction,
   ResearchReport,
   Strategy,
@@ -148,6 +150,23 @@ export interface EngineRepository {
    * only way a prospect ever advances past QUALIFIED.
    */
   updateProspectStatus(prospectId: string, status: Prospect['status'], reasonLost?: string): Promise<void>;
+
+  // real revenue ledger (Phase 4, §13) — append-only, human-entered actual
+  // money. Never mixed with the simulated wallet/experiment economics.
+  listRealRevenue(): Promise<RealRevenueEntry[]>;
+  addRealRevenueEntry(entry: RealRevenueEntry): Promise<void>;
+
+  // learning events (Phase 4, §17) — append-only feed of real-world data
+  // points that changed or reinforced a conclusion.
+  listLearningEvents(): Promise<LearningEvent[]>;
+  appendLearningEvent(event: LearningEvent): Promise<void>;
+
+  // real-world outcome tracking on a delivered project (Phase 4, §15) —
+  // satisfaction/repeat/referral, filled in by a human once known.
+  updateProjectOutcome(
+    projectId: string,
+    outcome: { satisfaction?: number; repeatPurchase?: boolean; referral?: boolean },
+  ): Promise<void>;
 }
 
 /** Engine callbacks so the host can render progress / stay in sync. */

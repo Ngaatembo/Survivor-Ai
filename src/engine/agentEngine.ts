@@ -497,12 +497,13 @@ export class AgentEngine {
           (o) => o.researchStage !== 'UNDISCOVERED',
         );
         const allExperiments = await this.repo.listExperiments();
+        const learningEvents = await this.repo.listLearningEvents();
         const changedOpps: Opportunity[] = [];
         let promotions = 0;
         let kills = 0;
 
         for (const o of researched) {
-          const { decision, newLifecycleState } = evaluateOpportunity(o, memory, allExperiments);
+          const { decision, newLifecycleState } = evaluateOpportunity(o, memory, allExperiments, learningEvents);
           const stateChanged = newLifecycleState !== (o.lifecycleState ?? 'DISCOVERED');
           if (stateChanged) {
             changedOpps.push({ ...o, lifecycleState: newLifecycleState });

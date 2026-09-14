@@ -17,7 +17,8 @@ import { AgentEngine } from '../../src/engine/agentEngine';
 import { SupabaseRepository } from '../../src/engine/supabaseRepository';
 import { D1Repository } from '../../src/engine/d1Repository';
 import type { EngineRepository } from '../../src/engine/repository';
-import type { ProspectStatus, OfferStatus, ProjectMilestoneKey } from '../../src/types';
+import type { ProspectStatus, OfferStatus, ProjectMilestoneKey, RealRevenueEntry } from '../../src/types';
+import { computeProfit, generateLearningEvent, foldRealRevenueIntoMemory } from '../../src/lib/realRevenue';
 import { createLLMProvider } from '../../src/services/providers/llm';
 import { createSearchProvider } from '../../src/services/providers/search';
 import { balanceFrom } from '../../src/services/wallet';
@@ -204,6 +205,8 @@ export default {
           offers,
           designBriefs,
           projects,
+          realRevenue,
+          learningEvents,
         ] = await Promise.all([
           repo.listOpportunities(),
           repo.listExperiments(),
@@ -222,6 +225,8 @@ export default {
           repo.listOffers(),
           repo.listDesignBriefs(),
           repo.listProjects(),
+          repo.listRealRevenue(),
+          repo.listLearningEvents(),
         ]);
         return json({
           ok: true,
@@ -249,6 +254,9 @@ export default {
           offers,
           designBriefs,
           projects,
+          // Real revenue + feedback learning (Phase 4).
+          realRevenue,
+          learningEvents: learningEvents.slice(0, 300),
         });
       } catch (e) {
         return json({ ok: false, error: (e as Error).message }, { status: 500 });
@@ -351,6 +359,128 @@ export default {
         const { repo } = buildEngine(env);
         await repo.advanceProjectMilestone(projectId, milestone as ProjectMilestoneKey);
         return json({ ok: true, projectId, milestone });
+      } catch (e) {
+        return json({ ok: false, error: (e as Error).message }, { status: 500 });
+      }
+    }
+
+    if (url.pathname === '/real-revenue' && req.method === 'POST') {
+      // The real-money write path (Phase 4, §13): a human records what
+      // actually happened after a real transaction. Append-only — this
+      // handler only ever inserts, never updates or deletes an entry, and
+      // never touches the simulated wallet/experiment tables. Immediately
+      // generates one learning event (§17) comparing prediction to actual
+      // and folds a note into agent_memory — feedback happens the moment
+      // the entry is recorded, not on the next cron cycle.
+      let body: any;
+      try {
+        body = await req.json();
+      } catch {
+        return json({ ok: false, error: 'invalid JSON body' }, { status: 400 });
+      }
+      const {
+        opportunityId,
+        prospectId,
+        projectId,
+        productService,
+        quotedPrice,
+        amountReceived,
+        costs,
+        currency,
+        paymentMethod,
+        acquisitionChannel,
+        daysFromDiscoveryToPayment,
+        notes,
+        date,
+      } = body ?? {};
+
+      const VALID_METHODS = new Set(['CASH', 'BANK_TRANSFER', 'MOBILE_MONEY', 'CARD', 'OTHER']);
+      const missing = ['opportunityId', 'prospectId', 'projectId', 'productService'].filter(
+        (k) => typeof body?.[k] !== 'string' || !body[k],
+      );
+      if (missing.length) {
+        return json({ ok: false, error: `missing/invalid required field(s): ${missing.join(', ')}` }, { status: 400 });
+      }
+      if (typeof amountReceived !== 'number' || amountReceived < 0) {
+        return json({ ok: false, error: 'amountReceived must be a non-negative number' }, { status: 400 });
+      }
+      if (paymentMethod !== undefined && !VALID_METHODS.has(paymentMethod)) {
+        return json({ ok: false, error: `paymentMethod must be one of: ${[...VALID_METHODS].join(', ')}` }, { status: 400 });
+      }
+
+      try {
+        const { repo } = buildEngine(env);
+        const [opportunities, businessModels, memory] = await Promise.all([
+          repo.listOpportunities(),
+          repo.listBusinessModels(),
+          repo.listMemory(),
+        ]);
+        const opp = opportunities.find((o) => o.id === opportunityId);
+        if (!opp) return json({ ok: false, error: `no opportunity found with id ${opportunityId}` }, { status: 404 });
+        const model = businessModels.find((m) => m.opportunityId === opportunityId);
+
+        const now = Date.now();
+        const profit = computeProfit(amountReceived, typeof costs === 'number' ? costs : 0);
+        const entry: RealRevenueEntry = {
+          id: `rr_${crypto.randomUUID()}`,
+          date: typeof date === 'number' ? date : now,
+          opportunityId,
+          opportunityName: opp.name,
+          prospectId,
+          prospectName: typeof body?.prospectName === 'string' ? body.prospectName : '',
+          projectId,
+          productService,
+          quotedPrice: typeof quotedPrice === 'number' ? quotedPrice : 0,
+          amountReceived,
+          costs: typeof costs === 'number' ? costs : 0,
+          profit,
+          currency: typeof currency === 'string' && currency ? currency : 'USD',
+          paymentMethod: paymentMethod ?? 'OTHER',
+          acquisitionChannel: typeof acquisitionChannel === 'string' ? acquisitionChannel : '',
+          daysFromDiscoveryToPayment: typeof daysFromDiscoveryToPayment === 'number' ? daysFromDiscoveryToPayment : 0,
+          notes: typeof notes === 'string' ? notes : undefined,
+          createdAt: now,
+        };
+        await repo.addRealRevenueEntry(entry);
+
+        const learningEvent = generateLearningEvent(entry, opp, model, now);
+        await repo.appendLearningEvent(learningEvent);
+
+        const updatedMemory = foldRealRevenueIntoMemory(memory, entry, opp, now);
+        for (const m of updatedMemory) {
+          if (!memory.includes(m)) await repo.upsertMemory(m);
+        }
+
+        return json({ ok: true, entry, learningEvent });
+      } catch (e) {
+        return json({ ok: false, error: (e as Error).message }, { status: 500 });
+      }
+    }
+
+    if (url.pathname === '/projects/outcome' && req.method === 'POST') {
+      // Real-world outcome tracking (Phase 4, §15) — satisfaction, repeat
+      // purchase, referral. Optional fields, filled in whenever known.
+      let body: any;
+      try {
+        body = await req.json();
+      } catch {
+        return json({ ok: false, error: 'invalid JSON body' }, { status: 400 });
+      }
+      const { projectId, satisfaction, repeatPurchase, referral } = body ?? {};
+      if (typeof projectId !== 'string' || !projectId) {
+        return json({ ok: false, error: 'projectId is required' }, { status: 400 });
+      }
+      if (satisfaction !== undefined && (typeof satisfaction !== 'number' || satisfaction < 1 || satisfaction > 5)) {
+        return json({ ok: false, error: 'satisfaction must be a number 1-5' }, { status: 400 });
+      }
+      try {
+        const { repo } = buildEngine(env);
+        await repo.updateProjectOutcome(projectId, {
+          satisfaction: typeof satisfaction === 'number' ? satisfaction : undefined,
+          repeatPurchase: typeof repeatPurchase === 'boolean' ? repeatPurchase : undefined,
+          referral: typeof referral === 'boolean' ? referral : undefined,
+        });
+        return json({ ok: true, projectId });
       } catch (e) {
         return json({ ok: false, error: (e as Error).message }, { status: 500 });
       }

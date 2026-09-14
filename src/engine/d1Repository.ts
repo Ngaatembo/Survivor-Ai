@@ -26,6 +26,7 @@ import type {
   DesignBrief,
   EventType,
   Experiment,
+  LearningEvent,
   LeadScoreBreakdown,
   MemoryEntry,
   Offer,
@@ -37,6 +38,7 @@ import type {
   ProjectMilestoneKey,
   Prospect,
   ProspectInteraction,
+  RealRevenueEntry,
   RecommendedAction,
   ResearchReport,
   Strategy,
@@ -820,6 +822,8 @@ export class D1Repository implements EngineRepository {
       'design_briefs', // no agent_id column; deleted via prospects/offers join below
       'offers', // no agent_id column; deleted via prospects join below
       'projects', // no agent_id column; deleted via prospects join below
+      'real_revenue', // no agent_id column; deleted via opportunities join below
+      'learning_events', // no agent_id column; deleted via opportunities join below
       'prospects',
     ];
 
@@ -846,10 +850,26 @@ export class D1Repository implements EngineRepository {
       this.db.prepare(
         `DELETE FROM projects WHERE prospect_id IN (SELECT id FROM prospects WHERE agent_id = ?)`,
       ).bind(this.agentId),
+      this.db.prepare(
+        `DELETE FROM real_revenue WHERE opportunity_id IN (SELECT id FROM opportunities WHERE agent_id = ?)`,
+      ).bind(this.agentId),
+      this.db.prepare(
+        `DELETE FROM learning_events WHERE opportunity_id IN (SELECT id FROM opportunities WHERE agent_id = ?)`,
+      ).bind(this.agentId),
       ...tables
         .filter(
           (t) =>
-            !['experiment_results', 'research_sources', 'prospect_interactions', 'outreach_messages', 'design_briefs', 'offers', 'projects'].includes(t),
+            ![
+              'experiment_results',
+              'research_sources',
+              'prospect_interactions',
+              'outreach_messages',
+              'design_briefs',
+              'offers',
+              'projects',
+              'real_revenue',
+              'learning_events',
+            ].includes(t),
         )
         .map((t) => this.db.prepare(`DELETE FROM ${t} WHERE agent_id = ?`).bind(this.agentId)),
       this.db.prepare('DELETE FROM agents WHERE id = ?').bind(this.agentId),
@@ -1497,6 +1517,9 @@ export class D1Repository implements EngineRepository {
       startedAt: this.ms(r.started_at),
       deliveredAt: r.delivered_at ? this.ms(r.delivered_at) : undefined,
       updatedAt: this.ms(r.updated_at),
+      satisfaction: r.satisfaction ?? undefined,
+      repeatPurchase: r.repeat_purchase === null || r.repeat_purchase === undefined ? undefined : !!r.repeat_purchase,
+      referral: r.referral === null || r.referral === undefined ? undefined : !!r.referral,
     };
   }
 
@@ -1508,6 +1531,153 @@ export class D1Repository implements EngineRepository {
         `UPDATE prospects SET status = ?, reason_lost = COALESCE(?, reason_lost), updated_at = ? WHERE id = ?`,
       )
       .bind(status, reasonLost ?? null, this.iso(Date.now()), prospectId)
+      .run();
+  }
+
+  /* --------------------------- real revenue ledger --------------------------- */
+
+  async listRealRevenue(): Promise<RealRevenueEntry[]> {
+    const { results } = await this.db
+      .prepare(
+        `SELECT rr.* FROM real_revenue rr
+         JOIN opportunities o ON o.id = rr.opportunity_id
+         WHERE o.agent_id = ? ORDER BY rr.date DESC`,
+      )
+      .bind(this.agentId)
+      .all();
+    return results.map((r: any) => this.mapRealRevenue(r));
+  }
+
+  async addRealRevenueEntry(entry: RealRevenueEntry): Promise<void> {
+    // Append-only, per the design constraint — always an INSERT, never an
+    // upsert/update. Auditable ledger of actual money received.
+    await this.db
+      .prepare(
+        `INSERT INTO real_revenue (
+           id, date, opportunity_id, opportunity_name, prospect_id, prospect_name, project_id,
+           product_service, quoted_price, amount_received, costs, profit, currency, payment_method,
+           acquisition_channel, days_from_discovery_to_payment, notes, created_at
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      )
+      .bind(
+        entry.id,
+        this.iso(entry.date),
+        entry.opportunityId,
+        entry.opportunityName,
+        entry.prospectId,
+        entry.prospectName,
+        entry.projectId,
+        entry.productService,
+        entry.quotedPrice,
+        entry.amountReceived,
+        entry.costs,
+        entry.profit,
+        entry.currency,
+        entry.paymentMethod,
+        entry.acquisitionChannel,
+        entry.daysFromDiscoveryToPayment,
+        entry.notes ?? null,
+        this.iso(entry.createdAt),
+      )
+      .run();
+  }
+
+  private mapRealRevenue(r: any): RealRevenueEntry {
+    return {
+      id: r.id,
+      date: this.ms(r.date),
+      opportunityId: r.opportunity_id,
+      opportunityName: r.opportunity_name ?? '',
+      prospectId: r.prospect_id,
+      prospectName: r.prospect_name ?? '',
+      projectId: r.project_id,
+      productService: r.product_service,
+      quotedPrice: this.n(r.quoted_price),
+      amountReceived: this.n(r.amount_received),
+      costs: this.n(r.costs),
+      profit: this.n(r.profit),
+      currency: r.currency,
+      paymentMethod: r.payment_method,
+      acquisitionChannel: r.acquisition_channel,
+      daysFromDiscoveryToPayment: r.days_from_discovery_to_payment,
+      notes: r.notes ?? undefined,
+      createdAt: this.ms(r.created_at),
+    };
+  }
+
+  /* ----------------------------- learning events ------------------------------ */
+
+  async listLearningEvents(): Promise<LearningEvent[]> {
+    const { results } = await this.db
+      .prepare(
+        `SELECT le.* FROM learning_events le
+         JOIN opportunities o ON o.id = le.opportunity_id
+         WHERE o.agent_id = ? ORDER BY le.created_at DESC`,
+      )
+      .bind(this.agentId)
+      .all();
+    return results.map((r: any) => this.mapLearningEvent(r));
+  }
+
+  async appendLearningEvent(event: LearningEvent): Promise<void> {
+    // Append-only, per the design constraint.
+    await this.db
+      .prepare(
+        `INSERT INTO learning_events (id, kind, opportunity_id, category, ref_id, summary, predicted_value, actual_value, delta_pct, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      )
+      .bind(
+        event.id,
+        event.kind,
+        event.opportunityId,
+        event.category,
+        event.refId,
+        event.summary,
+        event.predictedValue ?? null,
+        event.actualValue ?? null,
+        event.deltaPct ?? null,
+        this.iso(event.createdAt),
+      )
+      .run();
+  }
+
+  private mapLearningEvent(r: any): LearningEvent {
+    return {
+      id: r.id,
+      kind: r.kind,
+      opportunityId: r.opportunity_id,
+      category: r.category,
+      refId: r.ref_id,
+      summary: r.summary,
+      predictedValue: r.predicted_value ?? undefined,
+      actualValue: r.actual_value ?? undefined,
+      deltaPct: r.delta_pct ?? undefined,
+      createdAt: this.ms(r.created_at),
+    };
+  }
+
+  /* --------------------------- project outcome tracking ------------------------ */
+
+  async updateProjectOutcome(
+    projectId: string,
+    outcome: { satisfaction?: number; repeatPurchase?: boolean; referral?: boolean },
+  ): Promise<void> {
+    await this.db
+      .prepare(
+        `UPDATE projects SET
+           satisfaction = COALESCE(?, satisfaction),
+           repeat_purchase = COALESCE(?, repeat_purchase),
+           referral = COALESCE(?, referral),
+           updated_at = ?
+         WHERE id = ?`,
+      )
+      .bind(
+        outcome.satisfaction ?? null,
+        outcome.repeatPurchase === undefined ? null : this.b(outcome.repeatPurchase),
+        outcome.referral === undefined ? null : this.b(outcome.referral),
+        this.iso(Date.now()),
+        projectId,
+      )
       .run();
   }
 }

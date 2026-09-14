@@ -673,6 +673,68 @@ export interface Project {
   startedAt: number;
   deliveredAt?: number;
   updatedAt: number;
+
+  // Real-world outcome tracking (Phase 4, §15) — optional, filled in by a
+  // human once known. Never inferred or defaulted.
+  satisfaction?: number; // 1-5
+  repeatPurchase?: boolean;
+  referral?: boolean;
+}
+
+/* ----------------------------- real revenue -------------------------------- */
+
+/**
+ * The actual-money record (Phase 4, §13) — completely separate from the
+ * simulated wallet/experiment economics used everywhere else in the app.
+ * The platform never moves money; a human fills this in after a real
+ * transaction happens. Append-only: entries are never edited or deleted
+ * once recorded, so this stays an honest audit trail.
+ */
+export type PaymentMethod = 'CASH' | 'BANK_TRANSFER' | 'MOBILE_MONEY' | 'CARD' | 'OTHER';
+
+export interface RealRevenueEntry {
+  id: string;
+  date: number; // when the real transaction happened
+  opportunityId: string;
+  opportunityName: string;
+  prospectId: string;
+  prospectName: string;
+  projectId: string;
+  productService: string;
+  quotedPrice: number;
+  amountReceived: number;
+  costs: number;
+  profit: number; // amountReceived - costs, stored (not just derived) for audit
+  currency: string;
+  paymentMethod: PaymentMethod;
+  acquisitionChannel: string;
+  daysFromDiscoveryToPayment: number;
+  notes?: string;
+  createdAt: number;
+}
+
+/* ---------------------------- learning events ------------------------------ */
+
+/**
+ * Append-only feed of real-world data points that changed or reinforced a
+ * conclusion (Phase 4, §17). Feeds `agent_memory` (via a note, not a
+ * parallel system) and a small, explainable rule-based scoring nudge
+ * (`realWorldScoreAdjustment` in lib/realRevenue.ts) — never a black-box
+ * model.
+ */
+export type LearningEventKind = 'REAL_REVENUE_RECORDED' | 'PREDICTION_VS_ACTUAL';
+
+export interface LearningEvent {
+  id: string;
+  kind: LearningEventKind;
+  opportunityId: string;
+  category: string;
+  refId: string; // the real_revenue entry id this event was generated from
+  summary: string; // human-readable "what we learned" line
+  predictedValue?: number;
+  actualValue?: number;
+  deltaPct?: number; // (actual - predicted) / predicted, when both exist
+  createdAt: number;
 }
 
 /* ------------------------------ service wiring ---------------------------- */

@@ -6,9 +6,14 @@
 # Apply the D1 schema (one-time, or after schema.d1.sql changes):
 #   npx wrangler d1 execute survivor-ai --file=./schema.d1.sql --remote
 # Migrations (0001-0004) are applied automatically by
-# .github/workflows/deploy.yml on every push to main — each file uses
-# CREATE TABLE IF NOT EXISTS / additive ALTERs, so re-running is safe. Add a
-# new explicit `wrangler d1 execute` step there for each future migration.
+# .github/workflows/deploy.yml on every push to main — each of those files
+# uses CREATE TABLE IF NOT EXISTS / additive-only patterns, so re-running is
+# safe. 0005 adds bare `ALTER TABLE ... ADD COLUMN` statements (SQLite has
+# no ADD COLUMN IF NOT EXISTS), which fail on a second run — apply it ONCE,
+# manually:
+#   npx wrangler d1 execute survivor-ai --file=./migrations/0005_real_revenue.sql --remote
+# Add a new explicit `wrangler d1 execute` step to deploy.yml only for a
+# future migration that is itself safe to re-run.
 # Set secrets after first deploy:
 #   npx wrangler secret put ANTHROPIC_API_KEY      (or OPENAI_API_KEY)
 #   npx wrangler secret put TAVILY_API_KEY         (or BRAVE_API_KEY)

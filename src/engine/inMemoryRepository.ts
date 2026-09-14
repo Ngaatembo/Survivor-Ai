@@ -12,6 +12,7 @@ import type {
   CycleStepKey,
   DesignBrief,
   Experiment,
+  LearningEvent,
   MemoryEntry,
   Offer,
   Opportunity,
@@ -21,6 +22,7 @@ import type {
   ProjectMilestoneKey,
   Prospect,
   ProspectInteraction,
+  RealRevenueEntry,
   RecommendedAction,
   ResearchReport,
   Strategy,
@@ -48,6 +50,8 @@ interface InMemoryState {
   offers: Offer[];
   designBriefs: DesignBrief[];
   projects: Project[];
+  realRevenue: RealRevenueEntry[];
+  learningEvents: LearningEvent[];
 }
 
 export class InMemoryRepository implements EngineRepository {
@@ -70,6 +74,8 @@ export class InMemoryRepository implements EngineRepository {
     offers: [],
     designBriefs: [],
     projects: [],
+    realRevenue: [],
+    learningEvents: [],
   };
 
   /** Load a snapshot (e.g. produced by createSeedState). */
@@ -218,6 +224,8 @@ export class InMemoryRepository implements EngineRepository {
       offers: [],
       designBriefs: [],
       projects: [],
+      realRevenue: [],
+      learningEvents: [],
     };
   }
 
@@ -301,6 +309,29 @@ export class InMemoryRepository implements EngineRepository {
   async updateProspectStatus(prospectId: string, status: Prospect['status'], reasonLost?: string) {
     this.state.prospects = this.state.prospects.map((p) =>
       p.id === prospectId ? { ...p, status, reasonLost: reasonLost ?? p.reasonLost, updatedAt: Date.now() } : p,
+    );
+  }
+
+  async listRealRevenue() {
+    return this.state.realRevenue;
+  }
+  async addRealRevenueEntry(entry: RealRevenueEntry) {
+    this.state.realRevenue = [entry, ...this.state.realRevenue];
+  }
+
+  async listLearningEvents() {
+    return this.state.learningEvents;
+  }
+  async appendLearningEvent(event: LearningEvent) {
+    this.state.learningEvents = [event, ...this.state.learningEvents];
+  }
+
+  async updateProjectOutcome(
+    projectId: string,
+    outcome: { satisfaction?: number; repeatPurchase?: boolean; referral?: boolean },
+  ) {
+    this.state.projects = this.state.projects.map((p) =>
+      p.id === projectId ? { ...p, ...outcome, updatedAt: Date.now() } : p,
     );
   }
 }

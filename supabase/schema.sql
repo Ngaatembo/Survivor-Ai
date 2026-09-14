@@ -314,10 +314,59 @@ create table projects (
   status                      project_status not null default 'ACTIVE',
   started_at                  timestamptz not null default now(),
   delivered_at                timestamptz,
-  updated_at                  timestamptz not null default now()
+  updated_at                  timestamptz not null default now(),
+  -- Real-world outcome tracking (Phase 4, §15) — nullable, filled in by a
+  -- human once known.
+  satisfaction                int,
+  repeat_purchase             boolean,
+  referral                    boolean
 );
 create index idx_projects_prospect on projects(prospect_id);
 create index idx_projects_opportunity on projects(opportunity_id);
+
+-- real_revenue, learning_events — Phase 4 (real revenue). Both append-only:
+-- rows are inserted, never updated or deleted, so this stays an honest
+-- audit trail of actual money and the data points that came from it.
+create type payment_method as enum ('CASH', 'BANK_TRANSFER', 'MOBILE_MONEY', 'CARD', 'OTHER');
+create type learning_event_kind as enum ('REAL_REVENUE_RECORDED', 'PREDICTION_VS_ACTUAL');
+
+create table real_revenue (
+  id                                 text primary key,
+  date                               timestamptz not null default now(),
+  opportunity_id                     text not null references opportunities(id) on delete cascade,
+  opportunity_name                   text not null default '',
+  prospect_id                        text not null references prospects(id) on delete cascade,
+  prospect_name                      text not null default '',
+  project_id                         text not null references projects(id) on delete cascade,
+  product_service                    text not null default '',
+  quoted_price                       numeric(12,2) not null default 0,
+  amount_received                    numeric(12,2) not null default 0,
+  costs                              numeric(12,2) not null default 0,
+  profit                             numeric(12,2) not null default 0,
+  currency                           text not null default 'USD',
+  payment_method                     payment_method not null default 'OTHER',
+  acquisition_channel                text not null default '',
+  days_from_discovery_to_payment     int not null default 0,
+  notes                              text,
+  created_at                         timestamptz not null default now()
+);
+create index idx_real_revenue_opportunity on real_revenue(opportunity_id);
+create index idx_real_revenue_project on real_revenue(project_id);
+
+create table learning_events (
+  id                 text primary key,
+  kind               learning_event_kind not null,
+  opportunity_id     text not null references opportunities(id) on delete cascade,
+  category           text not null,
+  ref_id             text not null,
+  summary            text not null,
+  predicted_value    numeric(12,2),
+  actual_value       numeric(12,2),
+  delta_pct          numeric(6,2),
+  created_at         timestamptz not null default now()
+);
+create index idx_learning_events_opportunity on learning_events(opportunity_id);
+create index idx_learning_events_category on learning_events(category);
 
 -- research_sources -----------------------------------------------------------
 

@@ -15,6 +15,7 @@ import type {
   CycleStepKey,
   DesignBrief,
   Experiment,
+  LearningEvent,
   MemoryEntry,
   Offer,
   Opportunity,
@@ -24,6 +25,7 @@ import type {
   ProjectMilestoneKey,
   Prospect,
   ProspectInteraction,
+  RealRevenueEntry,
   RecommendedAction,
   ResearchReport,
   Strategy,
@@ -66,6 +68,8 @@ export function createStoreRepository(get: Get, set: Set, reseed: () => StateSha
   let offers: Offer[] = [];
   let designBriefs: DesignBrief[] = [];
   let projects: Project[] = [];
+  let realRevenue: RealRevenueEntry[] = [];
+  let learningEvents: LearningEvent[] = [];
   return {
     async getAgent() {
       return get().agent;
@@ -206,6 +210,8 @@ export function createStoreRepository(get: Get, set: Set, reseed: () => StateSha
       offers = [];
       designBriefs = [];
       projects = [];
+      realRevenue = [];
+      learningEvents = [];
       set(reseed() as any);
     },
 
@@ -284,6 +290,24 @@ export function createStoreRepository(get: Get, set: Set, reseed: () => StateSha
       prospects = prospects.map((p) =>
         p.id === prospectId ? { ...p, status, reasonLost: reasonLost ?? p.reasonLost, updatedAt: Date.now() } : p,
       );
+    },
+
+    async listRealRevenue() {
+      return realRevenue;
+    },
+    async addRealRevenueEntry(entry) {
+      realRevenue = [entry, ...realRevenue];
+    },
+
+    async listLearningEvents() {
+      return learningEvents;
+    },
+    async appendLearningEvent(event) {
+      learningEvents = [event, ...learningEvents];
+    },
+
+    async updateProjectOutcome(projectId, outcome) {
+      projects = projects.map((p) => (p.id === projectId ? { ...p, ...outcome, updatedAt: Date.now() } : p));
     },
   };
 }

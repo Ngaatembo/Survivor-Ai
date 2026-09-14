@@ -19,6 +19,7 @@ import type {
   DesignBrief,
   EventType,
   Experiment,
+  LearningEvent,
   MemoryEntry,
   Offer,
   Opportunity,
@@ -29,6 +30,7 @@ import type {
   ProjectMilestoneKey,
   Prospect,
   ProspectInteraction,
+  RealRevenueEntry,
   RecommendedAction,
   ResearchReport,
   Strategy,
@@ -1243,6 +1245,9 @@ export class SupabaseRepository implements EngineRepository {
       startedAt: Date.parse(r.started_at) || Date.now(),
       deliveredAt: r.delivered_at ? Date.parse(r.delivered_at) : undefined,
       updatedAt: Date.parse(r.updated_at) || Date.now(),
+      satisfaction: r.satisfaction ?? undefined,
+      repeatPurchase: r.repeat_purchase ?? undefined,
+      referral: r.referral ?? undefined,
     };
   }
 
@@ -1252,6 +1257,125 @@ export class SupabaseRepository implements EngineRepository {
     const patch: Record<string, unknown> = { status, updated_at: new Date().toISOString() };
     if (reasonLost !== undefined) patch.reason_lost = reasonLost;
     const { error } = await this.db.from('prospects').update(patch).eq('id', prospectId);
+    if (error) throw new Error(error.message);
+  }
+
+  /* --------------------------- real revenue ledger --------------------------- */
+
+  async listRealRevenue(): Promise<RealRevenueEntry[]> {
+    const { data: oppRows, error: oe } = await this.db.from('opportunities').select('id').eq('agent_id', this.agentId);
+    if (oe) throw new Error(oe.message);
+    const ids = (oppRows ?? []).map((r: any) => r.id);
+    if (!ids.length) return [];
+    const { data, error } = await this.db.from('real_revenue').select('*').in('opportunity_id', ids).order('date', { ascending: false });
+    if (error) throw new Error(error.message);
+    return (data ?? []).map((r: any) => this.mapRealRevenue(r));
+  }
+
+  async addRealRevenueEntry(entry: RealRevenueEntry): Promise<void> {
+    // Append-only: always an insert, never an upsert/update.
+    const row = {
+      id: entry.id,
+      date: new Date(entry.date).toISOString(),
+      opportunity_id: entry.opportunityId,
+      opportunity_name: entry.opportunityName,
+      prospect_id: entry.prospectId,
+      prospect_name: entry.prospectName,
+      project_id: entry.projectId,
+      product_service: entry.productService,
+      quoted_price: entry.quotedPrice,
+      amount_received: entry.amountReceived,
+      costs: entry.costs,
+      profit: entry.profit,
+      currency: entry.currency,
+      payment_method: entry.paymentMethod,
+      acquisition_channel: entry.acquisitionChannel,
+      days_from_discovery_to_payment: entry.daysFromDiscoveryToPayment,
+      notes: entry.notes ?? null,
+      created_at: new Date(entry.createdAt).toISOString(),
+    };
+    const { error } = await this.db.from('real_revenue').insert(row);
+    if (error) throw new Error(error.message);
+  }
+
+  private mapRealRevenue(r: any): RealRevenueEntry {
+    return {
+      id: r.id,
+      date: Date.parse(r.date) || Date.now(),
+      opportunityId: r.opportunity_id,
+      opportunityName: r.opportunity_name ?? '',
+      prospectId: r.prospect_id,
+      prospectName: r.prospect_name ?? '',
+      projectId: r.project_id,
+      productService: r.product_service,
+      quotedPrice: this.n(r.quoted_price),
+      amountReceived: this.n(r.amount_received),
+      costs: this.n(r.costs),
+      profit: this.n(r.profit),
+      currency: r.currency,
+      paymentMethod: r.payment_method,
+      acquisitionChannel: r.acquisition_channel,
+      daysFromDiscoveryToPayment: r.days_from_discovery_to_payment,
+      notes: r.notes ?? undefined,
+      createdAt: Date.parse(r.created_at) || Date.now(),
+    };
+  }
+
+  /* ----------------------------- learning events ------------------------------ */
+
+  async listLearningEvents(): Promise<LearningEvent[]> {
+    const { data: oppRows, error: oe } = await this.db.from('opportunities').select('id').eq('agent_id', this.agentId);
+    if (oe) throw new Error(oe.message);
+    const ids = (oppRows ?? []).map((r: any) => r.id);
+    if (!ids.length) return [];
+    const { data, error } = await this.db.from('learning_events').select('*').in('opportunity_id', ids).order('created_at', { ascending: false });
+    if (error) throw new Error(error.message);
+    return (data ?? []).map((r: any) => this.mapLearningEvent(r));
+  }
+
+  async appendLearningEvent(event: LearningEvent): Promise<void> {
+    const row = {
+      id: event.id,
+      kind: event.kind,
+      opportunity_id: event.opportunityId,
+      category: event.category,
+      ref_id: event.refId,
+      summary: event.summary,
+      predicted_value: event.predictedValue ?? null,
+      actual_value: event.actualValue ?? null,
+      delta_pct: event.deltaPct ?? null,
+      created_at: new Date(event.createdAt).toISOString(),
+    };
+    const { error } = await this.db.from('learning_events').insert(row);
+    if (error) throw new Error(error.message);
+  }
+
+  private mapLearningEvent(r: any): LearningEvent {
+    return {
+      id: r.id,
+      kind: r.kind,
+      opportunityId: r.opportunity_id,
+      category: r.category,
+      refId: r.ref_id,
+      summary: r.summary,
+      predictedValue: r.predicted_value ?? undefined,
+      actualValue: r.actual_value ?? undefined,
+      deltaPct: r.delta_pct ?? undefined,
+      createdAt: Date.parse(r.created_at) || Date.now(),
+    };
+  }
+
+  /* --------------------------- project outcome tracking ------------------------ */
+
+  async updateProjectOutcome(
+    projectId: string,
+    outcome: { satisfaction?: number; repeatPurchase?: boolean; referral?: boolean },
+  ): Promise<void> {
+    const patch: Record<string, unknown> = { updated_at: new Date().toISOString() };
+    if (outcome.satisfaction !== undefined) patch.satisfaction = outcome.satisfaction;
+    if (outcome.repeatPurchase !== undefined) patch.repeat_purchase = outcome.repeatPurchase;
+    if (outcome.referral !== undefined) patch.referral = outcome.referral;
+    const { error } = await this.db.from('projects').update(patch).eq('id', projectId);
     if (error) throw new Error(error.message);
   }
 }

@@ -20,6 +20,7 @@ import type {
   BusinessModel,
   DesignBrief,
   Experiment,
+  LearningEvent,
   MemoryEntry,
   Offer,
   Opportunity,
@@ -30,6 +31,7 @@ import type {
   Prospect,
   ProspectInteraction,
   ProspectStatus,
+  RealRevenueEntry,
   RecommendedAction,
   ResearchReport,
   Strategy,
@@ -70,6 +72,8 @@ export interface BackendState {
   offers: Offer[];
   designBriefs: DesignBrief[];
   projects: Project[];
+  realRevenue: RealRevenueEntry[];
+  learningEvents: LearningEvent[];
 }
 
 export class BackendError extends Error {
@@ -187,4 +191,36 @@ export function advanceProjectMilestone(
   milestone: ProjectMilestoneKey,
 ): Promise<{ ok: true; projectId: string; milestone: ProjectMilestoneKey }> {
   return postJson('/projects/milestone', { projectId, milestone });
+}
+
+/** Real-money write path (Phase 4): record what actually happened after a
+ *  real transaction. Append-only on the backend — this always creates a
+ *  new entry, never edits one. Returns the stored entry plus the learning
+ *  event it generated. */
+export function addRealRevenueEntry(input: {
+  opportunityId: string;
+  prospectId: string;
+  prospectName?: string;
+  projectId: string;
+  productService: string;
+  quotedPrice?: number;
+  amountReceived: number;
+  costs?: number;
+  currency?: string;
+  paymentMethod?: RealRevenueEntry['paymentMethod'];
+  acquisitionChannel?: string;
+  daysFromDiscoveryToPayment?: number;
+  notes?: string;
+  date?: number;
+}): Promise<{ ok: true; entry: RealRevenueEntry; learningEvent: LearningEvent }> {
+  return postJson('/real-revenue', input);
+}
+
+/** Real-world outcome tracking (Phase 4): satisfaction/repeat/referral on
+ *  a delivery project. */
+export function updateProjectOutcome(
+  projectId: string,
+  outcome: { satisfaction?: number; repeatPurchase?: boolean; referral?: boolean },
+): Promise<{ ok: true; projectId: string }> {
+  return postJson('/projects/outcome', { projectId, ...outcome });
 }

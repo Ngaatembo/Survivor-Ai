@@ -16,6 +16,7 @@ import type {
   CycleStepKey,
   DesignBrief,
   Experiment,
+  LearningEvent,
   MemoryEntry,
   Offer,
   Opportunity,
@@ -26,6 +27,7 @@ import type {
   Prospect,
   ProspectInteraction,
   ProspectStatus,
+  RealRevenueEntry,
   RecommendedAction,
   ResearchReport,
   Strategy,
@@ -43,6 +45,7 @@ import { createSeedSnapshot } from './engine/seed';
 import { createLLMProvider } from './services/providers/llm';
 import { createSearchProvider } from './services/providers/search';
 import { env, featureFlags } from './config/env';
+import { computeProfit, generateLearningEvent, foldRealRevenueIntoMemory } from './lib/realRevenue';
 import {
   fetchBackendState,
   fetchBackendHealth,
@@ -50,6 +53,8 @@ import {
   updateProspectStatus as apiUpdateProspectStatus,
   updateOfferStatus as apiUpdateOfferStatus,
   advanceProjectMilestone as apiAdvanceProjectMilestone,
+  addRealRevenueEntry as apiAddRealRevenueEntry,
+  updateProjectOutcome as apiUpdateProjectOutcome,
 } from './services/backendApi';
 
 const delay = (ms: number) => new Promise((r) => setTimeout(r, ms));
@@ -81,6 +86,8 @@ function seedInitialState() {
     offers: [] as Offer[],
     designBriefs: [] as DesignBrief[],
     projects: [] as Project[],
+    realRevenue: [] as RealRevenueEntry[],
+    learningEvents: [] as LearningEvent[],
   };
 }
 
@@ -120,6 +127,8 @@ interface SurviveState {
   offers: Offer[];
   designBriefs: DesignBrief[];
   projects: Project[];
+  realRevenue: RealRevenueEntry[];
+  learningEvents: LearningEvent[];
   loop: LoopState;
   backend: BackendSyncState;
 
@@ -137,6 +146,27 @@ interface SurviveState {
   updateProspectStatus: (prospectId: string, status: ProspectStatus, reasonLost?: string) => Promise<void>;
   updateOfferStatus: (offerId: string, status: Offer['status']) => Promise<void>;
   advanceProjectMilestone: (projectId: string, milestone: ProjectMilestoneKey) => Promise<void>;
+  /** Real-money write path (Phase 4) — always human-entered, never
+   *  autonomous. Same backend/demo-mode split as the actions above. */
+  addRealRevenueEntry: (input: {
+    opportunityId: string;
+    prospectId: string;
+    prospectName?: string;
+    projectId: string;
+    productService: string;
+    quotedPrice?: number;
+    amountReceived: number;
+    costs?: number;
+    currency?: string;
+    paymentMethod?: RealRevenueEntry['paymentMethod'];
+    acquisitionChannel?: string;
+    daysFromDiscoveryToPayment?: number;
+    notes?: string;
+  }) => Promise<void>;
+  updateProjectOutcome: (
+    projectId: string,
+    outcome: { satisfaction?: number; repeatPurchase?: boolean; referral?: boolean },
+  ) => Promise<void>;
   _runAuto: () => Promise<void>;
 }
 
@@ -241,6 +271,8 @@ export const useStore = create<SurviveState>()(
               offers: state.offers,
               designBriefs: state.designBriefs,
               projects: state.projects,
+              realRevenue: state.realRevenue,
+              learningEvents: state.learningEvents,
               backend: {
                 connected: true,
                 syncing: false,
@@ -299,6 +331,97 @@ export const useStore = create<SurviveState>()(
             return;
           }
           await repo.advanceProjectMilestone(projectId, milestone);
+          set({ projects: await repo.listProjects() } as any);
+        },
+
+        addRealRevenueEntry: async (input: {
+          opportunityId: string;
+          prospectId: string;
+          prospectName?: string;
+          projectId: string;
+          productService: string;
+          quotedPrice?: number;
+          amountReceived: number;
+          costs?: number;
+          currency?: string;
+          paymentMethod?: RealRevenueEntry['paymentMethod'];
+          acquisitionChannel?: string;
+          daysFromDiscoveryToPayment?: number;
+          notes?: string;
+        }) => {
+          if (featureFlags.backend) {
+            try {
+              await apiAddRealRevenueEntry(input);
+              await get().syncFromBackend();
+            } catch (e) {
+              const message = e instanceof BackendError ? e.message : (e as Error).message;
+              get().logEvent('WARNING', `Failed to record real revenue: ${message}`);
+            }
+            return;
+          }
+          // Demo mode: mirror the worker's /real-revenue handler exactly —
+          // append the entry, generate one learning event, fold a note
+          // into memory. Never touches the simulated wallet.
+          const [opportunities, businessModels, memory] = await Promise.all([
+            repo.listOpportunities(),
+            repo.listBusinessModels(),
+            repo.listMemory(),
+          ]);
+          const opp = opportunities.find((o) => o.id === input.opportunityId);
+          if (!opp) {
+            get().logEvent('WARNING', `Failed to record real revenue: no opportunity found with id ${input.opportunityId}`);
+            return;
+          }
+          const model = businessModels.find((m) => m.opportunityId === input.opportunityId);
+          const now = Date.now();
+          const entry: RealRevenueEntry = {
+            id: uid('rr'),
+            date: now,
+            opportunityId: input.opportunityId,
+            opportunityName: opp.name,
+            prospectId: input.prospectId,
+            prospectName: input.prospectName ?? '',
+            projectId: input.projectId,
+            productService: input.productService,
+            quotedPrice: input.quotedPrice ?? 0,
+            amountReceived: input.amountReceived,
+            costs: input.costs ?? 0,
+            profit: computeProfit(input.amountReceived, input.costs ?? 0),
+            currency: input.currency ?? 'USD',
+            paymentMethod: input.paymentMethod ?? 'OTHER',
+            acquisitionChannel: input.acquisitionChannel ?? '',
+            daysFromDiscoveryToPayment: input.daysFromDiscoveryToPayment ?? 0,
+            notes: input.notes,
+            createdAt: now,
+          };
+          await repo.addRealRevenueEntry(entry);
+          const learningEvent = generateLearningEvent(entry, opp, model, now);
+          await repo.appendLearningEvent(learningEvent);
+          const updatedMemory = foldRealRevenueIntoMemory(memory, entry, opp, now);
+          for (const m of updatedMemory) {
+            if (!memory.includes(m)) await repo.upsertMemory(m);
+          }
+          set({
+            realRevenue: await repo.listRealRevenue(),
+            learningEvents: await repo.listLearningEvents(),
+          } as any);
+        },
+
+        updateProjectOutcome: async (
+          projectId: string,
+          outcome: { satisfaction?: number; repeatPurchase?: boolean; referral?: boolean },
+        ) => {
+          if (featureFlags.backend) {
+            try {
+              await apiUpdateProjectOutcome(projectId, outcome);
+              await get().syncFromBackend();
+            } catch (e) {
+              const message = e instanceof BackendError ? e.message : (e as Error).message;
+              get().logEvent('WARNING', `Failed to update project outcome: ${message}`);
+            }
+            return;
+          }
+          await repo.updateProjectOutcome(projectId, outcome);
           set({ projects: await repo.listProjects() } as any);
         },
 

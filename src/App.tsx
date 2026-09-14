@@ -6,6 +6,7 @@ import { ResearchEngine } from './components/ResearchEngine';
 import { OpportunityExplorer } from './components/OpportunityExplorer';
 import { Prospects } from './components/Prospects';
 import { Projects } from './components/Projects';
+import { Analytics } from './components/Analytics';
 import { DecisionCenter } from './components/DecisionCenter';
 import { Experiments } from './components/Experiments';
 import { MemoryView } from './components/MemoryView';
@@ -21,6 +22,7 @@ export type View =
   | 'explorer'
   | 'prospects'
   | 'projects'
+  | 'analytics'
   | 'decision'
   | 'experiments'
   | 'memory'
@@ -35,6 +37,7 @@ const NAV: { id: View; label: string; icon: string; section: string }[] = [
   { id: 'explorer', label: 'Opportunity Explorer', icon: '▤', section: 'DISCOVERY' },
   { id: 'prospects', label: 'Prospects / CRM', icon: '☎', section: 'DISCOVERY' },
   { id: 'projects', label: 'Delivery Projects', icon: '🛠', section: 'DISCOVERY' },
+  { id: 'analytics', label: 'Analytics', icon: '📊', section: 'DISCOVERY' },
   { id: 'decision', label: 'Decision Center', icon: '➤', section: 'DISCOVERY' },
   { id: 'reports', label: 'Research Reports', icon: '▦', section: 'DISCOVERY' },
   { id: 'experiments', label: 'Experiments', icon: '▶', section: 'OPERATIONS' },
@@ -50,6 +53,7 @@ const TITLES: Record<View, string> = {
   explorer: 'Opportunity Explorer',
   prospects: 'Prospects / CRM',
   projects: 'Delivery Projects',
+  analytics: 'Simulation vs. Reality Analytics',
   decision: 'AI Decision Center',
   experiments: 'Experiment System',
   memory: 'Agent Memory',
@@ -212,6 +216,7 @@ export function App() {
           {view === 'explorer' && <OpportunityExplorer />}
           {view === 'prospects' && <Prospects />}
           {view === 'projects' && <Projects />}
+          {view === 'analytics' && <Analytics />}
           {view === 'decision' && <DecisionCenter />}
           {view === 'experiments' && <Experiments />}
           {view === 'memory' && <MemoryView />}

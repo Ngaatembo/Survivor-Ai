@@ -14,12 +14,14 @@
 import type {
   DecisionAction,
   Experiment,
+  LearningEvent,
   MemoryEntry,
   Opportunity,
   OpportunityDecision,
   OpportunityLifecycleState,
 } from '../types';
 import { uid } from './format';
+import { realWorldScoreAdjustment } from './realRevenue';
 
 /** Minimum composite score to leave pure research (DISCOVERED) and start
  *  spending simulated capital to test the idea for real (VALIDATING). */
@@ -48,7 +50,7 @@ const EVIDENCE_WEIGHT: Record<Opportunity['evidenceTier'], number> = {
  * should rank below a lower-ROI idea that can produce real cash quickly.
  * Fully explainable — every factor is a plain field on the opportunity.
  */
-export function realRevenueScore(opp: Opportunity, memory: MemoryEntry[]): number {
+export function realRevenueScore(opp: Opportunity, memory: MemoryEntry[], learningEvents: LearningEvent[] = []): number {
   const profitPotential = Math.max(0, (opp.revenuePotentialMonthlyMin + opp.revenuePotentialMonthlyMax) / 2);
   const evidenceQuality = EVIDENCE_WEIGHT[opp.evidenceTier];
   const avgDays = Math.max(1, (opp.timeToRevenueDaysMin + opp.timeToRevenueDaysMax) / 2);
@@ -64,6 +66,12 @@ export function realRevenueScore(opp: Opportunity, memory: MemoryEntry[]): numbe
     else if (mem.conclusion === 'MIXED') score *= 0.8;
     else if (mem.conclusion === 'AVOID') score *= 0.05;
   }
+
+  // Phase 4 §17 — a small, explainable real-world adjustment once at least
+  // 2 real outcomes exist for this category. Never applied on a single
+  // data point; see realWorldScoreAdjustment for the exact rule.
+  score *= realWorldScoreAdjustment(opp.category, learningEvents).multiplier;
+
   return Math.round(score * 100) / 100;
 }
 
@@ -103,10 +111,11 @@ export function evaluateOpportunity(
   opp: Opportunity,
   memory: MemoryEntry[],
   experiments: Experiment[],
+  learningEvents: LearningEvent[] = [],
   now: number = Date.now(),
 ): EvaluationResult {
   const ev = gatherEvidence(opp, memory, experiments);
-  const score = realRevenueScore(opp, memory);
+  const score = realRevenueScore(opp, memory, learningEvents);
   const prev = opp.lifecycleState ?? 'DISCOVERED';
 
   let action: DecisionAction = 'CONTINUE';
