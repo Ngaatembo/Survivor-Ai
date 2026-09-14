@@ -5,6 +5,23 @@
 
 ---
 
+## -2. Phase 5 — Intelligence (COMPLETE, this session)
+
+Everything below improves logic that already existed, using the real-world data Phase 4 collects. No new subsystem, no black-box model — every adjustment is a small, bounded, explainable blend between the modeled estimate and the real-world track record, and only ever kicks in once there's enough real data to be more than noise (3+ decided prospects for a category).
+
+- **`lib/realRevenue.ts`**: `blendWithReal()` — the one generic blending rule used everywhere below (real-world weight starts at 0 below 3 samples, grows 0.15/sample, caps at 0.6 — the model always keeps some say). `computeCategoryRealWorldStats()` — real close rate, avg time-to-revenue, avg deal value per opportunity category, computed fresh from prospects (WON/LOST) + real_revenue each time.
+- **§18 (scoring)**: `scoreOpportunity()` and `realRevenueScore()`/`evaluateOpportunity()` now blend real close-rate and real time-to-revenue into the `successProbability`/`speedToRevenue` factors that feed both the dashboard score breakdown and the KILL/ITERATE/SCALE decision — alongside (not replacing) Phase 4's price/time learning-event multiplier. Both fully backward compatible (optional params).
+- **§19 (opportunity memory)**: `foldRealRevenueIntoMemory()` now also surfaces objections/notes text and a running "this category's real close rate is X% across N decided prospects" line directly in `agent_memory` — and because that same real close rate now feeds into `scoreOpportunity()`, a category with a real-world track record of losing naturally scores lower and is naturally deprioritized in opportunity selection, without needing to touch the (simulated-evidence-gated) lifecycle state machine.
+- **§20 (prospect ranking)**: `scoreProspect()` blends `probabilityOfClose` with the category's real close rate (still capped at the existing conservative 35% ceiling), adding an explanatory factor string when the blend actually applies. Wired through `discoverProspects()` so newly-discovered prospects benefit immediately.
+- **§21 (action prioritization)**: `computeRecommendedActions()` applies a bounded (0.6x-1.6x) real-world weight to `CONTACT_PROSPECT`/`FOLLOW_UP_PROSPECT`/`SEND_OFFER` expected values — this is the ranking-time catch-up for prospects scored before real data existed, since §20's blend only affects newly-scored ones.
+- **§22 (visible improvement)**: new "Prediction error over time" chart in the Analytics view — a rolling average of `|price prediction error|` across recorded outcomes, oldest to newest, so whether predictions are actually getting closer to reality is visible, not just asserted.
+
+Verified: a new pure-function smoke suite (`scripts/intelligence.smoke.ts`, all passing — blend bounds, category-stats computation, backward compatibility of every extended function, and directional correctness of every nudge), all 5 smoke suites passing together, clean `tsc --noEmit` on both tsconfigs, clean `vite build`, and a live integration pass — 2 full cycles against a real local D1 with zero real-world data (confirming every blend is a true no-op until 3+ decided outcomes exist), then a live test with 2 WON + 1 LOST prospect and one real-revenue entry in a category, confirming the opportunity's `successProbability`/`speedToRevenue` score factors visibly shifted from their modeled baseline.
+
+**What remains for Phase 5 to matter in practice:** same pattern as Phases 3/4 — every blend requires 3+ real decided outcomes in a category before it does anything, so this activates once real prospects have been won and lost at some volume.
+
+---
+
 ## -1. Phase 4 — Real Revenue (COMPLETE, this session)
 
 Built, verified, and (pending final push) ready for production:

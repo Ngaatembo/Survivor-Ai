@@ -40,6 +40,7 @@ import { generateOutreachMessages } from '../lib/outreachGenerator';
 import { generateOffer } from '../lib/offerGenerator';
 import { generateDesignBrief } from '../lib/designBriefGenerator';
 import { createProjectFromWonOffer } from '../lib/projectTracker';
+import { computeCategoryRealWorldStats, statsForCategory } from '../lib/realRevenue';
 import { computeRecommendedActions } from '../lib/recommendedActions';
 
 export const STEP_ORDER: CycleStepKey[] = [
@@ -284,7 +285,15 @@ export class AgentEngine {
     await hooks.setActivity?.('Scoring opportunities against the $50 budget…', 'SCORE');
     {
       opportunities = await this.repo.listOpportunities();
-      const scored = scoreAll(opportunities);
+      // Phase 5 §18 — blend in the real-world track record per category
+      // (close rate, actual time-to-revenue) once enough real data exists;
+      // see lib/realRevenue.ts for the exact, explainable blending rule.
+      const categoryStats = computeCategoryRealWorldStats(
+        opportunities,
+        await this.repo.listProspects(),
+        await this.repo.listRealRevenue(),
+      );
+      const scored = scoreAll(opportunities, categoryStats);
       await this.repo.upsertOpportunities(scored);
       const top = [...scored]
         .filter((o) => o.score && !o.executionBlocked)
@@ -302,7 +311,12 @@ export class AgentEngine {
     await hooks.setActivity?.('Ranking candidates by risk-adjusted return…', 'RANK');
     {
       opportunities = await this.repo.listOpportunities();
-      const ranked = rankOpportunities(opportunities).map((o) =>
+      const categoryStats = computeCategoryRealWorldStats(
+        opportunities,
+        await this.repo.listProspects(),
+        await this.repo.listRealRevenue(),
+      );
+      const ranked = rankOpportunities(opportunities, categoryStats).map((o) =>
         o.researchStage === 'UNDISCOVERED' || o.researchStage === 'DISCOVERED'
           ? o
           : { ...o, researchStage: 'RANKED' as const },
@@ -498,12 +512,17 @@ export class AgentEngine {
         );
         const allExperiments = await this.repo.listExperiments();
         const learningEvents = await this.repo.listLearningEvents();
+        const categoryStatsForDecisions = computeCategoryRealWorldStats(
+          researched,
+          await this.repo.listProspects(),
+          await this.repo.listRealRevenue(),
+        );
         const changedOpps: Opportunity[] = [];
         let promotions = 0;
         let kills = 0;
 
         for (const o of researched) {
-          const { decision, newLifecycleState } = evaluateOpportunity(o, memory, allExperiments, learningEvents);
+          const { decision, newLifecycleState } = evaluateOpportunity(o, memory, allExperiments, learningEvents, categoryStatsForDecisions);
           const stateChanged = newLifecycleState !== (o.lifecycleState ?? 'DISCOVERED');
           if (stateChanged) {
             changedOpps.push({ ...o, lifecycleState: newLifecycleState });
@@ -555,6 +574,8 @@ export class AgentEngine {
 
         if (liveSearch?.connected && pursuable.length > 0) {
           const existingProspects = await this.repo.listProspects();
+          const allOppsForStats = await this.repo.listOpportunities();
+          const realRevenueForStats = await this.repo.listRealRevenue();
           let newProspectsCount = 0;
           let highPriorityCount = 0;
           for (const opp of pursuable) {
@@ -562,7 +583,14 @@ export class AgentEngine {
             const existingNames = existingProspects
               .filter((p) => p.opportunityId === opp.id)
               .map((p) => p.businessName);
-            const { prospects, sourcesCount } = await discoverProspects(liveSearch, opp, model, existingNames);
+            // Phase 5 §20 — blend this opportunity's category real close
+            // rate into new prospects' probabilityOfClose from the moment
+            // they're discovered, once enough real data exists.
+            const categoryStats = statsForCategory(
+              computeCategoryRealWorldStats(allOppsForStats, existingProspects, realRevenueForStats),
+              opp.category,
+            );
+            const { prospects, sourcesCount } = await discoverProspects(liveSearch, opp, model, existingNames, categoryStats);
             if (prospects.length === 0) continue;
             await this.repo.upsertProspects(prospects);
             for (const p of prospects) {
@@ -678,7 +706,17 @@ export class AgentEngine {
         const finalProspects = await this.repo.listProspects();
         const finalOffers = await this.repo.listOffers();
         const finalProjects = await this.repo.listProjects();
-        const actions = computeRecommendedActions(freshOpps, decisions, businessModels, memory, finalProspects, finalOffers, finalProjects);
+        const finalCategoryStats = computeCategoryRealWorldStats(freshOpps, finalProspects, await this.repo.listRealRevenue());
+        const actions = computeRecommendedActions(
+          freshOpps,
+          decisions,
+          businessModels,
+          memory,
+          finalProspects,
+          finalOffers,
+          finalProjects,
+          finalCategoryStats,
+        );
         await this.repo.replaceActions(actions);
         if (actions[0]) {
           await hooks.log('DECISION', `Top recommended action: ${actions[0].title}`);

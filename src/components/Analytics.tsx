@@ -1,7 +1,7 @@
 import { useMemo } from 'react';
 import { useStore } from '../store';
-import { Badge, Panel, KV } from './ui';
-import { comparePredictionToActual, aggregateRealityComparison } from '../lib/realRevenue';
+import { Badge, Panel, KV, Sparkline } from './ui';
+import { comparePredictionToActual, aggregateRealityComparison, predictionErrorTrend } from '../lib/realRevenue';
 
 function DeltaBadge({ pct }: { pct?: number }) {
   if (pct === undefined) return <span className="faint small">no data yet</span>;
@@ -26,6 +26,8 @@ export function Analytics() {
 
   const withData = comparisons.filter((c) => c.realEntryCount > 0);
   const aggregate = useMemo(() => aggregateRealityComparison(comparisons), [comparisons]);
+
+  const errorTrend = useMemo(() => predictionErrorTrend(learningEvents), [learningEvents]);
 
   return (
     <div className="view-enter">
@@ -70,6 +72,22 @@ export function Analytics() {
               </div>
             </Panel>
           </div>
+
+          {errorTrend.length > 0 && (
+            <Panel tight style={{ marginBottom: 20 }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+                <div>
+                  <div style={{ fontWeight: 700 }}>Prediction error over time (Phase 5 §22)</div>
+                  <div className="faint small">
+                    Rolling average |price prediction error| across recorded outcomes, oldest to newest. A
+                    falling line means predictions are getting closer to reality.
+                  </div>
+                </div>
+                <div className="stat-value" style={{ fontSize: 20 }}>{errorTrend[errorTrend.length - 1]}%</div>
+              </div>
+              <Sparkline values={errorTrend} width={280} height={48} positive={errorTrend[errorTrend.length - 1] <= errorTrend[0]} />
+            </Panel>
+          )}
 
           <div style={{ display: 'flex', flexDirection: 'column', gap: 10, marginBottom: 20 }}>
             {withData.map((c) => (

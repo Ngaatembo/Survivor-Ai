@@ -21,7 +21,7 @@ import type {
   OpportunityLifecycleState,
 } from '../types';
 import { uid } from './format';
-import { realWorldScoreAdjustment } from './realRevenue';
+import { realWorldScoreAdjustment, blendWithReal, statsForCategory, type CategoryRealWorldStats } from './realRevenue';
 
 /** Minimum composite score to leave pure research (DISCOVERED) and start
  *  spending simulated capital to test the idea for real (VALIDATING). */
@@ -50,15 +50,28 @@ const EVIDENCE_WEIGHT: Record<Opportunity['evidenceTier'], number> = {
  * should rank below a lower-ROI idea that can produce real cash quickly.
  * Fully explainable — every factor is a plain field on the opportunity.
  */
-export function realRevenueScore(opp: Opportunity, memory: MemoryEntry[], learningEvents: LearningEvent[] = []): number {
+export function realRevenueScore(
+  opp: Opportunity,
+  memory: MemoryEntry[],
+  learningEvents: LearningEvent[] = [],
+  categoryStats: CategoryRealWorldStats[] = [],
+): number {
+  // Phase 5 §18 — blend the two real-world-informable inputs (chance of
+  // success, speed to revenue) with this category's actual track record,
+  // same explainable rule used in scoreOpportunity(). A no-op below the
+  // sample-size threshold.
+  const stats = statsForCategory(categoryStats, opp.category);
+  const successProbability = blendWithReal(opp.successProbability, stats?.realCloseRate, stats?.decidedCount ?? 0);
+  const modeledAvgDays = (opp.timeToRevenueDaysMin + opp.timeToRevenueDaysMax) / 2;
+  const avgDays = Math.max(1, blendWithReal(modeledAvgDays, stats?.avgRealTimeToRevenueDays, stats?.decidedCount ?? 0));
+
   const profitPotential = Math.max(0, (opp.revenuePotentialMonthlyMin + opp.revenuePotentialMonthlyMax) / 2);
   const evidenceQuality = EVIDENCE_WEIGHT[opp.evidenceTier];
-  const avgDays = Math.max(1, (opp.timeToRevenueDaysMin + opp.timeToRevenueDaysMax) / 2);
   const speedToRevenue = 14 / avgDays; // normalized so ~2 weeks = 1.0
   const repeatability = opp.scalability / 5;
   const complexity = Math.max(1, opp.difficulty);
 
-  let score = (profitPotential * opp.successProbability * evidenceQuality * speedToRevenue * repeatability) / complexity;
+  let score = (profitPotential * successProbability * evidenceQuality * speedToRevenue * repeatability) / complexity;
 
   const mem = memory.find((m) => m.kind === 'opportunity' && m.refId === opp.id);
   if (mem) {
@@ -67,9 +80,10 @@ export function realRevenueScore(opp: Opportunity, memory: MemoryEntry[], learni
     else if (mem.conclusion === 'AVOID') score *= 0.05;
   }
 
-  // Phase 4 §17 — a small, explainable real-world adjustment once at least
-  // 2 real outcomes exist for this category. Never applied on a single
-  // data point; see realWorldScoreAdjustment for the exact rule.
+  // Phase 4 §17 — a small, explainable adjustment from price/time
+  // prediction-vs-actual learning events, kept alongside the Phase 5
+  // close-rate/speed blending above (extends it, does not replace it).
+  // Never applied on a single data point; see realWorldScoreAdjustment.
   score *= realWorldScoreAdjustment(opp.category, learningEvents).multiplier;
 
   return Math.round(score * 100) / 100;
@@ -112,10 +126,11 @@ export function evaluateOpportunity(
   memory: MemoryEntry[],
   experiments: Experiment[],
   learningEvents: LearningEvent[] = [],
+  categoryStats: CategoryRealWorldStats[] = [],
   now: number = Date.now(),
 ): EvaluationResult {
   const ev = gatherEvidence(opp, memory, experiments);
-  const score = realRevenueScore(opp, memory, learningEvents);
+  const score = realRevenueScore(opp, memory, learningEvents, categoryStats);
   const prev = opp.lifecycleState ?? 'DISCOVERED';
 
   let action: DecisionAction = 'CONTINUE';

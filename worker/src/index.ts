@@ -18,7 +18,7 @@ import { SupabaseRepository } from '../../src/engine/supabaseRepository';
 import { D1Repository } from '../../src/engine/d1Repository';
 import type { EngineRepository } from '../../src/engine/repository';
 import type { ProspectStatus, OfferStatus, ProjectMilestoneKey, RealRevenueEntry } from '../../src/types';
-import { computeProfit, generateLearningEvent, foldRealRevenueIntoMemory } from '../../src/lib/realRevenue';
+import { computeProfit, generateLearningEvent, foldRealRevenueIntoMemory, computeCategoryRealWorldStats, statsForCategory } from '../../src/lib/realRevenue';
 import { createLLMProvider } from '../../src/services/providers/llm';
 import { createSearchProvider } from '../../src/services/providers/search';
 import { balanceFrom } from '../../src/services/wallet';
@@ -410,10 +410,11 @@ export default {
 
       try {
         const { repo } = buildEngine(env);
-        const [opportunities, businessModels, memory] = await Promise.all([
+        const [opportunities, businessModels, memory, prospects] = await Promise.all([
           repo.listOpportunities(),
           repo.listBusinessModels(),
           repo.listMemory(),
+          repo.listProspects(),
         ]);
         const opp = opportunities.find((o) => o.id === opportunityId);
         if (!opp) return json({ ok: false, error: `no opportunity found with id ${opportunityId}` }, { status: 404 });
@@ -446,7 +447,14 @@ export default {
         const learningEvent = generateLearningEvent(entry, opp, model, now);
         await repo.appendLearningEvent(learningEvent);
 
-        const updatedMemory = foldRealRevenueIntoMemory(memory, entry, opp, now);
+        // Phase 5 §19 — include this real entry when computing the
+        // category's running conversion-rate stats, so the memory note
+        // reflects it immediately rather than lagging one entry behind.
+        const categoryStats = statsForCategory(
+          computeCategoryRealWorldStats(opportunities, prospects, [...(await repo.listRealRevenue())]),
+          opp.category,
+        );
+        const updatedMemory = foldRealRevenueIntoMemory(memory, entry, opp, categoryStats, now);
         for (const m of updatedMemory) {
           if (!memory.includes(m)) await repo.upsertMemory(m);
         }

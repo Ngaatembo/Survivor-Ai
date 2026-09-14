@@ -45,7 +45,7 @@ import { createSeedSnapshot } from './engine/seed';
 import { createLLMProvider } from './services/providers/llm';
 import { createSearchProvider } from './services/providers/search';
 import { env, featureFlags } from './config/env';
-import { computeProfit, generateLearningEvent, foldRealRevenueIntoMemory } from './lib/realRevenue';
+import { computeProfit, generateLearningEvent, foldRealRevenueIntoMemory, computeCategoryRealWorldStats, statsForCategory } from './lib/realRevenue';
 import {
   fetchBackendState,
   fetchBackendHealth,
@@ -362,10 +362,11 @@ export const useStore = create<SurviveState>()(
           // Demo mode: mirror the worker's /real-revenue handler exactly —
           // append the entry, generate one learning event, fold a note
           // into memory. Never touches the simulated wallet.
-          const [opportunities, businessModels, memory] = await Promise.all([
+          const [opportunities, businessModels, memory, prospects] = await Promise.all([
             repo.listOpportunities(),
             repo.listBusinessModels(),
             repo.listMemory(),
+            repo.listProspects(),
           ]);
           const opp = opportunities.find((o) => o.id === input.opportunityId);
           if (!opp) {
@@ -397,7 +398,11 @@ export const useStore = create<SurviveState>()(
           await repo.addRealRevenueEntry(entry);
           const learningEvent = generateLearningEvent(entry, opp, model, now);
           await repo.appendLearningEvent(learningEvent);
-          const updatedMemory = foldRealRevenueIntoMemory(memory, entry, opp, now);
+          const categoryStats = statsForCategory(
+            computeCategoryRealWorldStats(opportunities, prospects, await repo.listRealRevenue()),
+            opp.category,
+          );
+          const updatedMemory = foldRealRevenueIntoMemory(memory, entry, opp, categoryStats, now);
           for (const m of updatedMemory) {
             if (!memory.includes(m)) await repo.upsertMemory(m);
           }

@@ -13,6 +13,7 @@
 
 import type { Opportunity, ResearchStage } from '../types';
 import { scoreOpportunity } from '../lib/scoring';
+import type { CategoryRealWorldStats } from '../lib/realRevenue';
 
 /** Pull not-yet-discovered opportunities from the local seeded knowledge base. */
 export function discoverFromKnowledgeBase(
@@ -30,6 +31,7 @@ export function advanceStage(
   ids: string[],
   stage: ResearchStage,
   at: number = Date.now(),
+  categoryStats: CategoryRealWorldStats[] = [],
 ): Opportunity[] {
   const order: ResearchStage[] = [
     'UNDISCOVERED',
@@ -46,24 +48,24 @@ export function advanceStage(
     if (targetIdx <= currentIdx) return o;
     const next: Opportunity = { ...o, researchStage: stage };
     if (stage === 'DISCOVERED' && !o.dateResearched) next.dateResearched = at;
-    if (stage === 'SCORED') next.score = scoreOpportunity(o);
+    if (stage === 'SCORED') next.score = scoreOpportunity(o, categoryStats);
     return next;
   });
 }
 
 /** Score everything that has reached verification. */
-export function scoreAll(opportunities: Opportunity[]): Opportunity[] {
+export function scoreAll(opportunities: Opportunity[], categoryStats: CategoryRealWorldStats[] = []): Opportunity[] {
   return opportunities.map((o) => {
     if (o.researchStage === 'UNDISCOVERED' || o.researchStage === 'DISCOVERED') return o;
-    return { ...o, researchStage: o.researchStage === 'RANKED' ? 'RANKED' : 'SCORED', score: scoreOpportunity(o) };
+    return { ...o, researchStage: o.researchStage === 'RANKED' ? 'RANKED' : 'SCORED', score: scoreOpportunity(o, categoryStats) };
   });
 }
 
-export function rankOpportunities(opportunities: Opportunity[]): Opportunity[] {
+export function rankOpportunities(opportunities: Opportunity[], categoryStats: CategoryRealWorldStats[] = []): Opportunity[] {
   const scored = opportunities.map((o) =>
     o.score || o.researchStage === 'UNDISCOVERED' || o.researchStage === 'DISCOVERED'
       ? o
-      : { ...o, score: scoreOpportunity(o) },
+      : { ...o, score: scoreOpportunity(o, categoryStats) },
   );
   // Stable ranking: score desc, then capital asc, then speed asc.
   return [...scored].sort((a, b) => {

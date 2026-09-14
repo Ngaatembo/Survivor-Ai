@@ -8,6 +8,7 @@
  * ========================================================================== */
 
 import type { Opportunity, ScoreBreakdown, ScoreFactor, ScoreFactorKey } from '../types';
+import { blendWithReal, statsForCategory, type CategoryRealWorldStats } from './realRevenue';
 
 export const STARTING_BUDGET = 50;
 
@@ -44,12 +45,6 @@ function normalizeCapitalFit(o: Opportunity): number {
   return clamp(100 - (min / STARTING_BUDGET) * 100 + (min <= 10 ? 8 : 0));
 }
 
-function normalizeSpeed(o: Opportunity): number {
-  const mid = (o.timeToRevenueDaysMin + o.timeToRevenueDaysMax) / 2;
-  // 7 days ≈ 90; 60 days ≈ 60; 180 days ≈ 15.
-  return clamp(105 - mid * 0.75);
-}
-
 function normalizeProfit(o: Opportunity): number {
   const max = Math.max(0, o.revenuePotentialMonthlyMax);
   // Log scale: $100 ≈ 37, $500 ≈ 50, $2000 ≈ 61, $5000 ≈ 68.
@@ -63,11 +58,22 @@ const tierScore: Record<Opportunity['evidenceTier'], number> = {
   UNVERIFIED: 18,
 };
 
-export function scoreOpportunity(o: Opportunity): ScoreBreakdown {
+export function scoreOpportunity(o: Opportunity, categoryStats: CategoryRealWorldStats[] = []): ScoreBreakdown {
+  // Phase 5 §18 — once a category has a real-world track record (3+
+  // decided prospects), blend it into the two factors that a track record
+  // actually speaks to: how often this category really closes, and how
+  // long it really takes to get paid. Below that sample size, or for a
+  // category with no real data yet, this is a no-op — the modeled
+  // estimate is used exactly as before.
+  const stats = statsForCategory(categoryStats, o.category);
+  const blendedSuccessProbability = blendWithReal(o.successProbability, stats?.realCloseRate, stats?.decidedCount ?? 0);
+  const modeledAvgDays = (o.timeToRevenueDaysMin + o.timeToRevenueDaysMax) / 2;
+  const blendedAvgDays = blendWithReal(modeledAvgDays, stats?.avgRealTimeToRevenueDays, stats?.decidedCount ?? 0);
+
   const raw: Record<ScoreFactorKey, number> = {
     capitalFit: normalizeCapitalFit(o),
-    speedToRevenue: normalizeSpeed(o),
-    successProbability: clamp(o.successProbability * 100),
+    speedToRevenue: clamp(105 - blendedAvgDays * 0.75),
+    successProbability: clamp(blendedSuccessProbability * 100),
     profitPotential: normalizeProfit(o),
     scalability: (o.scalability / 5) * 100,
     competition: ((5 - o.competition) / 4) * 100,

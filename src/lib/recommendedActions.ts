@@ -19,8 +19,26 @@ import type {
 } from '../types';
 import { realRevenueScore } from './decisionEngine';
 import { nextIncompleteMilestone, isOverdue } from './projectTracker';
+import { statsForCategory, type CategoryRealWorldStats } from './realRevenue';
 import { uid } from './format';
 import type { MemoryEntry } from '../types';
+
+/** Phase 5 §21 — weight a prospect action's expectedValue by this
+ *  category's real close-rate track record, once there's enough of one
+ *  (3+ decided prospects) to be more than noise. Bounded to [0.6, 1.6] so
+ *  this stays a nudge, never a takeover, and applies even to a prospect
+ *  scored before real data existed (scoreProspect()'s own blend, §20,
+ *  only affects prospects scored after the fact — this is the ranking-time
+ *  catch-up for everything already on record). BASELINE_CLOSE_RATE is the
+ *  rough midpoint of the conservative 0-35% band scoreProspect() assumes
+ *  for an average-scoring lead. */
+const BASELINE_CLOSE_RATE = 0.12;
+function realWorldActionWeight(category: string | undefined, categoryStats: CategoryRealWorldStats[]): number {
+  if (!category) return 1;
+  const stats = statsForCategory(categoryStats, category);
+  if (!stats || stats.decidedCount < 3) return 1;
+  return Math.max(0.6, Math.min(1.6, stats.realCloseRate / BASELINE_CLOSE_RATE));
+}
 
 function latestDecisionFor(opportunityId: string, decisions: OpportunityDecision[]): OpportunityDecision | undefined {
   return decisions
@@ -49,16 +67,18 @@ export function computeRecommendedActions(
   prospects: Prospect[] = [],
   offers: Offer[] = [],
   projects: Project[] = [],
+  categoryStats: CategoryRealWorldStats[] = [],
   now: number = Date.now(),
   recentWindowMs: number = 2 * 60 * 60 * 1000,
 ): RecommendedAction[] {
   const inputs: ActionInput[] = [];
+  const categoryOf = new Map(opportunities.map((o) => [o.id, o.category]));
 
   for (const opp of opportunities) {
     if (opp.researchStage === 'UNDISCOVERED') continue;
     const decision = latestDecisionFor(opp.id, decisions);
     const model = businessModels.find((m) => m.opportunityId === opp.id);
-    const score = realRevenueScore(opp, memory);
+    const score = realRevenueScore(opp, memory, [], categoryStats);
 
     if (opp.lifecycleState === 'PROVEN' || opp.lifecycleState === 'SCALING') {
       inputs.push({
@@ -126,6 +146,7 @@ export function computeRecommendedActions(
   // prospect or one already past outreach without a due follow-up.
   for (const p of prospects) {
     if (p.priority === 'DO_NOT_CONTACT' || p.status === 'WON' || p.status === 'LOST' || p.status === 'NOT_INTERESTED') continue;
+    const actionWeight = realWorldActionWeight(categoryOf.get(p.opportunityId), categoryStats);
 
     if (p.status === 'DISCOVERED' || p.status === 'QUALIFIED') {
       inputs.push({
@@ -133,7 +154,7 @@ export function computeRecommendedActions(
         prospect: p,
         title: `Contact ${p.businessName}`,
         description: `${p.priority} priority — ${p.evidenceNotes} Estimated deal $${p.score.expectedDealValue.toFixed(0)}, ~${Math.round(p.score.probabilityOfClose * 100)}% probability of close.`,
-        expectedValue: p.score.expectedValue,
+        expectedValue: Math.round(p.score.expectedValue * actionWeight * 100) / 100,
         urgency: p.priority === 'HIGH' ? 5 : p.priority === 'MEDIUM' ? 3 : 1,
         effort: 1,
       });
@@ -143,7 +164,7 @@ export function computeRecommendedActions(
         prospect: p,
         title: `Follow up with ${p.businessName}`,
         description: `Status ${p.status.replace('_', ' ').toLowerCase()} — follow-up was due ${new Date(p.nextFollowUpAt).toLocaleDateString()}.`,
-        expectedValue: p.score.expectedValue * 0.8,
+        expectedValue: Math.round(p.score.expectedValue * 0.8 * actionWeight * 100) / 100,
         urgency: 4,
         effort: 1,
       });
@@ -153,7 +174,7 @@ export function computeRecommendedActions(
         prospect: p,
         title: `Follow up with ${p.businessName}`,
         description: `Contacted ${Math.round((now - p.lastContactAt) / DAY_MS)} day(s) ago with no recorded reply yet.`,
-        expectedValue: p.score.expectedValue * 0.6,
+        expectedValue: Math.round(p.score.expectedValue * 0.6 * actionWeight * 100) / 100,
         urgency: 2,
         effort: 1,
       });
@@ -166,12 +187,13 @@ export function computeRecommendedActions(
     if (offer.status !== 'DRAFT') continue;
     const prospect = prospects.find((p) => p.id === offer.prospectId);
     if (!prospect || prospect.status === 'LOST' || prospect.status === 'NOT_INTERESTED') continue;
+    const actionWeight = realWorldActionWeight(categoryOf.get(prospect.opportunityId), categoryStats);
     inputs.push({
       kind: 'SEND_OFFER',
       prospect,
       title: `Send offer to ${offer.prospectName}`,
       description: `Drafted offer: $${offer.price} over ${offer.timelineDaysMin}-${offer.timelineDaysMax} days, with a design brief ready. Review and send.`,
-      expectedValue: prospect.score.expectedValue || offer.price,
+      expectedValue: Math.round((prospect.score.expectedValue || offer.price) * actionWeight * 100) / 100,
       urgency: 4,
       effort: 1,
     });

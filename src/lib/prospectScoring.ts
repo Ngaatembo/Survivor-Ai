@@ -8,6 +8,7 @@
  * ========================================================================== */
 
 import type { BusinessModel, ContactChannel, LeadScoreBreakdown, Prospect, WebsitePresence } from '../types';
+import { blendWithReal, type CategoryRealWorldStats } from './realRevenue';
 
 /** How strongly each observed web-presence state signals real need for the
  *  website-service offer. ADEQUATE means the business likely already has a
@@ -47,6 +48,7 @@ export interface ScoreProspectInput {
 export function scoreProspect(
   input: ScoreProspectInput,
   businessModel: BusinessModel | undefined,
+  categoryStats?: CategoryRealWorldStats,
   now: number = Date.now(),
 ): LeadScoreBreakdown {
   const factors: string[] = [];
@@ -106,8 +108,21 @@ export function scoreProspect(
 
   // Probability of close: lead score scaled into a believable close-rate
   // band. Deliberately conservative — cold outreach to an unqualified local
-  // business rarely closes above ~35% even for a strong lead.
-  const probabilityOfClose = Math.round(Math.min(0.35, (total / 100) * 0.35) * 100) / 100;
+  // business rarely closes above ~35% even for a strong lead. Phase 5 §20:
+  // once this category has a real-world track record (3+ decided
+  // prospects), that record is blended in before the conservative cap is
+  // applied — a category that demonstrably closes more (or less) than the
+  // static heuristic assumes should say so.
+  const modeledProbability = Math.min(0.35, (total / 100) * 0.35);
+  const probabilityOfClose =
+    Math.round(
+      Math.min(0.35, blendWithReal(modeledProbability, categoryStats?.realCloseRate, categoryStats?.decidedCount ?? 0)) * 100,
+    ) / 100;
+  if (categoryStats && categoryStats.decidedCount >= 3) {
+    factors.push(
+      `Blended with this category's real close rate (${Math.round(categoryStats.realCloseRate * 100)}% across ${categoryStats.decidedCount} decided prospect(s))`,
+    );
+  }
   const expectedValue = Math.round(expectedProfit * probabilityOfClose * 100) / 100;
 
   return {

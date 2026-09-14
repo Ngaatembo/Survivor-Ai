@@ -19,6 +19,7 @@
 import type { BusinessModel, ContactChannel, Opportunity, Prospect, ResearchSource, WebsitePresence } from '../types';
 import { uid } from '../lib/format';
 import { scoreProspect, priorityFromScore } from '../lib/prospectScoring';
+import type { CategoryRealWorldStats } from '../lib/realRevenue';
 import type { SearchProvider } from './providers/types';
 
 /** Rotated across cycles (by day) rather than all searched every cycle, to
@@ -99,6 +100,7 @@ export async function discoverProspects(
   opportunity: Opportunity,
   businessModel: BusinessModel | undefined,
   existingBusinessNames: string[],
+  categoryStats?: CategoryRealWorldStats,
   now: number = Date.now(),
 ): Promise<{ prospects: Prospect[]; queriesRun: number; sourcesCount: number }> {
   const region = opportunity.geographicRelevance[0] ?? 'Zimbabwe';
@@ -152,6 +154,7 @@ export async function discoverProspects(
           hasUrgencySignal,
         },
         businessModel,
+        categoryStats,
         now,
       );
       const priority = priorityFromScore(score, presence);
