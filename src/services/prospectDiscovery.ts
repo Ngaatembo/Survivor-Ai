@@ -123,6 +123,15 @@ export async function discoverProspects(
     for (const r of results) {
       if (found.length >= MAX_NEW_PROSPECTS_PER_CYCLE) break;
       sourcesCount += 1;
+
+      // A Facebook GROUP is a community, not a business — Facebook renders
+      // its post-page titles as "{Group Name} | {Post text}", which would
+      // otherwise get misparsed as a business name below, with the post's
+      // content (and any contact info in it) wrongly attributed to it —
+      // that content belongs to whichever member posted it, not to the
+      // group. Never a reliable prospect source; skip entirely.
+      if (/facebook\.com\/groups\//i.test(r.url)) continue;
+
       const businessName = cleanBusinessName(r.title);
       if (!businessName || businessName.length < 3) continue;
       if (existingBusinessNames.some((n) => n.toLowerCase() === businessName.toLowerCase())) continue;

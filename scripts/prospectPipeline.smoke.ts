@@ -209,6 +209,18 @@ console.log('--- End-to-end discovery: fake search results -> real prospects -> 
       snippet: '',
       source: 'stub',
     },
+    {
+      // Real bug reproduction: Facebook renders a group-post page's title
+      // as "{Group Name} | {Post text}" — a group is a community, not a
+      // business, and post content within it belongs to whichever member
+      // posted it (here, an unrelated coach's own contact number), never
+      // reliably to the group's name. Must be skipped entirely, not
+      // misparsed into a prospect named after the group.
+      title: 'The Market Place Zimbabwe | The 4 Ways to Win in the Clothing Business',
+      url: 'https://www.facebook.com/groups/303721000000000/permalink/1234567890/',
+      snippet: 'For coaching, consulting or mentorship: WhatsApp 0781141313 — The Small Biz Guy.',
+      source: 'stub',
+    },
   ];
 
   const stubSearch: SearchProvider = {
@@ -233,6 +245,16 @@ console.log('--- End-to-end discovery: fake search results -> real prospects -> 
   const ownDomain = prospects.find((p) => p.businessName.toLowerCase().includes('marimba motors'));
   assert(ownDomain?.websitePresence === 'ADEQUATE', 'a result indexed under its own domain is treated as already having a website');
   assert(ownDomain?.priority === 'DO_NOT_CONTACT', 'a business that already has a website is not recommended for the website offer');
+
+  const groupMisattribution = prospects.find((p) => p.businessName.toLowerCase().includes('market place zimbabwe'));
+  assert(
+    !groupMisattribution,
+    'a Facebook GROUP post is never turned into a prospect — the group name is not a business and its poster\'s contact info is never misattributed to it',
+  );
+  assert(
+    !prospects.some((p) => p.contactValue?.includes('0781141313')),
+    'the unrelated group-post author\'s phone number never ends up on any prospect',
+  );
 
   // Repository round-trip (InMemoryRepository — same interface D1/Supabase implement).
   const repo = new InMemoryRepository();

@@ -43,6 +43,12 @@ async function gatherSnippets(
     }
     for (const r of results) {
       if (snippets.length >= MAX_SNIPPETS) break;
+      // Same reasoning as prospectDiscovery.ts: a Facebook GROUP is a
+      // community, not this business — post content within it belongs to
+      // whichever member posted it, never reliably to the business being
+      // researched. Skip entirely rather than risk feeding an LLM (or a
+      // human reading the digest) content misattributed to this prospect.
+      if (/facebook\.com\/groups\//i.test(r.url)) continue;
       snippets.push(`${r.title} — ${r.snippet}`);
       sources.push({
         id: uid('src'),
