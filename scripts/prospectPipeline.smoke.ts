@@ -221,6 +221,29 @@ console.log('--- End-to-end discovery: fake search results -> real prospects -> 
       snippet: 'For coaching, consulting or mentorship: WhatsApp 0781141313 — The Small Biz Guy.',
       source: 'stub',
     },
+    {
+      // Real bug reproduction: Facebook renders a group-post page's title
+      // as "{Group Name} | {Post text}" — a group is a community, not a
+      // business, and post content within it belongs to whichever member
+      // posted it (here, an unrelated coach's own contact number), never
+      // reliably to the group's name. Must be skipped entirely, not
+      // misparsed into a prospect named after the group.
+      title: 'The Market Place Zimbabwe | The 4 Ways to Win in the Clothing Business',
+      url: 'https://www.facebook.com/groups/303721000000000/permalink/1234567890/',
+      snippet: 'For coaching, consulting or mentorship: WhatsApp 0781141313 — The Small Biz Guy.',
+      source: 'stub',
+    },
+    {
+      // Real bug reproduction: a shared government-policy news post
+      // (no commercial signal, not indexed under its own business domain)
+      // was previously turned into a prospect scored 74/100 and marked
+      // HIGH priority. Must be skipped for lack of any real evidence this
+      // is a business at all.
+      title: 'Government Scraps US$703 Bakery Licence Fee... - Cleopas H Mukungunugwa',
+      url: 'https://www.facebook.com/cleopas.mukungunugwa/posts/9876543210',
+      snippet: 'The Government of Zimbabwe has completely removed the Local Authority bakery licence fee, which previously cost US$703. Exchange rate context: 16.0001 to 7.9996 in recent commentary. 12 6 comments 11 shares.',
+      source: 'stub',
+    },
   ];
 
   const stubSearch: SearchProvider = {
@@ -254,6 +277,16 @@ console.log('--- End-to-end discovery: fake search results -> real prospects -> 
   assert(
     !prospects.some((p) => p.contactValue?.includes('0781141313')),
     'the unrelated group-post author\'s phone number never ends up on any prospect',
+  );
+
+  const newsArticleMisattribution = prospects.find((p) => p.businessName.toLowerCase().includes('government scraps'));
+  assert(
+    !newsArticleMisattribution,
+    'a government-policy news post with no commercial signal and no own domain is never turned into a prospect',
+  );
+  assert(
+    !prospects.some((p) => p.contactValue?.includes('16.0001') || p.contactValue?.includes('7.9996')),
+    'a decimal figure from an article\'s economic commentary is never extracted as a phone number',
   );
 
   // Repository round-trip (InMemoryRepository — same interface D1/Supabase implement).
