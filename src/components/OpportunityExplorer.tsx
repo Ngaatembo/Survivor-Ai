@@ -4,6 +4,7 @@ import { Badge, DataSourceBadge, EvidenceBadge, RecommendationBadge, ScoreRing }
 import { capRange, dayRange } from '../lib/format';
 import type { Category } from '../types';
 import { OpportunityDrawer } from './OpportunityDrawer';
+import { featureFlags } from '../config/env';
 
 type SortKey = 'score' | 'capital' | 'speed' | 'risk' | 'potential' | 'evidence';
 
@@ -69,13 +70,32 @@ export function OpportunityExplorer() {
   }, [opportunities, q, category, maxCapital, riskOnly, evidence, aiSuitableOnly, discoveredOnly, sort]);
 
   const drawerOpp = drawerId ? opportunities.find((o) => o.id === drawerId) ?? null : null;
+  const liveCount = opportunities.filter((o) => o.dataSource === 'LIVE').length;
 
   return (
     <div className="view-enter">
       <div className="warn-banner">
-        All records below are <strong>SAMPLE seed data</strong> unless tagged LIVE (no live research
-        connector is attached in v1). Scores are computed by the local engine; evidence tiers express
-        confidence, not guarantees.
+        {featureFlags.backend ? (
+          liveCount > 0 ? (
+            <>
+              {liveCount} of {opportunities.length} opportunities below are <strong>LIVE</strong> — discovered via
+              your connected search provider. The rest are SAMPLE seed data, tagged accordingly. Scores are
+              computed by the local engine; evidence tiers express confidence, not guarantees.
+            </>
+          ) : (
+            <>
+              Connected to the live backend, but no opportunities are tagged <strong>LIVE</strong> yet — all{' '}
+              {opportunities.length} below are SAMPLE seed data. Scores are computed by the local engine;
+              evidence tiers express confidence, not guarantees.
+            </>
+          )
+        ) : (
+          <>
+            All records below are <strong>SAMPLE seed data</strong> unless tagged LIVE (no live research
+            connector is attached in this standalone demo). Scores are computed by the local engine; evidence
+            tiers express confidence, not guarantees.
+          </>
+        )}
       </div>
 
       <div className="filter-bar">
