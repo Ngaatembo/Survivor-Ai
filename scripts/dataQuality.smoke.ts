@@ -127,5 +127,21 @@ console.log('--- Orphaned offers/projects/revenue are flagged ---');
   assert(!revenueIssues.some((i) => i.entityId === 'rr1'), 'a valid revenue entry is never flagged');
 }
 
+console.log('--- Implausible phone number (decimal-formatted, misparsed from article text) is flagged ---');
+{
+  const badPhone = baseProspect({ id: 'p6', businessName: 'News Article Misfire', contactChannel: 'PHONE', contactValue: '16.0001 7.9996' });
+  const issues = computeDataQualityIssues({ prospects: [baseProspect(), badPhone], offers: [], projects: [], realRevenue: [] });
+  const flagged = issues.find((i) => i.entityId === 'p6');
+  assert(!!flagged, 'a decimal-formatted "phone number" is flagged');
+  assert(flagged?.severity === 'HIGH', 'implausible phone numbers are HIGH severity');
+
+  const tooShort = baseProspect({ id: 'p7', contactChannel: 'PHONE', contactValue: '12345' });
+  const shortIssues = computeDataQualityIssues({ prospects: [tooShort], offers: [], projects: [], realRevenue: [] });
+  assert(shortIssues.some((i) => i.entityId === 'p7'), 'an implausibly short digit sequence is flagged');
+
+  const clean = computeDataQualityIssues({ prospects: [baseProspect()], offers: [], projects: [], realRevenue: [] });
+  assert(!clean.some((i) => i.category === 'Implausible phone number'), 'a normal, real-looking phone number is never flagged');
+}
+
 console.log(failures === 0 ? `\nAll checks passed.` : `\n${failures} check(s) FAILED.`);
 process.exit(failures === 0 ? 0 : 1);

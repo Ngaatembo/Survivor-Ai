@@ -29,6 +29,17 @@ function isFacebookGroupUrl(url?: string): boolean {
   return Boolean(url && /facebook\.com\/groups\//i.test(url));
 }
 
+/** Same shape as prospectDiscovery.ts's looksLikeRealPhoneNumber() — a
+ *  contact value stored before that fix could be a decimal-formatted
+ *  figure (e.g. an exchange rate) misparsed as a phone number, rather
+ *  than an actual dialable number. */
+function looksLikeGarbagePhoneNumber(value?: string): boolean {
+  if (!value) return false;
+  if (value.includes('.')) return true; // real numbers don't use '.' as a group separator
+  const digits = value.replace(/\D/g, '');
+  return digits.length < 7 || digits.length > 13;
+}
+
 export function computeDataQualityIssues(input: {
   prospects: Prospect[];
   offers: Offer[];
@@ -47,6 +58,15 @@ export function computeDataQualityIssues(input: {
         severity: 'HIGH',
         category: 'Discovered from a Facebook group',
         message: `"${p.businessName}" was discovered from a Facebook group post. The group's name may have been misparsed as the business name, and any contact info may belong to an unrelated group member — verify manually before contacting.`,
+        entityId: p.id,
+      });
+    }
+    if (p.contactChannel === 'PHONE' && looksLikeGarbagePhoneNumber(p.contactValue)) {
+      issues.push({
+        id: `badphone-${p.id}`,
+        severity: 'HIGH',
+        category: 'Implausible phone number',
+        message: `"${p.businessName}"'s stored contact number "${p.contactValue}" doesn't look like a real phone number — it may be a decimal figure or other text misparsed from the source article. Do not call before verifying manually.`,
         entityId: p.id,
       });
     }
