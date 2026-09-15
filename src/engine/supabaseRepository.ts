@@ -33,6 +33,7 @@ import type {
   ProspectDemo,
   ProspectInteraction,
   ProspectIntelligence,
+  MarketPriceResearch,
   RealRevenueEntry,
   RecommendedAction,
   ResearchReport,
@@ -1097,6 +1098,7 @@ export class SupabaseRepository implements EngineRepository {
       opportunity_id: offer.opportunityId,
       business_model_id: offer.businessModelId ?? null,
       price: offer.price,
+      price_rationale: offer.priceRationale ?? null,
       timeline_days_min: offer.timelineDaysMin,
       timeline_days_max: offer.timelineDaysMax,
       deliverables: offer.deliverables,
@@ -1127,6 +1129,7 @@ export class SupabaseRepository implements EngineRepository {
       opportunityId: r.opportunity_id,
       businessModelId: r.business_model_id ?? undefined,
       price: this.n(r.price),
+      priceRationale: r.price_rationale ?? undefined,
       timelineDaysMin: r.timeline_days_min,
       timelineDaysMax: r.timeline_days_max,
       deliverables: r.deliverables ?? [],
@@ -1471,6 +1474,56 @@ export class SupabaseRepository implements EngineRepository {
       heroHeadline: r.hero_headline,
       sectionsIncluded: (r.sections_included ?? []) as string[],
       generator: r.generator,
+      generatedAt: Date.parse(r.generated_at) || Date.now(),
+      updatedAt: Date.parse(r.updated_at) || Date.now(),
+    };
+  }
+
+  /* -------------------------------- market pricing ------------------------------ */
+
+  async listMarketPriceResearch(): Promise<MarketPriceResearch[]> {
+    const { data: oppRows, error: oe } = await this.db.from('opportunities').select('id').eq('agent_id', this.agentId);
+    if (oe) throw new Error(oe.message);
+    const ids = (oppRows ?? []).map((r: any) => r.id);
+    if (!ids.length) return [];
+    const { data, error } = await this.db.from('market_price_research').select('*').in('opportunity_id', ids);
+    if (error) throw new Error(error.message);
+    return (data ?? []).map((r: any) => this.mapMarketPriceResearch(r));
+  }
+
+  async upsertMarketPriceResearch(research: MarketPriceResearch): Promise<void> {
+    const row = {
+      id: research.id,
+      opportunity_id: research.opportunityId,
+      service: research.service,
+      region: research.region,
+      price_min: research.priceMin,
+      price_max: research.priceMax,
+      currency: research.currency,
+      rationale: research.rationale,
+      confidence: research.confidence,
+      generator: research.generator,
+      sources: research.sources,
+      generated_at: new Date(research.generatedAt).toISOString(),
+      updated_at: new Date(research.updatedAt).toISOString(),
+    };
+    const { error } = await this.db.from('market_price_research').upsert(row, { onConflict: 'opportunity_id' });
+    if (error) throw new Error(error.message);
+  }
+
+  private mapMarketPriceResearch(r: any): MarketPriceResearch {
+    return {
+      id: r.id,
+      opportunityId: r.opportunity_id,
+      service: r.service,
+      region: r.region,
+      priceMin: this.n(r.price_min),
+      priceMax: this.n(r.price_max),
+      currency: r.currency,
+      rationale: r.rationale,
+      confidence: r.confidence,
+      generator: r.generator,
+      sources: (r.sources ?? []) as MarketPriceResearch['sources'],
       generatedAt: Date.parse(r.generated_at) || Date.now(),
       updatedAt: Date.parse(r.updated_at) || Date.now(),
     };

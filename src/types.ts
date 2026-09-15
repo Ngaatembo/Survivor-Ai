@@ -561,6 +561,33 @@ export interface ProspectIntelligence {
   updatedAt: number;
 }
 
+/* ------------------------------ market pricing ------------------------------ */
+
+/**
+ * A real, evidence-grounded market-rate estimate for a specific service in
+ * a specific region — replaces the old pure-formula price guess
+ * (modeled monthly revenue ÷ assumed engagement count) with actual going
+ * rates found via live search, synthesized by the real LLM when
+ * connected. Confidence is only ever HIGH/MEDIUM when the underlying
+ * snippets contained a real pricing figure — never estimated from theory.
+ * One per opportunity, regenerated as research improves.
+ */
+export interface MarketPriceResearch {
+  id: string;
+  opportunityId: string;
+  service: string;
+  region: string;
+  priceMin: number;
+  priceMax: number;
+  currency: string;
+  rationale: string;
+  confidence: IntelligenceConfidence;
+  generator: 'llm' | 'snippet-digest';
+  sources: ResearchSource[];
+  generatedAt: number;
+  updatedAt: number;
+}
+
 /* -------------------------------- demos -------------------------------- */
 
 /* ------------------------------ prospect demos ------------------------------ */
@@ -649,6 +676,7 @@ export interface Offer {
   businessModelId?: string;
 
   price: number;
+  priceRationale?: string; // explains whether the price is grounded in real market research or a formula estimate
   timelineDaysMin: number;
   timelineDaysMax: number;
   deliverables: string[];

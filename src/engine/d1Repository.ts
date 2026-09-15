@@ -41,6 +41,7 @@ import type {
   ProspectDemo,
   ProspectInteraction,
   ProspectIntelligence,
+  MarketPriceResearch,
   RealRevenueEntry,
   RecommendedAction,
   ResearchReport,
@@ -851,6 +852,7 @@ export class D1Repository implements EngineRepository {
       'learning_events', // no agent_id column; deleted via opportunities join below
       'prospect_intelligence', // no agent_id column; deleted via prospects join below
       'prospect_demos', // no agent_id column; deleted via prospects join below
+      'market_price_research', // no agent_id column; deleted via opportunities join below
       'prospects',
     ];
 
@@ -889,6 +891,9 @@ export class D1Repository implements EngineRepository {
       this.db.prepare(
         `DELETE FROM prospect_demos WHERE prospect_id IN (SELECT id FROM prospects WHERE agent_id = ?)`,
       ).bind(this.agentId),
+      this.db.prepare(
+        `DELETE FROM market_price_research WHERE opportunity_id IN (SELECT id FROM opportunities WHERE agent_id = ?)`,
+      ).bind(this.agentId),
       ...tables
         .filter(
           (t) =>
@@ -904,6 +909,7 @@ export class D1Repository implements EngineRepository {
               'learning_events',
               'prospect_intelligence',
               'prospect_demos',
+              'market_price_research',
             ].includes(t),
         )
         .map((t) => this.db.prepare(`DELETE FROM ${t} WHERE agent_id = ?`).bind(this.agentId)),
@@ -1372,6 +1378,7 @@ export class D1Repository implements EngineRepository {
       opportunity_id: offer.opportunityId,
       business_model_id: offer.businessModelId ?? null,
       price: offer.price,
+      price_rationale: offer.priceRationale ?? null,
       timeline_days_min: offer.timelineDaysMin,
       timeline_days_max: offer.timelineDaysMax,
       deliverables: this.j(offer.deliverables),
@@ -1412,6 +1419,7 @@ export class D1Repository implements EngineRepository {
       opportunityId: r.opportunity_id,
       businessModelId: r.business_model_id ?? undefined,
       price: this.n(r.price),
+      priceRationale: r.price_rationale ?? undefined,
       timelineDaysMin: r.timeline_days_min,
       timelineDaysMax: r.timeline_days_max,
       deliverables: this.a<string>(r.deliverables),
@@ -1835,6 +1843,68 @@ export class D1Repository implements EngineRepository {
       heroHeadline: r.hero_headline,
       sectionsIncluded: this.a<string>(r.sections_included),
       generator: r.generator,
+      generatedAt: this.ms(r.generated_at),
+      updatedAt: this.ms(r.updated_at),
+    };
+  }
+
+  /* -------------------------------- market pricing ------------------------------ */
+
+  async listMarketPriceResearch(): Promise<MarketPriceResearch[]> {
+    const { results } = await this.db
+      .prepare(
+        `SELECT mpr.* FROM market_price_research mpr
+         JOIN opportunities o ON o.id = mpr.opportunity_id
+         WHERE o.agent_id = ?`,
+      )
+      .bind(this.agentId)
+      .all();
+    return results.map((r: any) => this.mapMarketPriceResearch(r));
+  }
+
+  async upsertMarketPriceResearch(research: MarketPriceResearch): Promise<void> {
+    const row = {
+      id: research.id,
+      opportunity_id: research.opportunityId,
+      service: research.service,
+      region: research.region,
+      price_min: research.priceMin,
+      price_max: research.priceMax,
+      currency: research.currency,
+      rationale: research.rationale,
+      confidence: research.confidence,
+      generator: research.generator,
+      sources: this.j(research.sources),
+      generated_at: this.iso(research.generatedAt),
+      updated_at: this.iso(research.updatedAt),
+    };
+    const cols = Object.keys(row);
+    const updateClause = cols
+      .filter((c) => c !== 'opportunity_id')
+      .map((c) => `${c} = excluded.${c}`)
+      .join(', ');
+    await this.db
+      .prepare(
+        `INSERT INTO market_price_research (${cols.join(', ')}) VALUES (${cols.map(() => '?').join(', ')})
+         ON CONFLICT(opportunity_id) DO UPDATE SET ${updateClause}`,
+      )
+      .bind(...cols.map((c) => (row as any)[c]))
+      .run();
+  }
+
+  private mapMarketPriceResearch(r: any): MarketPriceResearch {
+    return {
+      id: r.id,
+      opportunityId: r.opportunity_id,
+      service: r.service,
+      region: r.region,
+      priceMin: this.n(r.price_min),
+      priceMax: this.n(r.price_max),
+      currency: r.currency,
+      rationale: r.rationale,
+      confidence: r.confidence,
+      generator: r.generator,
+      sources: this.a(r.sources),
       generatedAt: this.ms(r.generated_at),
       updatedAt: this.ms(r.updated_at),
     };

@@ -5,6 +5,21 @@
 
 ---
 
+## -5. Real market pricing (COMPLETE, this session)
+
+Fixed a real, substantive flaw flagged directly by the user: offer prices (e.g. $16 for a website) were never grounded in what the market actually charges — they came from a bare formula (`modeled monthly revenue ÷ 4 assumed engagements`, floor of just $5) with no connection to real going rates.
+
+- **`src/services/marketPricing.ts`** — runs real live searches for actual going rates for a service in a region, then either has the real LLM synthesize a price range strictly from real figures found in those results (never from theory/general knowledge), or — with no LLM connected, or the call fails — falls back to an honest $0 "not enough evidence" digest, never a fabricated number.
+- **`generateOffer()` now prefers the real researched price** over the old formula guess, but *only* when the research is genuinely confident (LLM-synthesized, non-LOW confidence) — a LOW-confidence or unsynthesized digest never overrides pricing. Every offer now carries a visible `priceRationale` explaining exactly why it's priced the way it is, shown in the Prospect Drawer.
+- **Wired into the cycle**: before drafting any offer, the agent researches real market pricing for that opportunity once (cached per opportunity, not re-researched every cycle).
+- New D1 migration `0009_market_price_research.sql` (new table + a one-time `offers.price_rationale` column addition) + Supabase schema.
+
+Verified: a new mock-provider smoke suite (`scripts/marketPricing.smoke.ts`, all passing) demonstrates the exact fix concretely — the old formula guessed $80 for a sample opportunity; real market research (mocked freelancer quotes of $120-$250 in Harare) corrected it to $185. All 9 smoke suites pass together, clean `tsc --noEmit` on both tsconfigs, clean `vite build`, and a live integration pass against real local D1 confirmed the new `price_rationale` column persists correctly end-to-end (falls back safely to the formula price when no live search/LLM connector is available, exactly as designed).
+
+**What remains for this to matter in practice:** requires live search + LLM to be connected (both already are in your production backend) — the very next offer drafted for a real prospect should be priced from genuine market research rather than the old formula.
+
+---
+
 ## -4. Phase 3 (deepened) — Real working demo pages (COMPLETE, this session)
 
 "Here's what YOUR website could look like" — an actual, working single-page demo per prospect, not just a written brief.

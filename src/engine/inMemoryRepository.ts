@@ -24,6 +24,7 @@ import type {
   ProspectDemo,
   ProspectInteraction,
   ProspectIntelligence,
+  MarketPriceResearch,
   RealRevenueEntry,
   RecommendedAction,
   ResearchReport,
@@ -56,6 +57,7 @@ interface InMemoryState {
   learningEvents: LearningEvent[];
   prospectIntelligence: ProspectIntelligence[];
   prospectDemos: ProspectDemo[];
+  marketPriceResearch: MarketPriceResearch[];
 }
 
 export class InMemoryRepository implements EngineRepository {
@@ -82,6 +84,7 @@ export class InMemoryRepository implements EngineRepository {
     learningEvents: [],
     prospectIntelligence: [],
     prospectDemos: [],
+    marketPriceResearch: [],
   };
 
   /** Load a snapshot (e.g. produced by createSeedState). */
@@ -234,6 +237,7 @@ export class InMemoryRepository implements EngineRepository {
       learningEvents: [],
       prospectIntelligence: [],
       prospectDemos: [],
+      marketPriceResearch: [],
     };
   }
 
@@ -358,5 +362,15 @@ export class InMemoryRepository implements EngineRepository {
   }
   async upsertProspectDemo(demo: ProspectDemo) {
     this.state.prospectDemos = [demo, ...this.state.prospectDemos.filter((d) => d.prospectId !== demo.prospectId)];
+  }
+
+  async listMarketPriceResearch() {
+    return this.state.marketPriceResearch;
+  }
+  async upsertMarketPriceResearch(research: MarketPriceResearch) {
+    this.state.marketPriceResearch = [
+      research,
+      ...this.state.marketPriceResearch.filter((r) => r.opportunityId !== research.opportunityId),
+    ];
   }
 }

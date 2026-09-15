@@ -16,6 +16,7 @@ import type {
   DesignBrief,
   Experiment,
   LearningEvent,
+  MarketPriceResearch,
   MemoryEntry,
   Offer,
   Opportunity,
@@ -180,6 +181,12 @@ export interface EngineRepository {
   // as research/offer details improve.
   listProspectDemos(): Promise<ProspectDemo[]>;
   upsertProspectDemo(demo: ProspectDemo): Promise<void>;
+
+  // market pricing research — real going rates for a specific service in
+  // a specific region, replacing the old pure-formula price guess. One
+  // per opportunity, regenerated (upserted) as research improves.
+  listMarketPriceResearch(): Promise<MarketPriceResearch[]>;
+  upsertMarketPriceResearch(research: MarketPriceResearch): Promise<void>;
 }
 
 /** Engine callbacks so the host can render progress / stay in sync. */

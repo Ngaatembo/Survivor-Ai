@@ -17,6 +17,7 @@ import type {
   DesignBrief,
   Experiment,
   LearningEvent,
+  MarketPriceResearch,
   MemoryEntry,
   Offer,
   Opportunity,
@@ -97,6 +98,7 @@ function seedInitialState() {
     learningEvents: [] as LearningEvent[],
     prospectIntelligence: [] as ProspectIntelligence[],
     prospectDemos: [] as Omit<ProspectDemo, 'html'>[],
+    marketPriceResearch: [] as MarketPriceResearch[],
   };
 }
 
@@ -142,6 +144,7 @@ interface SurviveState {
   // Metadata only — the full HTML lives in the repo (demo mode) or is
   // fetched on demand from the backend (live mode), never persisted here.
   prospectDemos: Omit<ProspectDemo, 'html'>[];
+  marketPriceResearch: MarketPriceResearch[];
   loop: LoopState;
   backend: BackendSyncState;
 
@@ -300,6 +303,7 @@ export const useStore = create<SurviveState>()(
               learningEvents: state.learningEvents,
               prospectIntelligence: state.prospectIntelligence,
               prospectDemos: state.prospectDemos,
+              marketPriceResearch: state.marketPriceResearch,
               backend: {
                 connected: true,
                 syncing: false,

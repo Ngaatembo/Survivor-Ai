@@ -38,6 +38,27 @@ export interface LLMProvider {
     location: string;
     snippets: string[];
   }): Promise<Partial<ProspectIntelligenceAnalysis> | null>;
+
+  /**
+   * Synthesize a real market-rate estimate for a specific service, from
+   * real search snippets about actual going rates — never a formula
+   * guess. Returns null if the model can't answer or the snippets don't
+   * support a confident number (caller then keeps the formula-based
+   * estimate, clearly labeled as such).
+   */
+  analyzeMarketPrice?(input: {
+    service: string;
+    region: string;
+    snippets: string[];
+  }): Promise<Partial<MarketPriceAnalysis> | null>;
+}
+
+export interface MarketPriceAnalysis {
+  priceMin: number;
+  priceMax: number;
+  currency: string;
+  rationale: string;
+  confidence: 'HIGH' | 'MEDIUM' | 'LOW';
 }
 
 export interface ProspectIntelligenceAnalysis {

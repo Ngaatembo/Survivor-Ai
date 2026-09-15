@@ -211,6 +211,7 @@ export default {
           learningEvents,
           prospectIntelligence,
           prospectDemos,
+          marketPriceResearch,
         ] = await Promise.all([
           repo.listOpportunities(),
           repo.listExperiments(),
@@ -233,6 +234,7 @@ export default {
           repo.listLearningEvents(),
           repo.listProspectIntelligence(),
           repo.listProspectDemos(),
+          repo.listMarketPriceResearch(),
         ]);
         return json({
           ok: true,
@@ -269,6 +271,8 @@ export default {
           // the full HTML is served at GET /demo/{prospectId} so this
           // payload stays bounded regardless of how many demos exist.
           prospectDemos: prospectDemos.map(({ html, ...meta }) => meta),
+          // Real market pricing research (replaces the old formula guess).
+          marketPriceResearch,
         });
       } catch (e) {
         return json({ ok: false, error: (e as Error).message }, { status: 500 });

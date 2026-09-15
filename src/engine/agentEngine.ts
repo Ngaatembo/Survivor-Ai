@@ -38,6 +38,7 @@ import { evaluateOpportunity, VALIDATION_SCORE_THRESHOLD } from '../lib/decision
 import { generateBusinessModel } from '../lib/businessModel';
 import { generateOutreachMessages } from '../lib/outreachGenerator';
 import { researchProspect } from '../services/prospectIntelligence';
+import { researchMarketPrice } from '../services/marketPricing';
 import { generateOffer } from '../lib/offerGenerator';
 import { generateDesignBrief } from '../lib/designBriefGenerator';
 import { generateProspectDemo } from '../lib/demoGenerator';
@@ -686,10 +687,11 @@ export class AgentEngine {
           await hooks.log('DECISION', `Prepared outreach messages for ${needsOutreach.length} prospect(s) — review before sending.`);
         }
 
-        // Phase 3 (offer + delivery): draft an offer + design brief for any
-        // engaged prospect (INTERESTED or further along) that doesn't have
-        // one yet. Capped per cycle. Nothing here sends anything — an
-        // offer stays DRAFT until a human moves it via the CRM write path.
+        // Real market-price research (replaces the pure-formula price
+        // guess in businessModel.ts's estimatePrice): for any opportunity
+        // about to produce an offer that doesn't have researched pricing
+        // yet, look up real going rates via live search before quoting a
+        // client. Capped implicitly by needsOffer's own cap below.
         const ENGAGED_STATUSES = new Set(['INTERESTED', 'PROPOSAL_SENT', 'NEGOTIATING', 'WON']);
         const existingOffers = await this.repo.listOffers();
         const latestIntelligence = await this.repo.listProspectIntelligence();
@@ -697,10 +699,30 @@ export class AgentEngine {
           .filter((p) => ENGAGED_STATUSES.has(p.status) && !existingOffers.some((o) => o.prospectId === p.id))
           .sort((a, b) => b.score.expectedValue - a.score.expectedValue)
           .slice(0, 5);
+
+        if (liveSearch?.connected) {
+          const existingPricing = await this.repo.listMarketPriceResearch();
+          const oppsNeedingPricing = new Map<string, Opportunity>();
+          for (const p of needsOffer) {
+            if (existingPricing.some((mp) => mp.opportunityId === p.opportunityId)) continue;
+            const opp = researched.find((o) => o.id === p.opportunityId);
+            if (opp) oppsNeedingPricing.set(opp.id, opp);
+          }
+          for (const opp of oppsNeedingPricing.values()) {
+            const priceResearch = await researchMarketPrice(liveSearch, liveLlm, opp);
+            await this.repo.upsertMarketPriceResearch(priceResearch);
+          }
+          if (oppsNeedingPricing.size > 0) {
+            await hooks.log('DECISION', `Researched real market pricing for ${oppsNeedingPricing.size} opportunity(ies) before quoting.`);
+          }
+        }
+        const latestPricing = await this.repo.listMarketPriceResearch();
+
         for (const p of needsOffer) {
           const model = businessModels.find((m) => m.opportunityId === p.opportunityId);
           const intel = latestIntelligence.find((i) => i.prospectId === p.id);
-          const offer = generateOffer(p, model, intel);
+          const marketPrice = latestPricing.find((mp) => mp.opportunityId === p.opportunityId);
+          const offer = generateOffer(p, model, intel, marketPrice);
           await this.repo.upsertOffer(offer);
           const brief = generateDesignBrief(offer, p);
           await this.repo.upsertDesignBrief(brief);

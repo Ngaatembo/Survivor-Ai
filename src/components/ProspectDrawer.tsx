@@ -236,6 +236,12 @@ export function ProspectDrawer({ prospect, onClose }: { prospect: Prospect; onCl
                 </button>
               )}
             </div>
+            {offer.priceRationale && (
+              <p className="small faint" style={{ marginBottom: 10 }}>
+                <span className="mono-label">Why this price — </span>
+                {offer.priceRationale}
+              </p>
+            )}
             {offer.gapAnalysis && (
               <p className="small" style={{ marginBottom: 8 }}>
                 <span className="mono-label">Gap analysis — </span>

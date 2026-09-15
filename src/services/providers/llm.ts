@@ -4,7 +4,7 @@
  * soft (returns null) so the engine falls back to the rule engine.
  * ========================================================================== */
 
-import type { LLMOpportunityAnalysis, LLMProvider, ProspectIntelligenceAnalysis } from './types';
+import type { LLMOpportunityAnalysis, LLMProvider, MarketPriceAnalysis, ProspectIntelligenceAnalysis } from './types';
 
 const ANALYSIS_SCHEMA_HINT = `Return ONLY minified JSON with this shape:
 {"howMoneyMade":string,"capitalRequiredMin":number,"capitalRequiredMax":number,
@@ -27,6 +27,17 @@ fact this business doesn't have evidence for in the snippets. If the snippets do
 support a field, say so plainly in that field rather than guessing (e.g.
 "no evidence found of X in available sources"). Use LOW confidence when snippets are
 thin or generic. No prose outside the JSON.`;
+
+const MARKET_PRICE_SCHEMA_HINT = `Return ONLY minified JSON with this shape:
+{"priceMin":number,"priceMax":number,"currency":string,"rationale":string,
+"confidence":"HIGH|MEDIUM|LOW"}
+Base the price range ONLY on real going-rate figures actually present in the
+snippets (e.g. a freelancer's listed rate, a competitor's quoted price, a market
+survey figure) — never estimate from theory or general knowledge if the snippets
+don't contain a real number. If the snippets don't contain any real pricing
+evidence, return confidence "LOW" and set priceMin/priceMax to your best honest
+read of whatever partial evidence exists, explaining the gap in rationale. No
+prose outside the JSON.`;
 
 function extractJson(text: string): unknown {
   const start = text.indexOf('{');
@@ -112,6 +123,26 @@ class AnthropicProvider implements LLMProvider {
       return null;
     }
   }
+
+  async analyzeMarketPrice(input: {
+    service: string;
+    region: string;
+    snippets: string[];
+  }): Promise<Partial<MarketPriceAnalysis> | null> {
+    const raw = await this.complete(
+      'You are a careful pricing researcher. Only use real going-rate figures actually present in the provided snippets — never estimate from general theory or knowledge when the snippets lack a real number.',
+      `What do people actually charge for "${input.service}" in ${input.region}?\n\nSearch snippets:\n${input.snippets
+        .slice(0, 8)
+        .map((s, i) => `[${i + 1}] ${s}`)
+        .join('\n')}\n\n${MARKET_PRICE_SCHEMA_HINT}`,
+    );
+    if (!raw) return null;
+    try {
+      return extractJson(raw) as Partial<MarketPriceAnalysis>;
+    } catch {
+      return null;
+    }
+  }
 }
 
 /* ------------------------------- OpenAI ----------------------------------- */
@@ -188,6 +219,26 @@ class OpenAIProvider implements LLMProvider {
     if (!raw) return null;
     try {
       return extractJson(raw) as Partial<ProspectIntelligenceAnalysis>;
+    } catch {
+      return null;
+    }
+  }
+
+  async analyzeMarketPrice(input: {
+    service: string;
+    region: string;
+    snippets: string[];
+  }): Promise<Partial<MarketPriceAnalysis> | null> {
+    const raw = await this.complete(
+      'You are a careful pricing researcher. Only use real going-rate figures actually present in the provided snippets — never estimate from general theory or knowledge when the snippets lack a real number.',
+      `What do people actually charge for "${input.service}" in ${input.region}?\n\nSearch snippets:\n${input.snippets
+        .slice(0, 8)
+        .map((s, i) => `[${i + 1}] ${s}`)
+        .join('\n')}\n\n${MARKET_PRICE_SCHEMA_HINT}`,
+    );
+    if (!raw) return null;
+    try {
+      return extractJson(raw) as Partial<MarketPriceAnalysis>;
     } catch {
       return null;
     }

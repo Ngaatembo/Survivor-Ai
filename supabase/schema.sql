@@ -274,6 +274,7 @@ create table offers (
   opportunity_id         text not null references opportunities(id) on delete cascade,
   business_model_id      text,
   price                  numeric(12,2) not null default 0,
+  price_rationale        text,
   timeline_days_min      int not null default 0,
   timeline_days_max      int not null default 0,
   deliverables           jsonb not null default '[]',
@@ -408,6 +409,25 @@ create table prospect_demos (
 );
 create index idx_prospect_demos_prospect on prospect_demos(prospect_id);
 create index idx_prospect_demos_offer on prospect_demos(offer_id);
+
+-- market_price_research — real going rates for a specific service in a
+-- specific region, replacing the old pure-formula price guess.
+create table market_price_research (
+  id                  text primary key,
+  opportunity_id      text not null unique references opportunities(id) on delete cascade,
+  service             text not null default '',
+  region              text not null default '',
+  price_min           numeric(12,2) not null default 0,
+  price_max           numeric(12,2) not null default 0,
+  currency            text not null default 'USD',
+  rationale           text not null default '',
+  confidence          intelligence_confidence not null default 'LOW',
+  generator           intelligence_generator not null default 'snippet-digest',
+  sources             jsonb not null default '[]',
+  generated_at        timestamptz not null default now(),
+  updated_at          timestamptz not null default now()
+);
+create index idx_market_price_research_opportunity on market_price_research(opportunity_id);
 
 -- research_sources -----------------------------------------------------------
 

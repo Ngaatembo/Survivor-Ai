@@ -13,8 +13,23 @@
  * to SENT via the CRM write path.
  * ========================================================================== */
 
-import type { BusinessModel, Offer, Prospect, ProspectIntelligence, WebsiteBrief } from '../types';
+import type { BusinessModel, MarketPriceResearch, Offer, Prospect, ProspectIntelligence, WebsiteBrief } from '../types';
 import { uid } from './format';
+
+/** Real market research (§ "underpricing fix") always wins over the
+ *  formula-based BusinessModel.suggestedPrice when it's genuinely
+ *  evidence-backed (LLM-synthesized from real snippets, not a LOW-
+ *  confidence digest) — the formula price was never grounded in what the
+ *  market actually charges, only a generic monthly-revenue-model guess. */
+function priceFor(model: BusinessModel | undefined, marketPrice: MarketPriceResearch | undefined): { price: number; rationale?: string } {
+  if (marketPrice && marketPrice.generator === 'llm' && marketPrice.confidence !== 'LOW' && marketPrice.priceMax > 0) {
+    // Quote at the midpoint of the real researched range — a starting
+    // point grounded in evidence, still adjustable in the real conversation.
+    const price = Math.round((marketPrice.priceMin + marketPrice.priceMax) / 2);
+    return { price, rationale: `Based on real market research: ${marketPrice.rationale}` };
+  }
+  return { price: model?.suggestedPrice ?? 25, rationale: model?.priceRationale };
+}
 
 function gapAnalysis(p: Prospect, intelligence?: ProspectIntelligence): string | undefined {
   const generic = (() => {
@@ -82,9 +97,10 @@ export function generateOffer(
   prospect: Prospect,
   model: BusinessModel | undefined,
   intelligence?: ProspectIntelligence,
+  marketPrice?: MarketPriceResearch,
   now: number = Date.now(),
 ): Offer {
-  const price = model?.suggestedPrice ?? 25;
+  const { price, rationale: priceRationale } = priceFor(model, marketPrice);
   const timelineDaysMax = Math.max(3, model?.timeToFirstSaleDaysEstimate ?? 14);
   const timelineDaysMin = Math.min(timelineDaysMax, Math.max(3, Math.round(timelineDaysMax * 0.5)));
 
@@ -104,6 +120,7 @@ export function generateOffer(
     opportunityId: prospect.opportunityId,
     businessModelId: model?.id,
     price,
+    priceRationale,
     timelineDaysMin,
     timelineDaysMax,
     deliverables,

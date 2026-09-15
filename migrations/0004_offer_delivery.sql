@@ -10,6 +10,7 @@ CREATE TABLE IF NOT EXISTS offers (
   opportunity_name             TEXT NOT NULL DEFAULT '',
   business_model_id            TEXT,
   price                       REAL NOT NULL DEFAULT 0,
+  price_rationale             TEXT,
   timeline_days_min            INTEGER NOT NULL DEFAULT 0,
   timeline_days_max            INTEGER NOT NULL DEFAULT 0,
   deliverables                TEXT NOT NULL DEFAULT '[]',

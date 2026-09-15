@@ -21,6 +21,7 @@ import type {
   DesignBrief,
   Experiment,
   LearningEvent,
+  MarketPriceResearch,
   MemoryEntry,
   Offer,
   Opportunity,
@@ -80,6 +81,7 @@ export interface BackendState {
   // The worker's /state strips the full html to keep the payload bounded —
   // fetch the actual page at GET /demo/{prospectId} when needed.
   prospectDemos: Omit<ProspectDemo, 'html'>[];
+  marketPriceResearch: MarketPriceResearch[];
 }
 
 export class BackendError extends Error {
