@@ -105,6 +105,18 @@ export class D1Repository implements EngineRepository {
     }
   }
 
+  /** D1 (Cloudflare's SQLite) caps a single statement at 100 bound
+   *  parameters. Any `WHERE x IN (?,?,...)` built from a caller-supplied
+   *  list must be chunked through this before binding, since that list
+   *  has no fixed upper bound (accumulates over the agent's lifetime as
+   *  more opportunities/prospects are discovered) — 90 leaves headroom
+   *  for the query's own fixed placeholders. */
+  private chunk<T>(items: T[], size = 90): T[][] {
+    const chunks: T[][] = [];
+    for (let i = 0; i < items.length; i += size) chunks.push(items.slice(i, i + size));
+    return chunks;
+  }
+
   private b(v: boolean | undefined | null): number {
     return v ? 1 : 0;
   }
@@ -244,11 +256,15 @@ export class D1Repository implements EngineRepository {
     if (!opps.length) return [];
 
     const ids = opps.map((o: any) => o.id);
-    const placeholders = ids.map(() => '?').join(',');
-    const { results: sources } = await this.db
-      .prepare(`SELECT * FROM research_sources WHERE opportunity_id IN (${placeholders})`)
-      .bind(...ids)
-      .all();
+    const sources: any[] = [];
+    for (const idChunk of this.chunk(ids)) {
+      const placeholders = idChunk.map(() => '?').join(',');
+      const { results } = await this.db
+        .prepare(`SELECT * FROM research_sources WHERE opportunity_id IN (${placeholders})`)
+        .bind(...idChunk)
+        .all();
+      sources.push(...results);
+    }
 
     const sourcesByOpp = new Map<string, any[]>();
     for (const s of sources) {
@@ -288,10 +304,12 @@ export class D1Repository implements EngineRepository {
     // Sources: wipe & re-insert for affected opportunities (kept simple; sources
     // are append-mostly and small) — same approach as SupabaseRepository.
     const ids = opps.map((o) => o.id);
-    const placeholders = ids.map(() => '?').join(',');
-    const deleteStmt = this.db
-      .prepare(`DELETE FROM research_sources WHERE opportunity_id IN (${placeholders})`)
-      .bind(...ids);
+    const deleteStmts = this.chunk(ids).map((idChunk) => {
+      const placeholders = idChunk.map(() => '?').join(',');
+      return this.db
+        .prepare(`DELETE FROM research_sources WHERE opportunity_id IN (${placeholders})`)
+        .bind(...idChunk);
+    });
 
     const sourceStmts = opps.flatMap((o) =>
       o.sources.map((s) =>
@@ -308,7 +326,7 @@ export class D1Repository implements EngineRepository {
       ),
     );
 
-    await this.db.batch([deleteStmt, ...sourceStmts]);
+    await this.db.batch([...deleteStmts, ...sourceStmts]);
   }
 
   private mapOpportunity(r: any, sourceRows: any[]): Opportunity {
@@ -462,11 +480,15 @@ export class D1Repository implements EngineRepository {
     if (!exps.length) return [];
 
     const ids = exps.map((e: any) => e.id);
-    const placeholders = ids.map(() => '?').join(',');
-    const { results: resultRows } = await this.db
-      .prepare(`SELECT * FROM experiment_results WHERE experiment_id IN (${placeholders})`)
-      .bind(...ids)
-      .all();
+    const resultRows: any[] = [];
+    for (const idChunk of this.chunk(ids)) {
+      const placeholders = idChunk.map(() => '?').join(',');
+      const { results } = await this.db
+        .prepare(`SELECT * FROM experiment_results WHERE experiment_id IN (${placeholders})`)
+        .bind(...idChunk)
+        .all();
+      resultRows.push(...results);
+    }
     const resultsByExp = new Map<string, any>();
     for (const res of resultRows) resultsByExp.set(res.experiment_id as string, res);
 
@@ -1084,11 +1106,15 @@ export class D1Repository implements EngineRepository {
       .all();
     if (!rows.length) return [];
     const ids = rows.map((r: any) => r.id);
-    const placeholders = ids.map(() => '?').join(',');
-    const { results: sourceRows } = await this.db
-      .prepare(`SELECT * FROM prospect_sources WHERE prospect_id IN (${placeholders})`)
-      .bind(...ids)
-      .all();
+    const sourceRows: any[] = [];
+    for (const idChunk of this.chunk(ids)) {
+      const placeholders = idChunk.map(() => '?').join(',');
+      const { results } = await this.db
+        .prepare(`SELECT * FROM prospect_sources WHERE prospect_id IN (${placeholders})`)
+        .bind(...idChunk)
+        .all();
+      sourceRows.push(...results);
+    }
     const sourcesByProspect = new Map<string, any[]>();
     for (const s of sourceRows) {
       const list = sourcesByProspect.get(s.prospect_id as string) ?? [];
@@ -1117,10 +1143,12 @@ export class D1Repository implements EngineRepository {
     await this.db.batch(stmts);
 
     const ids = prospects.map((p) => p.id);
-    const placeholders = ids.map(() => '?').join(',');
-    const deleteStmt = this.db
-      .prepare(`DELETE FROM prospect_sources WHERE prospect_id IN (${placeholders})`)
-      .bind(...ids);
+    const deleteStmts = this.chunk(ids).map((idChunk) => {
+      const placeholders = idChunk.map(() => '?').join(',');
+      return this.db
+        .prepare(`DELETE FROM prospect_sources WHERE prospect_id IN (${placeholders})`)
+        .bind(...idChunk);
+    });
     const sourceStmts = prospects.flatMap((p) =>
       p.sources.map((s) =>
         this.db
@@ -1134,7 +1162,7 @@ export class D1Repository implements EngineRepository {
           .bind(s.id, p.id, s.title, s.url ?? null, s.kind, s.note ?? null),
       ),
     );
-    await this.db.batch([deleteStmt, ...sourceStmts]);
+    await this.db.batch([...deleteStmts, ...sourceStmts]);
   }
 
   private prospectRow(p: Prospect): Record<string, unknown> {
