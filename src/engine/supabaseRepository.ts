@@ -19,6 +19,7 @@ import type {
   DesignBrief,
   EventType,
   Experiment,
+  IntelligenceConfidence,
   LearningEvent,
   MemoryEntry,
   Offer,
@@ -30,6 +31,7 @@ import type {
   ProjectMilestoneKey,
   Prospect,
   ProspectInteraction,
+  ProspectIntelligence,
   RealRevenueEntry,
   RecommendedAction,
   ResearchReport,
@@ -1377,6 +1379,56 @@ export class SupabaseRepository implements EngineRepository {
     if (outcome.referral !== undefined) patch.referral = outcome.referral;
     const { error } = await this.db.from('projects').update(patch).eq('id', projectId);
     if (error) throw new Error(error.message);
+  }
+
+  /* --------------------------- prospect intelligence -------------------------- */
+
+  async listProspectIntelligence(): Promise<ProspectIntelligence[]> {
+    const { data: prospectRows, error: pe } = await this.db.from('prospects').select('id').eq('agent_id', this.agentId);
+    if (pe) throw new Error(pe.message);
+    const ids = (prospectRows ?? []).map((r: any) => r.id);
+    if (!ids.length) return [];
+    const { data, error } = await this.db.from('prospect_intelligence').select('*').in('prospect_id', ids);
+    if (error) throw new Error(error.message);
+    return (data ?? []).map((r: any) => this.mapProspectIntelligence(r));
+  }
+
+  async upsertProspectIntelligence(intel: ProspectIntelligence): Promise<void> {
+    const row = {
+      id: intel.id,
+      prospect_id: intel.prospectId,
+      business_overview: intel.businessOverview,
+      apparent_services: intel.apparentServices,
+      social_presence_summary: intel.socialPresenceSummary,
+      competitive_note: intel.competitiveNote,
+      specific_problem_evidence: intel.specificProblemEvidence,
+      recommended_angle: intel.recommendedAngle,
+      confidence: intel.confidence,
+      generator: intel.generator,
+      sources: intel.sources,
+      generated_at: new Date(intel.generatedAt).toISOString(),
+      updated_at: new Date(intel.updatedAt).toISOString(),
+    };
+    const { error } = await this.db.from('prospect_intelligence').upsert(row, { onConflict: 'prospect_id' });
+    if (error) throw new Error(error.message);
+  }
+
+  private mapProspectIntelligence(r: any): ProspectIntelligence {
+    return {
+      id: r.id,
+      prospectId: r.prospect_id,
+      businessOverview: r.business_overview,
+      apparentServices: (r.apparent_services ?? []) as string[],
+      socialPresenceSummary: r.social_presence_summary,
+      competitiveNote: r.competitive_note,
+      specificProblemEvidence: r.specific_problem_evidence,
+      recommendedAngle: r.recommended_angle,
+      confidence: r.confidence as IntelligenceConfidence,
+      generator: r.generator,
+      sources: (r.sources ?? []) as ProspectIntelligence['sources'],
+      generatedAt: Date.parse(r.generated_at) || Date.now(),
+      updatedAt: Date.parse(r.updated_at) || Date.now(),
+    };
   }
 }
 

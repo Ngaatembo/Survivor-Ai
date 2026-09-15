@@ -25,6 +25,29 @@ export interface LLMProvider {
     category: string;
     snippets: string[];
   }): Promise<Partial<LLMOpportunityAnalysis> | null>;
+
+  /**
+   * Synthesize a Prospect Intelligence Report: what this SPECIFIC real
+   * business actually does, from real search snippets about them — never
+   * from a template. Returns null (caller falls back to a rule-based
+   * synthesis directly from the raw snippets) if the model can't answer.
+   */
+  analyzeProspect?(input: {
+    businessName: string;
+    category: string;
+    location: string;
+    snippets: string[];
+  }): Promise<Partial<ProspectIntelligenceAnalysis> | null>;
+}
+
+export interface ProspectIntelligenceAnalysis {
+  businessOverview: string;
+  apparentServices: string[];
+  socialPresenceSummary: string;
+  competitiveNote: string;
+  specificProblemEvidence: string;
+  recommendedAngle: string;
+  confidence: 'HIGH' | 'MEDIUM' | 'LOW';
 }
 
 export interface LLMOpportunityAnalysis {

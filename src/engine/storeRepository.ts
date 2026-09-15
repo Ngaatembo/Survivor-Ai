@@ -25,6 +25,7 @@ import type {
   ProjectMilestoneKey,
   Prospect,
   ProspectInteraction,
+  ProspectIntelligence,
   RealRevenueEntry,
   RecommendedAction,
   ResearchReport,
@@ -70,6 +71,7 @@ export function createStoreRepository(get: Get, set: Set, reseed: () => StateSha
   let projects: Project[] = [];
   let realRevenue: RealRevenueEntry[] = [];
   let learningEvents: LearningEvent[] = [];
+  let prospectIntelligence: ProspectIntelligence[] = [];
   return {
     async getAgent() {
       return get().agent;
@@ -212,6 +214,7 @@ export function createStoreRepository(get: Get, set: Set, reseed: () => StateSha
       projects = [];
       realRevenue = [];
       learningEvents = [];
+      prospectIntelligence = [];
       set(reseed() as any);
     },
 
@@ -308,6 +311,13 @@ export function createStoreRepository(get: Get, set: Set, reseed: () => StateSha
 
     async updateProjectOutcome(projectId, outcome) {
       projects = projects.map((p) => (p.id === projectId ? { ...p, ...outcome, updatedAt: Date.now() } : p));
+    },
+
+    async listProspectIntelligence() {
+      return prospectIntelligence;
+    },
+    async upsertProspectIntelligence(intel) {
+      prospectIntelligence = [intel, ...prospectIntelligence.filter((i) => i.prospectId !== intel.prospectId)];
     },
   };
 }

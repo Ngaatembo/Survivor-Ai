@@ -26,6 +26,7 @@ import type {
   ProjectMilestoneKey,
   Prospect,
   ProspectInteraction,
+  ProspectIntelligence,
   ProspectStatus,
   RealRevenueEntry,
   RecommendedAction,
@@ -46,6 +47,7 @@ import { createLLMProvider } from './services/providers/llm';
 import { createSearchProvider } from './services/providers/search';
 import { env, featureFlags } from './config/env';
 import { computeProfit, generateLearningEvent, foldRealRevenueIntoMemory, computeCategoryRealWorldStats, statsForCategory } from './lib/realRevenue';
+import { researchProspect } from './services/prospectIntelligence';
 import {
   fetchBackendState,
   fetchBackendHealth,
@@ -55,6 +57,7 @@ import {
   advanceProjectMilestone as apiAdvanceProjectMilestone,
   addRealRevenueEntry as apiAddRealRevenueEntry,
   updateProjectOutcome as apiUpdateProjectOutcome,
+  researchProspectNow as apiResearchProspectNow,
 } from './services/backendApi';
 
 const delay = (ms: number) => new Promise((r) => setTimeout(r, ms));
@@ -88,6 +91,7 @@ function seedInitialState() {
     projects: [] as Project[],
     realRevenue: [] as RealRevenueEntry[],
     learningEvents: [] as LearningEvent[],
+    prospectIntelligence: [] as ProspectIntelligence[],
   };
 }
 
@@ -129,6 +133,7 @@ interface SurviveState {
   projects: Project[];
   realRevenue: RealRevenueEntry[];
   learningEvents: LearningEvent[];
+  prospectIntelligence: ProspectIntelligence[];
   loop: LoopState;
   backend: BackendSyncState;
 
@@ -167,6 +172,11 @@ interface SurviveState {
     projectId: string,
     outcome: { satisfaction?: number; repeatPurchase?: boolean; referral?: boolean },
   ) => Promise<void>;
+  /** Phase 6 — manually trigger deep research on one specific prospect
+   *  right now. Backend mode calls the Worker endpoint; demo mode runs the
+   *  same researchProspect() function directly against the local
+   *  search/LLM providers. Requires live search to be connected. */
+  researchProspectNow: (prospectId: string) => Promise<void>;
   _runAuto: () => Promise<void>;
 }
 
@@ -273,6 +283,7 @@ export const useStore = create<SurviveState>()(
               projects: state.projects,
               realRevenue: state.realRevenue,
               learningEvents: state.learningEvents,
+              prospectIntelligence: state.prospectIntelligence,
               backend: {
                 connected: true,
                 syncing: false,
@@ -428,6 +439,32 @@ export const useStore = create<SurviveState>()(
           }
           await repo.updateProjectOutcome(projectId, outcome);
           set({ projects: await repo.listProjects() } as any);
+        },
+
+        researchProspectNow: async (prospectId: string) => {
+          if (featureFlags.backend) {
+            try {
+              await apiResearchProspectNow(prospectId);
+              await get().syncFromBackend();
+            } catch (e) {
+              const message = e instanceof BackendError ? e.message : (e as Error).message;
+              get().logEvent('WARNING', `Failed to research prospect: ${message}`);
+            }
+            return;
+          }
+          if (!search?.connected) {
+            get().logEvent('WARNING', 'Failed to research prospect: no live search provider connected.');
+            return;
+          }
+          const prospects = await repo.listProspects();
+          const prospect = prospects.find((p) => p.id === prospectId);
+          if (!prospect) {
+            get().logEvent('WARNING', `Failed to research prospect: no prospect found with id ${prospectId}.`);
+            return;
+          }
+          const intel = await researchProspect(search, llm, prospect);
+          await repo.upsertProspectIntelligence(intel);
+          set({ prospectIntelligence: await repo.listProspectIntelligence() } as any);
         },
 
         logEvent: (type: AgentEvent['type'], message: string) =>

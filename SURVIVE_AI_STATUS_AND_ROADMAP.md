@@ -1,7 +1,25 @@
 # SURVIVE AI — Status & Path to Real Revenue
 
-**As of:** September 14, 2026
+**As of:** September 15, 2026
 **Purpose:** a working reference for what's done, what's live, and what remains before this project can generate real income — so you can hand out or prioritize the remaining work.
+
+---
+
+## -3. Phase 6 — Prospect Intelligence (deep research) (COMPLETE, this session)
+
+Answers "why would THIS specific business pay us?" using real, live research — not the generic category-level evidence used elsewhere. This also activates a capability (`analyzeProspect`/the LLM connection) that existed in the codebase but was never actually being called — outreach and offers were previously template-only even with an LLM key connected.
+
+- **`src/services/prospectIntelligence.ts`** — runs 3 targeted live searches naming the actual business (name+location, reviews/services, category+location competitors), then either has the real LLM synthesize a report strictly from those snippets, or — if no LLM is connected, or the call fails/returns unusable JSON — falls back to an honest raw-snippet digest. Never fabricates a fact the snippets don't support; the LLM prompt explicitly enforces this and every report carries its sources.
+- **New `ProspectIntelligence` type**: businessOverview, apparentServices, socialPresenceSummary, competitiveNote, specificProblemEvidence, recommendedAngle, confidence (HIGH/MEDIUM/LOW), generator (llm/snippet-digest), sources.
+- **Wired into the autonomous cycle**: runs automatically on your top 3 highest-value engaged prospects each cycle (capped to bound API cost), only when live search is connected.
+- **`POST /prospects/research`** — manually trigger deep research on one specific prospect right now, instead of waiting for the capped auto-cycle. Shown as a "Research now" button in the Prospect Drawer.
+- **Offers and outreach messages now genuinely use this research**: `generateOffer`'s gap analysis and `generateOutreachMessages`' opener both fold in the report's specific findings — but only when it's LLM-synthesized (not an unsynthesized digest) and at least MEDIUM confidence, so a customer never sees raw, unvetted digest text.
+- Persisted across all 4 `EngineRepository` implementations + new D1 migration `0006_prospect_intelligence.sql` (fully idempotent, `CREATE TABLE IF NOT EXISTS`) + Supabase schema.
+- New Deep Research section in the Prospect Drawer showing the full report, confidence, generator, and expandable sources.
+
+Verified: a new mock-provider smoke suite (`scripts/prospectIntelligence.smoke.ts`, all passing — the no-results case, the no-LLM digest case, the LLM-synthesized case, the LLM-fails-falls-back-to-digest case, and that offers/outreach only trust confident synthesized reports), all 6 smoke suites passing together, clean `tsc --noEmit` on both tsconfigs, clean `vite build`, and a live integration pass against real local D1 — a full cycle ran cleanly with the new step as a no-op (no search connected in the test environment), and `/prospects/research` correctly returned a graceful, honest error rather than crashing or fabricating a report.
+
+**What remains for Phase 6 to matter in practice:** this activates the moment your live search finds real prospects worth deep-researching — which, per your own database counts, is now (128 real prospects on record). The next 3 highest-value ones will get research automatically on the next cycle, or you can trigger it manually right now from the Prospect Drawer.
 
 ---
 

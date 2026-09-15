@@ -25,6 +25,7 @@ import type {
   ProjectMilestoneKey,
   Prospect,
   ProspectInteraction,
+  ProspectIntelligence,
   RealRevenueEntry,
   RecommendedAction,
   ResearchReport,
@@ -167,6 +168,11 @@ export interface EngineRepository {
     projectId: string,
     outcome: { satisfaction?: number; repeatPurchase?: boolean; referral?: boolean },
   ): Promise<void>;
+
+  // prospect intelligence (Phase 6) — deep, business-specific research.
+  // One report per prospect, regenerated (upserted) as new research runs.
+  listProspectIntelligence(): Promise<ProspectIntelligence[]>;
+  upsertProspectIntelligence(intel: ProspectIntelligence): Promise<void>;
 }
 
 /** Engine callbacks so the host can render progress / stay in sync. */

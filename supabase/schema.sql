@@ -368,6 +368,28 @@ create table learning_events (
 create index idx_learning_events_opportunity on learning_events(opportunity_id);
 create index idx_learning_events_category on learning_events(category);
 
+-- prospect_intelligence — Phase 6 (deep, business-specific research). One
+-- report per prospect, regenerated (upserted) as new research runs.
+create type intelligence_confidence as enum ('HIGH', 'MEDIUM', 'LOW');
+create type intelligence_generator as enum ('llm', 'snippet-digest');
+
+create table prospect_intelligence (
+  id                            text primary key,
+  prospect_id                   text not null unique references prospects(id) on delete cascade,
+  business_overview             text not null default '',
+  apparent_services             jsonb not null default '[]',
+  social_presence_summary       text not null default '',
+  competitive_note              text not null default '',
+  specific_problem_evidence     text not null default '',
+  recommended_angle             text not null default '',
+  confidence                    intelligence_confidence not null default 'LOW',
+  generator                     intelligence_generator not null default 'snippet-digest',
+  sources                       jsonb not null default '[]',
+  generated_at                  timestamptz not null default now(),
+  updated_at                    timestamptz not null default now()
+);
+create index idx_prospect_intelligence_prospect on prospect_intelligence(prospect_id);
+
 -- research_sources -----------------------------------------------------------
 
 create table research_sources (

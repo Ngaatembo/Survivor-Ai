@@ -4,7 +4,7 @@
  * soft (returns null) so the engine falls back to the rule engine.
  * ========================================================================== */
 
-import type { LLMOpportunityAnalysis, LLMProvider } from './types';
+import type { LLMOpportunityAnalysis, LLMProvider, ProspectIntelligenceAnalysis } from './types';
 
 const ANALYSIS_SCHEMA_HINT = `Return ONLY minified JSON with this shape:
 {"howMoneyMade":string,"capitalRequiredMin":number,"capitalRequiredMax":number,
@@ -17,6 +17,16 @@ const ANALYSIS_SCHEMA_HINT = `Return ONLY minified JSON with this shape:
 "operatingCostsNote":string,"examples":string[],"summary":string}
 Conservative, realistic numbers for a beginner with ~$50. If sources are weak,
 use UNCERTAIN/UNVERIFIED. No prose outside the JSON.`;
+
+const PROSPECT_SCHEMA_HINT = `Return ONLY minified JSON with this shape:
+{"businessOverview":string,"apparentServices":string[],"socialPresenceSummary":string,
+"competitiveNote":string,"specificProblemEvidence":string,"recommendedAngle":string,
+"confidence":"HIGH|MEDIUM|LOW"}
+Base every field ONLY on the provided snippets — never invent a service, review, or
+fact this business doesn't have evidence for in the snippets. If the snippets don't
+support a field, say so plainly in that field rather than guessing (e.g.
+"no evidence found of X in available sources"). Use LOW confidence when snippets are
+thin or generic. No prose outside the JSON.`;
 
 function extractJson(text: string): unknown {
   const start = text.indexOf('{');
@@ -81,6 +91,27 @@ class AnthropicProvider implements LLMProvider {
       return null;
     }
   }
+
+  async analyzeProspect(input: {
+    businessName: string;
+    category: string;
+    location: string;
+    snippets: string[];
+  }): Promise<Partial<ProspectIntelligenceAnalysis> | null> {
+    const raw = await this.complete(
+      'You are a careful small-business researcher preparing a real sales team to talk to a REAL business. Never invent a fact this business hasn\'t evidenced. Say plainly when the evidence is thin.',
+      `Research this specific business: "${input.businessName}" (${input.category}, ${input.location}).\n\nSearch snippets about THIS business:\n${input.snippets
+        .slice(0, 8)
+        .map((s, i) => `[${i + 1}] ${s}`)
+        .join('\n')}\n\n${PROSPECT_SCHEMA_HINT}`,
+    );
+    if (!raw) return null;
+    try {
+      return extractJson(raw) as Partial<ProspectIntelligenceAnalysis>;
+    } catch {
+      return null;
+    }
+  }
 }
 
 /* ------------------------------- OpenAI ----------------------------------- */
@@ -136,6 +167,27 @@ class OpenAIProvider implements LLMProvider {
     if (!raw) return null;
     try {
       return extractJson(raw) as Partial<LLMOpportunityAnalysis>;
+    } catch {
+      return null;
+    }
+  }
+
+  async analyzeProspect(input: {
+    businessName: string;
+    category: string;
+    location: string;
+    snippets: string[];
+  }): Promise<Partial<ProspectIntelligenceAnalysis> | null> {
+    const raw = await this.complete(
+      'You are a careful small-business researcher preparing a real sales team to talk to a REAL business. Never invent a fact this business hasn\'t evidenced. Say plainly when the evidence is thin.',
+      `Research this specific business: "${input.businessName}" (${input.category}, ${input.location}).\n\nSearch snippets about THIS business:\n${input.snippets
+        .slice(0, 8)
+        .map((s, i) => `[${i + 1}] ${s}`)
+        .join('\n')}\n\n${PROSPECT_SCHEMA_HINT}`,
+    );
+    if (!raw) return null;
+    try {
+      return extractJson(raw) as Partial<ProspectIntelligenceAnalysis>;
     } catch {
       return null;
     }

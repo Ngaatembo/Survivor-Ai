@@ -22,6 +22,7 @@ import type {
   ProjectMilestoneKey,
   Prospect,
   ProspectInteraction,
+  ProspectIntelligence,
   RealRevenueEntry,
   RecommendedAction,
   ResearchReport,
@@ -52,6 +53,7 @@ interface InMemoryState {
   projects: Project[];
   realRevenue: RealRevenueEntry[];
   learningEvents: LearningEvent[];
+  prospectIntelligence: ProspectIntelligence[];
 }
 
 export class InMemoryRepository implements EngineRepository {
@@ -76,6 +78,7 @@ export class InMemoryRepository implements EngineRepository {
     projects: [],
     realRevenue: [],
     learningEvents: [],
+    prospectIntelligence: [],
   };
 
   /** Load a snapshot (e.g. produced by createSeedState). */
@@ -226,6 +229,7 @@ export class InMemoryRepository implements EngineRepository {
       projects: [],
       realRevenue: [],
       learningEvents: [],
+      prospectIntelligence: [],
     };
   }
 
@@ -333,5 +337,15 @@ export class InMemoryRepository implements EngineRepository {
     this.state.projects = this.state.projects.map((p) =>
       p.id === projectId ? { ...p, ...outcome, updatedAt: Date.now() } : p,
     );
+  }
+
+  async listProspectIntelligence() {
+    return this.state.prospectIntelligence;
+  }
+  async upsertProspectIntelligence(intel: ProspectIntelligence) {
+    this.state.prospectIntelligence = [
+      intel,
+      ...this.state.prospectIntelligence.filter((i) => i.prospectId !== intel.prospectId),
+    ];
   }
 }

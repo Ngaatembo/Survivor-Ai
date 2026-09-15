@@ -30,6 +30,7 @@ import type {
   ProjectMilestoneKey,
   Prospect,
   ProspectInteraction,
+  ProspectIntelligence,
   ProspectStatus,
   RealRevenueEntry,
   RecommendedAction,
@@ -74,6 +75,7 @@ export interface BackendState {
   projects: Project[];
   realRevenue: RealRevenueEntry[];
   learningEvents: LearningEvent[];
+  prospectIntelligence: ProspectIntelligence[];
 }
 
 export class BackendError extends Error {
@@ -223,4 +225,10 @@ export function updateProjectOutcome(
   outcome: { satisfaction?: number; repeatPurchase?: boolean; referral?: boolean },
 ): Promise<{ ok: true; projectId: string }> {
   return postJson('/projects/outcome', { projectId, ...outcome });
+}
+
+/** Phase 6: manually trigger deep research on one specific prospect right
+ *  now, rather than waiting for the capped per-cycle automatic pass. */
+export function researchProspectNow(prospectId: string): Promise<{ ok: true; intelligence: ProspectIntelligence }> {
+  return postJson('/prospects/research', { prospectId });
 }

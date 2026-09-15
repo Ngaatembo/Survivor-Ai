@@ -26,6 +26,7 @@ import type {
   DesignBrief,
   EventType,
   Experiment,
+  IntelligenceConfidence,
   LearningEvent,
   LeadScoreBreakdown,
   MemoryEntry,
@@ -38,6 +39,7 @@ import type {
   ProjectMilestoneKey,
   Prospect,
   ProspectInteraction,
+  ProspectIntelligence,
   RealRevenueEntry,
   RecommendedAction,
   ResearchReport,
@@ -846,6 +848,7 @@ export class D1Repository implements EngineRepository {
       'projects', // no agent_id column; deleted via prospects join below
       'real_revenue', // no agent_id column; deleted via opportunities join below
       'learning_events', // no agent_id column; deleted via opportunities join below
+      'prospect_intelligence', // no agent_id column; deleted via prospects join below
       'prospects',
     ];
 
@@ -878,6 +881,9 @@ export class D1Repository implements EngineRepository {
       this.db.prepare(
         `DELETE FROM learning_events WHERE opportunity_id IN (SELECT id FROM opportunities WHERE agent_id = ?)`,
       ).bind(this.agentId),
+      this.db.prepare(
+        `DELETE FROM prospect_intelligence WHERE prospect_id IN (SELECT id FROM prospects WHERE agent_id = ?)`,
+      ).bind(this.agentId),
       ...tables
         .filter(
           (t) =>
@@ -891,6 +897,7 @@ export class D1Repository implements EngineRepository {
               'projects',
               'real_revenue',
               'learning_events',
+              'prospect_intelligence',
             ].includes(t),
         )
         .map((t) => this.db.prepare(`DELETE FROM ${t} WHERE agent_id = ?`).bind(this.agentId)),
@@ -1707,6 +1714,68 @@ export class D1Repository implements EngineRepository {
         projectId,
       )
       .run();
+  }
+
+  /* ---------------------------- prospect intelligence -------------------------- */
+
+  async listProspectIntelligence(): Promise<ProspectIntelligence[]> {
+    const { results } = await this.db
+      .prepare(
+        `SELECT pi.* FROM prospect_intelligence pi
+         JOIN prospects p ON p.id = pi.prospect_id
+         WHERE p.agent_id = ?`,
+      )
+      .bind(this.agentId)
+      .all();
+    return results.map((r: any) => this.mapProspectIntelligence(r));
+  }
+
+  async upsertProspectIntelligence(intel: ProspectIntelligence): Promise<void> {
+    const row = {
+      id: intel.id,
+      prospect_id: intel.prospectId,
+      business_overview: intel.businessOverview,
+      apparent_services: this.j(intel.apparentServices),
+      social_presence_summary: intel.socialPresenceSummary,
+      competitive_note: intel.competitiveNote,
+      specific_problem_evidence: intel.specificProblemEvidence,
+      recommended_angle: intel.recommendedAngle,
+      confidence: intel.confidence,
+      generator: intel.generator,
+      sources: this.j(intel.sources),
+      generated_at: this.iso(intel.generatedAt),
+      updated_at: this.iso(intel.updatedAt),
+    };
+    const cols = Object.keys(row);
+    const updateClause = cols
+      .filter((c) => c !== 'prospect_id')
+      .map((c) => `${c} = excluded.${c}`)
+      .join(', ');
+    await this.db
+      .prepare(
+        `INSERT INTO prospect_intelligence (${cols.join(', ')}) VALUES (${cols.map(() => '?').join(', ')})
+         ON CONFLICT(prospect_id) DO UPDATE SET ${updateClause}`,
+      )
+      .bind(...cols.map((c) => (row as any)[c]))
+      .run();
+  }
+
+  private mapProspectIntelligence(r: any): ProspectIntelligence {
+    return {
+      id: r.id,
+      prospectId: r.prospect_id,
+      businessOverview: r.business_overview,
+      apparentServices: this.a<string>(r.apparent_services),
+      socialPresenceSummary: r.social_presence_summary,
+      competitiveNote: r.competitive_note,
+      specificProblemEvidence: r.specific_problem_evidence,
+      recommendedAngle: r.recommended_angle,
+      confidence: r.confidence as IntelligenceConfidence,
+      generator: r.generator,
+      sources: this.a(r.sources),
+      generatedAt: this.ms(r.generated_at),
+      updatedAt: this.ms(r.updated_at),
+    };
   }
 }
 

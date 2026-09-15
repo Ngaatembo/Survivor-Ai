@@ -13,22 +13,33 @@
  * to SENT via the CRM write path.
  * ========================================================================== */
 
-import type { BusinessModel, Offer, Prospect, WebsiteBrief } from '../types';
+import type { BusinessModel, Offer, Prospect, ProspectIntelligence, WebsiteBrief } from '../types';
 import { uid } from './format';
 
-function gapAnalysis(p: Prospect): string | undefined {
-  switch (p.websitePresence) {
-    case 'NONE_FOUND':
-      return `No independent website was found for ${p.businessName} — customers currently have no way to find or evaluate the business online outside of ${p.contactChannel !== 'UNKNOWN' ? p.contactChannel.toLowerCase() : 'word of mouth'}.`;
-    case 'SOCIAL_ONLY':
-      return `${p.businessName}'s main online presence is a social page rather than an owned website — this limits control over first impressions, discoverability, and the ability to add a direct contact/booking path.`;
-    case 'WEAK_OR_OUTDATED':
-      return `${p.businessName}'s current website appears weak or outdated based on available evidence — a refresh would likely improve trust and conversion without needing to rebuild the business's existing brand from scratch.`;
-    case 'ADEQUATE':
-    case 'UNKNOWN':
-    default:
-      return undefined;
+function gapAnalysis(p: Prospect, intelligence?: ProspectIntelligence): string | undefined {
+  const generic = (() => {
+    switch (p.websitePresence) {
+      case 'NONE_FOUND':
+        return `No independent website was found for ${p.businessName} — customers currently have no way to find or evaluate the business online outside of ${p.contactChannel !== 'UNKNOWN' ? p.contactChannel.toLowerCase() : 'word of mouth'}.`;
+      case 'SOCIAL_ONLY':
+        return `${p.businessName}'s main online presence is a social page rather than an owned website — this limits control over first impressions, discoverability, and the ability to add a direct contact/booking path.`;
+      case 'WEAK_OR_OUTDATED':
+        return `${p.businessName}'s current website appears weak or outdated based on available evidence — a refresh would likely improve trust and conversion without needing to rebuild the business's existing brand from scratch.`;
+      case 'ADEQUATE':
+      case 'UNKNOWN':
+      default:
+        return undefined;
+    }
+  })();
+
+  // Phase 6 — when genuine (AI-synthesized, non-LOW-confidence) deep
+  // research exists on this specific business, fold its recommended angle
+  // in alongside the generic presence-based gap analysis, rather than
+  // replacing it — both are grounded in real evidence about this business.
+  if (intelligence && intelligence.generator === 'llm' && intelligence.confidence !== 'LOW' && intelligence.recommendedAngle) {
+    return [generic, intelligence.recommendedAngle].filter(Boolean).join(' ');
   }
+  return generic;
 }
 
 function sitemapFor(model: BusinessModel | undefined, category: string): string[] {
@@ -70,6 +81,7 @@ function websiteBriefFor(prospect: Prospect, model: BusinessModel | undefined): 
 export function generateOffer(
   prospect: Prospect,
   model: BusinessModel | undefined,
+  intelligence?: ProspectIntelligence,
   now: number = Date.now(),
 ): Offer {
   const price = model?.suggestedPrice ?? 25;
@@ -95,7 +107,7 @@ export function generateOffer(
     timelineDaysMin,
     timelineDaysMax,
     deliverables,
-    gapAnalysis: gapAnalysis(prospect),
+    gapAnalysis: gapAnalysis(prospect, intelligence),
     websiteBrief: websiteBriefFor(prospect, model),
     status: 'DRAFT',
     generator: 'local-rule-engine',

@@ -10,7 +10,7 @@
  * sends anything automatically (spec §20).
  * ========================================================================== */
 
-import type { BusinessModel, OutreachMessageSet, Prospect } from '../types';
+import type { BusinessModel, OutreachMessageSet, Prospect, ProspectIntelligence } from '../types';
 import { uid } from './format';
 
 function presenceLine(p: Prospect): string {
@@ -26,16 +26,29 @@ function presenceLine(p: Prospect): string {
   }
 }
 
+/** Phase 6 — when a genuine, AI-synthesized (not raw-digest) intelligence
+ *  report exists with at least MEDIUM confidence, use its specific
+ *  angle/problem evidence to personalize the opener instead of the generic
+ *  website-presence line. Never used at LOW confidence or from an
+ *  unsynthesized digest — those aren't reliable enough to put in front of
+ *  a real customer as if they were researched insight. */
+function personalizedOpener(prospect: Prospect, intelligence: ProspectIntelligence | undefined): string {
+  const generic = presenceLine(prospect);
+  if (!intelligence || intelligence.generator !== 'llm' || intelligence.confidence === 'LOW') return generic;
+  return intelligence.specificProblemEvidence?.trim() || generic;
+}
+
 export function generateOutreachMessages(
   prospect: Prospect,
   model: BusinessModel | undefined,
+  intelligence?: ProspectIntelligence,
   now: number = Date.now(),
 ): OutreachMessageSet {
   const name = prospect.businessName;
   const price = model?.suggestedPrice ?? 25;
   const offer = model?.offer ?? 'a professional, mobile-friendly website';
   const timeline = model?.timeToFirstSaleDaysEstimate ?? 14;
-  const opener = presenceLine(prospect);
+  const opener = personalizedOpener(prospect, intelligence);
 
   const whatsapp = `Hi ${name} 👋 ${opener} while researching businesses in ${prospect.location}. I build ${offer.toLowerCase()} for local businesses, starting at $${price}, usually delivered within ~${timeline} days. Would you be open to a quick chat about what that could look like for you?`;
 

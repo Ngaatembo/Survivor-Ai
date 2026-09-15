@@ -37,6 +37,7 @@ import type { LLMProvider, SearchProvider } from '../services/providers/types';
 import { evaluateOpportunity, VALIDATION_SCORE_THRESHOLD } from '../lib/decisionEngine';
 import { generateBusinessModel } from '../lib/businessModel';
 import { generateOutreachMessages } from '../lib/outreachGenerator';
+import { researchProspect } from '../services/prospectIntelligence';
 import { generateOffer } from '../lib/offerGenerator';
 import { generateDesignBrief } from '../lib/designBriefGenerator';
 import { createProjectFromWonOffer } from '../lib/projectTracker';
@@ -613,11 +614,49 @@ export class AgentEngine {
           }
         }
 
+        // Phase 6 (deep research): for the highest-value engaged prospects
+        // that don't have a Prospect Intelligence report yet, research the
+        // SPECIFIC business (not the generic category) using real search +
+        // the real LLM when connected. Capped per cycle to bound API cost;
+        // never runs without live search, since there's nothing real to
+        // research otherwise.
+        const allProspects = await this.repo.listProspects();
+        const existingIntelligence = await this.repo.listProspectIntelligence();
+        if (liveSearch?.connected) {
+          const needsResearch = allProspects
+            .filter(
+              (p) =>
+                p.priority !== 'DO_NOT_CONTACT' &&
+                p.status !== 'WON' &&
+                p.status !== 'LOST' &&
+                p.status !== 'NOT_INTERESTED' &&
+                !existingIntelligence.some((i) => i.prospectId === p.id),
+            )
+            .sort((a, b) => b.score.expectedValue - a.score.expectedValue)
+            .slice(0, 3);
+          for (const p of needsResearch) {
+            const intel = await researchProspect(liveSearch, liveLlm, p);
+            await this.repo.upsertProspectIntelligence(intel);
+            await this.repo.appendProspectInteraction({
+              id: uid('pint'),
+              prospectId: p.id,
+              kind: 'INTELLIGENCE_GATHERED',
+              summary: `Deep research completed (${intel.generator === 'llm' ? 'AI-synthesized' : 'raw source digest'}, ${intel.confidence.toLowerCase()} confidence) — ${intel.sources.length} source(s) reviewed.`,
+              createdAt: now,
+            });
+          }
+          if (needsResearch.length > 0) {
+            await hooks.log(
+              'DECISION',
+              `Deep research completed for ${needsResearch.length} top prospect(s) — business-specific findings ready to inform outreach and offers.`,
+            );
+          }
+        }
+
         // AI outreach assistant (build-spec §9): generate the message set for
         // any QUALIFIED-or-better prospect that doesn't have one yet. Capped
         // per cycle; messages are prepared for human approval only — nothing
         // here sends anything.
-        const allProspects = await this.repo.listProspects();
         const existingOutreach = await this.repo.listOutreachMessages();
         const needsOutreach = allProspects
           .filter(
@@ -632,7 +671,8 @@ export class AgentEngine {
           .slice(0, 5);
         for (const p of needsOutreach) {
           const model = businessModels.find((m) => m.opportunityId === p.opportunityId);
-          await this.repo.upsertOutreachMessages(generateOutreachMessages(p, model));
+          const intel = (await this.repo.listProspectIntelligence()).find((i) => i.prospectId === p.id);
+          await this.repo.upsertOutreachMessages(generateOutreachMessages(p, model, intel));
           await this.repo.appendProspectInteraction({
             id: uid('pint'),
             prospectId: p.id,
@@ -651,13 +691,15 @@ export class AgentEngine {
         // offer stays DRAFT until a human moves it via the CRM write path.
         const ENGAGED_STATUSES = new Set(['INTERESTED', 'PROPOSAL_SENT', 'NEGOTIATING', 'WON']);
         const existingOffers = await this.repo.listOffers();
+        const latestIntelligence = await this.repo.listProspectIntelligence();
         const needsOffer = allProspects
           .filter((p) => ENGAGED_STATUSES.has(p.status) && !existingOffers.some((o) => o.prospectId === p.id))
           .sort((a, b) => b.score.expectedValue - a.score.expectedValue)
           .slice(0, 5);
         for (const p of needsOffer) {
           const model = businessModels.find((m) => m.opportunityId === p.opportunityId);
-          const offer = generateOffer(p, model);
+          const intel = latestIntelligence.find((i) => i.prospectId === p.id);
+          const offer = generateOffer(p, model, intel);
           await this.repo.upsertOffer(offer);
           const brief = generateDesignBrief(offer, p);
           await this.repo.upsertDesignBrief(brief);

@@ -43,7 +43,10 @@ export function ProspectDrawer({ prospect, onClose }: { prospect: Prospect; onCl
   );
   const updateProspectStatus = useStore((s) => s.updateProspectStatus);
   const updateOfferStatus = useStore((s) => s.updateOfferStatus);
+  const intelligence = useStore((s) => s.prospectIntelligence.find((i) => i.prospectId === prospect.id));
+  const researchProspectNow = useStore((s) => s.researchProspectNow);
   const [updating, setUpdating] = useState(false);
+  const [researching, setResearching] = useState(false);
 
   const setStatus = async (status: ProspectStatus) => {
     setUpdating(true);
@@ -51,6 +54,15 @@ export function ProspectDrawer({ prospect, onClose }: { prospect: Prospect; onCl
       await updateProspectStatus(prospect.id, status);
     } finally {
       setUpdating(false);
+    }
+  };
+
+  const runResearch = async () => {
+    setResearching(true);
+    try {
+      await researchProspectNow(prospect.id);
+    } finally {
+      setResearching(false);
     }
   };
 
@@ -113,6 +125,71 @@ export function ProspectDrawer({ prospect, onClose }: { prospect: Prospect; onCl
               </li>
             ))}
           </ul>
+        </div>
+
+        <div className="drawer-section">
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+            <h3 style={{ margin: 0 }}>Deep research</h3>
+            <button className="btn small" disabled={researching} onClick={runResearch}>
+              {researching ? 'Researching…' : intelligence ? 'Research again' : 'Research now'}
+            </button>
+          </div>
+          {intelligence ? (
+            <>
+              <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 8 }}>
+                <Badge tone={intelligence.confidence === 'HIGH' ? 'green' : intelligence.confidence === 'MEDIUM' ? 'blue' : 'amber'}>
+                  {intelligence.confidence} CONFIDENCE
+                </Badge>
+                <span className="faint small">
+                  {intelligence.generator === 'llm' ? 'AI-synthesized' : 'Raw source digest (no LLM connected)'} ·{' '}
+                  {intelligence.sources.length} source(s)
+                </span>
+              </div>
+              <p className="small" style={{ marginBottom: 8 }}>
+                <span className="mono-label">Overview — </span>
+                {intelligence.businessOverview}
+              </p>
+              {intelligence.apparentServices.length > 0 && (
+                <p className="small" style={{ marginBottom: 8 }}>
+                  <span className="mono-label">Apparent services — </span>
+                  {intelligence.apparentServices.join(', ')}
+                </p>
+              )}
+              <p className="small" style={{ marginBottom: 8 }}>
+                <span className="mono-label">Social presence — </span>
+                {intelligence.socialPresenceSummary}
+              </p>
+              <p className="small" style={{ marginBottom: 8 }}>
+                <span className="mono-label">Competitive note — </span>
+                {intelligence.competitiveNote}
+              </p>
+              <p className="small" style={{ marginBottom: 8 }}>
+                <span className="mono-label">Specific problem evidence — </span>
+                {intelligence.specificProblemEvidence}
+              </p>
+              <p className="small" style={{ marginBottom: 8 }}>
+                <span className="mono-label">Recommended angle — </span>
+                {intelligence.recommendedAngle}
+              </p>
+              {intelligence.sources.length > 0 && (
+                <details style={{ marginTop: 8 }}>
+                  <summary className="small faint" style={{ cursor: 'pointer' }}>View sources</summary>
+                  <ul style={{ marginTop: 6, paddingLeft: 18 }}>
+                    {intelligence.sources.map((s) => (
+                      <li key={s.id} className="small muted" style={{ marginBottom: 3 }}>
+                        {s.url ? <a href={s.url} target="_blank" rel="noreferrer">{s.title}</a> : s.title}
+                      </li>
+                    ))}
+                  </ul>
+                </details>
+              )}
+            </>
+          ) : (
+            <div className="empty">
+              No deep research yet. This runs automatically on your top 3 prospects each cycle, or click
+              "Research now" to run it on this one immediately.
+            </div>
+          )}
         </div>
 
         <div className="drawer-section">

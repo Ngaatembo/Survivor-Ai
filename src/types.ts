@@ -520,7 +520,8 @@ export type ProspectInteractionKind =
   | 'NOTE'
   | 'FOLLOW_UP_SET'
   | 'OFFER_DRAFTED'
-  | 'PROJECT_STARTED';
+  | 'PROJECT_STARTED'
+  | 'INTELLIGENCE_GATHERED';
 
 /** Append-only observability trail for a prospect (build-spec §23). */
 export interface ProspectInteraction {
@@ -529,6 +530,34 @@ export interface ProspectInteraction {
   kind: ProspectInteractionKind;
   summary: string;
   createdAt: number;
+}
+
+/* ------------------------- prospect intelligence ---------------------------- */
+
+/**
+ * Deep research on ONE specific real business (Phase 6, "why would THIS
+ * person pay us") — as opposed to the generic category-level evidence
+ * used elsewhere. Generated from live search snippets about that exact
+ * business, synthesized by the real LLM when connected (never a template);
+ * degrades to a plain snippet digest when the LLM is unavailable. Every
+ * field traces to `sources`; nothing here is invented.
+ */
+export type IntelligenceConfidence = 'HIGH' | 'MEDIUM' | 'LOW';
+
+export interface ProspectIntelligence {
+  id: string;
+  prospectId: string;
+  businessOverview: string;
+  apparentServices: string[];
+  socialPresenceSummary: string;
+  competitiveNote: string;
+  specificProblemEvidence: string;
+  recommendedAngle: string;
+  confidence: IntelligenceConfidence;
+  generator: 'llm' | 'snippet-digest';
+  sources: ResearchSource[];
+  generatedAt: number;
+  updatedAt: number;
 }
 
 /* --------------------------- outreach_messages ------------------------------ */

@@ -19,6 +19,7 @@ import { D1Repository } from '../../src/engine/d1Repository';
 import type { EngineRepository } from '../../src/engine/repository';
 import type { ProspectStatus, OfferStatus, ProjectMilestoneKey, RealRevenueEntry } from '../../src/types';
 import { computeProfit, generateLearningEvent, foldRealRevenueIntoMemory, computeCategoryRealWorldStats, statsForCategory } from '../../src/lib/realRevenue';
+import { researchProspect } from '../../src/services/prospectIntelligence';
 import { createLLMProvider } from '../../src/services/providers/llm';
 import { createSearchProvider } from '../../src/services/providers/search';
 import { balanceFrom } from '../../src/services/wallet';
@@ -207,6 +208,7 @@ export default {
           projects,
           realRevenue,
           learningEvents,
+          prospectIntelligence,
         ] = await Promise.all([
           repo.listOpportunities(),
           repo.listExperiments(),
@@ -227,6 +229,7 @@ export default {
           repo.listProjects(),
           repo.listRealRevenue(),
           repo.listLearningEvents(),
+          repo.listProspectIntelligence(),
         ]);
         return json({
           ok: true,
@@ -257,6 +260,8 @@ export default {
           // Real revenue + feedback learning (Phase 4).
           realRevenue,
           learningEvents: learningEvents.slice(0, 300),
+          // Deep research on specific businesses (Phase 6).
+          prospectIntelligence,
         });
       } catch (e) {
         return json({ ok: false, error: (e as Error).message }, { status: 500 });
@@ -308,6 +313,48 @@ export default {
           createdAt: Date.now(),
         });
         return json({ ok: true, prospectId, status });
+      } catch (e) {
+        return json({ ok: false, error: (e as Error).message }, { status: 500 });
+      }
+    }
+
+    if (url.pathname === '/prospects/research' && req.method === 'POST') {
+      // Phase 6 — manually trigger deep research on one specific prospect
+      // right now, rather than waiting for the capped per-cycle automatic
+      // pass. Same researchProspect() function the cycle uses; requires
+      // live search to be connected, since there's nothing real to
+      // research otherwise.
+      let body: any;
+      try {
+        body = await req.json();
+      } catch {
+        return json({ ok: false, error: 'invalid JSON body' }, { status: 400 });
+      }
+      const { prospectId } = body ?? {};
+      if (typeof prospectId !== 'string' || !prospectId) {
+        return json({ ok: false, error: 'prospectId is required' }, { status: 400 });
+      }
+      try {
+        const { repo } = buildEngine(env);
+        const search = createSearchProvider({ tavily: env.TAVILY_API_KEY, brave: env.BRAVE_API_KEY });
+        if (!search?.connected) {
+          return json({ ok: false, error: 'no live search provider connected — nothing real to research' }, { status: 503 });
+        }
+        const llm = createLLMProvider({ anthropic: env.ANTHROPIC_API_KEY, openai: env.OPENAI_API_KEY });
+        const prospects = await repo.listProspects();
+        const prospect = prospects.find((p) => p.id === prospectId);
+        if (!prospect) return json({ ok: false, error: `no prospect found with id ${prospectId}` }, { status: 404 });
+
+        const intel = await researchProspect(search, llm, prospect);
+        await repo.upsertProspectIntelligence(intel);
+        await repo.appendProspectInteraction({
+          id: `pint_${crypto.randomUUID()}`,
+          prospectId,
+          kind: 'INTELLIGENCE_GATHERED',
+          summary: `Deep research completed manually (${intel.generator === 'llm' ? 'AI-synthesized' : 'raw source digest'}, ${intel.confidence.toLowerCase()} confidence) — ${intel.sources.length} source(s) reviewed.`,
+          createdAt: Date.now(),
+        });
+        return json({ ok: true, intelligence: intel });
       } catch (e) {
         return json({ ok: false, error: (e as Error).message }, { status: 500 });
       }
