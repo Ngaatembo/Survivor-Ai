@@ -128,3 +128,5 @@ None of this touches real payments or automates outreach — it's decision-suppo
 4. Add the real-world revenue log once you have at least one real result to record.
 
 Tell me which of these to start on first, or if you'd rather reprioritize.
+
+<!-- frontend rebuild trigger: VITE_API_BASE_URL added to survivor-ai Cloudflare project, 2026-09-15T05:31:55Z -->
