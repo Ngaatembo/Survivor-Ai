@@ -30,6 +30,7 @@ import type {
   ProjectMilestone,
   ProjectMilestoneKey,
   Prospect,
+  ProspectDemo,
   ProspectInteraction,
   ProspectIntelligence,
   RealRevenueEntry,
@@ -1426,6 +1427,50 @@ export class SupabaseRepository implements EngineRepository {
       confidence: r.confidence as IntelligenceConfidence,
       generator: r.generator,
       sources: (r.sources ?? []) as ProspectIntelligence['sources'],
+      generatedAt: Date.parse(r.generated_at) || Date.now(),
+      updatedAt: Date.parse(r.updated_at) || Date.now(),
+    };
+  }
+
+  /* -------------------------------- prospect demos ------------------------------ */
+
+  async listProspectDemos(): Promise<ProspectDemo[]> {
+    const { data: prospectRows, error: pe } = await this.db.from('prospects').select('id').eq('agent_id', this.agentId);
+    if (pe) throw new Error(pe.message);
+    const ids = (prospectRows ?? []).map((r: any) => r.id);
+    if (!ids.length) return [];
+    const { data, error } = await this.db.from('prospect_demos').select('*').in('prospect_id', ids);
+    if (error) throw new Error(error.message);
+    return (data ?? []).map((r: any) => this.mapProspectDemo(r));
+  }
+
+  async upsertProspectDemo(demo: ProspectDemo): Promise<void> {
+    const row = {
+      id: demo.id,
+      prospect_id: demo.prospectId,
+      offer_id: demo.offerId,
+      business_name: demo.businessName,
+      html: demo.html,
+      hero_headline: demo.heroHeadline,
+      sections_included: demo.sectionsIncluded,
+      generator: demo.generator,
+      generated_at: new Date(demo.generatedAt).toISOString(),
+      updated_at: new Date(demo.updatedAt).toISOString(),
+    };
+    const { error } = await this.db.from('prospect_demos').upsert(row, { onConflict: 'prospect_id' });
+    if (error) throw new Error(error.message);
+  }
+
+  private mapProspectDemo(r: any): ProspectDemo {
+    return {
+      id: r.id,
+      prospectId: r.prospect_id,
+      offerId: r.offer_id,
+      businessName: r.business_name,
+      html: r.html,
+      heroHeadline: r.hero_headline,
+      sectionsIncluded: (r.sections_included ?? []) as string[],
+      generator: r.generator,
       generatedAt: Date.parse(r.generated_at) || Date.now(),
       updatedAt: Date.parse(r.updated_at) || Date.now(),
     };

@@ -45,6 +45,10 @@ export function ProspectDrawer({ prospect, onClose }: { prospect: Prospect; onCl
   const updateOfferStatus = useStore((s) => s.updateOfferStatus);
   const intelligence = useStore((s) => s.prospectIntelligence.find((i) => i.prospectId === prospect.id));
   const researchProspectNow = useStore((s) => s.researchProspectNow);
+  const demo = useStore((s) => s.prospectDemos.find((d) => d.prospectId === prospect.id));
+  const regenerateProspectDemo = useStore((s) => s.regenerateProspectDemo);
+  const viewProspectDemo = useStore((s) => s.viewProspectDemo);
+  const [buildingDemo, setBuildingDemo] = useState(false);
   const [updating, setUpdating] = useState(false);
   const [researching, setResearching] = useState(false);
 
@@ -63,6 +67,15 @@ export function ProspectDrawer({ prospect, onClose }: { prospect: Prospect; onCl
       await researchProspectNow(prospect.id);
     } finally {
       setResearching(false);
+    }
+  };
+
+  const runBuildDemo = async () => {
+    setBuildingDemo(true);
+    try {
+      await regenerateProspectDemo(prospect.id);
+    } finally {
+      setBuildingDemo(false);
     }
   };
 
@@ -271,6 +284,37 @@ export function ProspectDrawer({ prospect, onClose }: { prospect: Prospect; onCl
               </div>
             </div>
           )
+        )}
+
+        {offer && (
+          <div className="drawer-section">
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+              <h3 style={{ margin: 0 }}>Demo website</h3>
+              <div style={{ display: 'flex', gap: 6 }}>
+                {demo && (
+                  <button className="btn small primary" onClick={() => viewProspectDemo(prospect.id)}>
+                    View demo
+                  </button>
+                )}
+                <button className="btn small" disabled={buildingDemo} onClick={runBuildDemo}>
+                  {buildingDemo ? 'Building…' : demo ? 'Rebuild demo' : 'Build demo'}
+                </button>
+              </div>
+            </div>
+            {demo ? (
+              <p className="small faint">
+                "{demo.heroHeadline}" — {demo.sectionsIncluded.length} section(s)
+                {demo.generator === 'llm' ? ', personalized from deep research' : ''}. This is a real, working
+                page you can open and send as a link — never the business's actual live site until they say
+                yes.
+              </p>
+            ) : (
+              <div className="empty">
+                No demo built yet — click "Build demo" to generate a real, working preview page for{' '}
+                {prospect.businessName} based on this offer.
+              </div>
+            )}
+          </div>
         )}
 
         {project && (

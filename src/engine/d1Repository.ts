@@ -38,6 +38,7 @@ import type {
   ProjectMilestone,
   ProjectMilestoneKey,
   Prospect,
+  ProspectDemo,
   ProspectInteraction,
   ProspectIntelligence,
   RealRevenueEntry,
@@ -849,6 +850,7 @@ export class D1Repository implements EngineRepository {
       'real_revenue', // no agent_id column; deleted via opportunities join below
       'learning_events', // no agent_id column; deleted via opportunities join below
       'prospect_intelligence', // no agent_id column; deleted via prospects join below
+      'prospect_demos', // no agent_id column; deleted via prospects join below
       'prospects',
     ];
 
@@ -884,6 +886,9 @@ export class D1Repository implements EngineRepository {
       this.db.prepare(
         `DELETE FROM prospect_intelligence WHERE prospect_id IN (SELECT id FROM prospects WHERE agent_id = ?)`,
       ).bind(this.agentId),
+      this.db.prepare(
+        `DELETE FROM prospect_demos WHERE prospect_id IN (SELECT id FROM prospects WHERE agent_id = ?)`,
+      ).bind(this.agentId),
       ...tables
         .filter(
           (t) =>
@@ -898,6 +903,7 @@ export class D1Repository implements EngineRepository {
               'real_revenue',
               'learning_events',
               'prospect_intelligence',
+              'prospect_demos',
             ].includes(t),
         )
         .map((t) => this.db.prepare(`DELETE FROM ${t} WHERE agent_id = ?`).bind(this.agentId)),
@@ -1773,6 +1779,62 @@ export class D1Repository implements EngineRepository {
       confidence: r.confidence as IntelligenceConfidence,
       generator: r.generator,
       sources: this.a(r.sources),
+      generatedAt: this.ms(r.generated_at),
+      updatedAt: this.ms(r.updated_at),
+    };
+  }
+
+  /* -------------------------------- prospect demos ------------------------------ */
+
+  async listProspectDemos(): Promise<ProspectDemo[]> {
+    const { results } = await this.db
+      .prepare(
+        `SELECT pd.* FROM prospect_demos pd
+         JOIN prospects p ON p.id = pd.prospect_id
+         WHERE p.agent_id = ?`,
+      )
+      .bind(this.agentId)
+      .all();
+    return results.map((r: any) => this.mapProspectDemo(r));
+  }
+
+  async upsertProspectDemo(demo: ProspectDemo): Promise<void> {
+    const row = {
+      id: demo.id,
+      prospect_id: demo.prospectId,
+      offer_id: demo.offerId,
+      business_name: demo.businessName,
+      html: demo.html,
+      hero_headline: demo.heroHeadline,
+      sections_included: this.j(demo.sectionsIncluded),
+      generator: demo.generator,
+      generated_at: this.iso(demo.generatedAt),
+      updated_at: this.iso(demo.updatedAt),
+    };
+    const cols = Object.keys(row);
+    const updateClause = cols
+      .filter((c) => c !== 'prospect_id')
+      .map((c) => `${c} = excluded.${c}`)
+      .join(', ');
+    await this.db
+      .prepare(
+        `INSERT INTO prospect_demos (${cols.join(', ')}) VALUES (${cols.map(() => '?').join(', ')})
+         ON CONFLICT(prospect_id) DO UPDATE SET ${updateClause}`,
+      )
+      .bind(...cols.map((c) => (row as any)[c]))
+      .run();
+  }
+
+  private mapProspectDemo(r: any): ProspectDemo {
+    return {
+      id: r.id,
+      prospectId: r.prospect_id,
+      offerId: r.offer_id,
+      businessName: r.business_name,
+      html: r.html,
+      heroHeadline: r.hero_headline,
+      sectionsIncluded: this.a<string>(r.sections_included),
+      generator: r.generator,
       generatedAt: this.ms(r.generated_at),
       updatedAt: this.ms(r.updated_at),
     };

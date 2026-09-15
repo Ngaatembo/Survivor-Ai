@@ -390,6 +390,25 @@ create table prospect_intelligence (
 );
 create index idx_prospect_intelligence_prospect on prospect_intelligence(prospect_id);
 
+-- prospect_demos — Phase 3 (deepened): a real, working single-page demo
+-- website built for one specific prospect. One per offer.
+create type demo_generator as enum ('llm', 'template');
+
+create table prospect_demos (
+  id                    text primary key,
+  prospect_id           text not null unique references prospects(id) on delete cascade,
+  offer_id              text not null references offers(id) on delete cascade,
+  business_name         text not null default '',
+  html                  text not null default '',
+  hero_headline         text not null default '',
+  sections_included     jsonb not null default '[]',
+  generator             demo_generator not null default 'template',
+  generated_at          timestamptz not null default now(),
+  updated_at            timestamptz not null default now()
+);
+create index idx_prospect_demos_prospect on prospect_demos(prospect_id);
+create index idx_prospect_demos_offer on prospect_demos(offer_id);
+
 -- research_sources -----------------------------------------------------------
 
 create table research_sources (

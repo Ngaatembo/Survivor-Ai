@@ -7,6 +7,7 @@ CREATE TABLE IF NOT EXISTS offers (
   prospect_id                 TEXT NOT NULL UNIQUE REFERENCES prospects(id) ON DELETE CASCADE,
   prospect_name               TEXT NOT NULL DEFAULT '',
   opportunity_id               TEXT NOT NULL REFERENCES opportunities(id) ON DELETE CASCADE,
+  opportunity_name             TEXT NOT NULL DEFAULT '',
   business_model_id            TEXT,
   price                       REAL NOT NULL DEFAULT 0,
   timeline_days_min            INTEGER NOT NULL DEFAULT 0,

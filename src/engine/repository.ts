@@ -24,6 +24,7 @@ import type {
   Project,
   ProjectMilestoneKey,
   Prospect,
+  ProspectDemo,
   ProspectInteraction,
   ProspectIntelligence,
   RealRevenueEntry,
@@ -173,6 +174,12 @@ export interface EngineRepository {
   // One report per prospect, regenerated (upserted) as new research runs.
   listProspectIntelligence(): Promise<ProspectIntelligence[]>;
   upsertProspectIntelligence(intel: ProspectIntelligence): Promise<void>;
+
+  // prospect demos (Phase 3, deepened) — a real, working single-page demo
+  // built for one specific prospect. One per offer, regenerated (upserted)
+  // as research/offer details improve.
+  listProspectDemos(): Promise<ProspectDemo[]>;
+  upsertProspectDemo(demo: ProspectDemo): Promise<void>;
 }
 
 /** Engine callbacks so the host can render progress / stay in sync. */

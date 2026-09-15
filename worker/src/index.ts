@@ -20,6 +20,7 @@ import type { EngineRepository } from '../../src/engine/repository';
 import type { ProspectStatus, OfferStatus, ProjectMilestoneKey, RealRevenueEntry } from '../../src/types';
 import { computeProfit, generateLearningEvent, foldRealRevenueIntoMemory, computeCategoryRealWorldStats, statsForCategory } from '../../src/lib/realRevenue';
 import { researchProspect } from '../../src/services/prospectIntelligence';
+import { generateProspectDemo } from '../../src/lib/demoGenerator';
 import { createLLMProvider } from '../../src/services/providers/llm';
 import { createSearchProvider } from '../../src/services/providers/search';
 import { balanceFrom } from '../../src/services/wallet';
@@ -209,6 +210,7 @@ export default {
           realRevenue,
           learningEvents,
           prospectIntelligence,
+          prospectDemos,
         ] = await Promise.all([
           repo.listOpportunities(),
           repo.listExperiments(),
@@ -230,6 +232,7 @@ export default {
           repo.listRealRevenue(),
           repo.listLearningEvents(),
           repo.listProspectIntelligence(),
+          repo.listProspectDemos(),
         ]);
         return json({
           ok: true,
@@ -262,6 +265,10 @@ export default {
           learningEvents: learningEvents.slice(0, 300),
           // Deep research on specific businesses (Phase 6).
           prospectIntelligence,
+          // Real, working demo pages (Phase 3, deepened) — metadata only;
+          // the full HTML is served at GET /demo/{prospectId} so this
+          // payload stays bounded regardless of how many demos exist.
+          prospectDemos: prospectDemos.map(({ html, ...meta }) => meta),
         });
       } catch (e) {
         return json({ ok: false, error: (e as Error).message }, { status: 500 });
@@ -355,6 +362,69 @@ export default {
           createdAt: Date.now(),
         });
         return json({ ok: true, intelligence: intel });
+      } catch (e) {
+        return json({ ok: false, error: (e as Error).message }, { status: 500 });
+      }
+    }
+
+    if (url.pathname.startsWith('/demo/') && req.method === 'GET') {
+      // Serve the actual, working demo page for one prospect as real HTML
+      // — this is the shareable link sent to a real business ("here's
+      // what your website could look like"), not a JSON API response.
+      const prospectId = url.pathname.slice('/demo/'.length);
+      if (!prospectId) return new Response('Not found', { status: 404 });
+      try {
+        const { repo } = buildEngine(env);
+        const demos = await repo.listProspectDemos();
+        const demo = demos.find((d) => d.prospectId === prospectId);
+        if (!demo) return new Response('No demo found for this prospect yet.', { status: 404 });
+        return new Response(demo.html, {
+          headers: { 'content-type': 'text/html; charset=utf-8' },
+        });
+      } catch (e) {
+        return new Response(`Error loading demo: ${(e as Error).message}`, { status: 500 });
+      }
+    }
+
+    if (url.pathname === '/prospects/demo' && req.method === 'POST') {
+      // Manually regenerate a prospect's demo page right now — e.g. after
+      // fresh deep research or an updated offer. Requires an existing
+      // offer for this prospect (the demo is built from the offer's
+      // website brief); nothing to build a demo from otherwise.
+      let body: any;
+      try {
+        body = await req.json();
+      } catch {
+        return json({ ok: false, error: 'invalid JSON body' }, { status: 400 });
+      }
+      const { prospectId } = body ?? {};
+      if (typeof prospectId !== 'string' || !prospectId) {
+        return json({ ok: false, error: 'prospectId is required' }, { status: 400 });
+      }
+      try {
+        const { repo } = buildEngine(env);
+        const [prospects, offers, intelligence] = await Promise.all([
+          repo.listProspects(),
+          repo.listOffers(),
+          repo.listProspectIntelligence(),
+        ]);
+        const prospect = prospects.find((p) => p.id === prospectId);
+        if (!prospect) return json({ ok: false, error: `no prospect found with id ${prospectId}` }, { status: 404 });
+        const offer = offers.find((o) => o.prospectId === prospectId);
+        if (!offer) return json({ ok: false, error: 'no offer exists for this prospect yet — the demo is built from the offer\'s website brief' }, { status: 404 });
+        const intel = intelligence.find((i) => i.prospectId === prospectId);
+
+        const demo = generateProspectDemo(prospect, offer, intel);
+        await repo.upsertProspectDemo(demo);
+        await repo.appendProspectInteraction({
+          id: `pint_${crypto.randomUUID()}`,
+          prospectId,
+          kind: 'DEMO_BUILT',
+          summary: `Demo page regenerated manually (${demo.generator === 'llm' ? 'personalized from deep research' : 'standard layout'}).`,
+          createdAt: Date.now(),
+        });
+        const { html, ...meta } = demo;
+        return json({ ok: true, demo: meta, demoUrl: `${url.origin}/demo/${prospectId}` });
       } catch (e) {
         return json({ ok: false, error: (e as Error).message }, { status: 500 });
       }

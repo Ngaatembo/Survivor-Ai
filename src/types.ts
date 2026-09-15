@@ -521,7 +521,8 @@ export type ProspectInteractionKind =
   | 'FOLLOW_UP_SET'
   | 'OFFER_DRAFTED'
   | 'PROJECT_STARTED'
-  | 'INTELLIGENCE_GATHERED';
+  | 'INTELLIGENCE_GATHERED'
+  | 'DEMO_BUILT';
 
 /** Append-only observability trail for a prospect (build-spec §23). */
 export interface ProspectInteraction {
@@ -556,6 +557,32 @@ export interface ProspectIntelligence {
   confidence: IntelligenceConfidence;
   generator: 'llm' | 'snippet-digest';
   sources: ResearchSource[];
+  generatedAt: number;
+  updatedAt: number;
+}
+
+/* -------------------------------- demos -------------------------------- */
+
+/* ------------------------------ prospect demos ------------------------------ */
+
+/**
+ * A real, working single-page website demo built for ONE specific
+ * prospect (Phase 3, "here's what YOUR website could look like" — not a
+ * generic template). Built from the prospect's own real fields, the
+ * linked offer's website brief, and (when available and confident) the
+ * deep-research report — never a fabricated photo, testimonial, or claim.
+ * Always carries a visible "demo, not yet built or affiliated" disclaimer
+ * so it can never be mistaken for the business's real official site.
+ */
+export interface ProspectDemo {
+  id: string;
+  prospectId: string;
+  offerId: string;
+  businessName: string;
+  html: string; // self-contained HTML document
+  heroHeadline: string;
+  sectionsIncluded: string[];
+  generator: 'llm' | 'template';
   generatedAt: number;
   updatedAt: number;
 }

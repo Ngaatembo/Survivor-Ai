@@ -5,6 +5,26 @@
 
 ---
 
+## -4. Phase 3 (deepened) — Real working demo pages (COMPLETE, this session)
+
+"Here's what YOUR website could look like" — an actual, working single-page demo per prospect, not just a written brief.
+
+- **`src/lib/demoGenerator.ts`** — builds a real, self-contained HTML page: a category-based color palette (not a generic corporate-blue template), real sections (hero/about/services/gallery/contact) driven by the offer's website brief, personalized headline/services/about copy when confident (LLM-synthesized, non-LOW-confidence) deep research exists, honest labeled photo placeholders (never a stock photo passed off as real), and a real working WhatsApp/phone/email contact link built from the prospect's own contact info. Every page carries a visible "DEMO — not the business's official site" disclaimer.
+- **Wired into the cycle**: a demo is built automatically the moment an offer is drafted, alongside the design brief.
+- **`GET /demo/{prospectId}`** — serves the actual page as real HTML; this is the shareable link. **`POST /prospects/demo`** — manually regenerate one on demand.
+- **Dashboard**: "Build demo" / "View demo" / "Rebuild demo" buttons in the Prospect Drawer. In live-backend mode, "View demo" opens the real backend URL; in the standalone browser demo (no backend), it opens a local Blob URL built from the same HTML, since there's no server to serve it from there.
+- New D1 migration `0007_prospect_demos.sql` (fully idempotent) + Supabase schema.
+
+**A real, important bug found and fixed during this build**: `prospect_interactions.kind`'s database CHECK constraint was never updated when `OFFER_DRAFTED`/`PROJECT_STARTED` (Phase 3) or `INTELLIGENCE_GATHERED` (Phase 6) were added to the app's type — every attempt to log one of those interaction kinds has been silently failing with `SQLITE_CONSTRAINT` since Phase 3 shipped. This was dormant only because no prospect had reached INTERESTED status yet in production; it would have broken the moment one did. Fixed going forward in `schema.d1.sql` and migration `0003`; **migration `0008_fix_prospect_interaction_kinds.sql` fixes your existing live table** (SQLite can't `ALTER` a CHECK constraint, so this safely rebuilds the table, preserving all existing rows) — **this one needs to be run once, manually, like 0005/0006/0007.**
+
+Also fixed: migration `0004`'s `offers` table was missing the `opportunity_name` column in the migration *file* (production only had it because you added it manually via the D1 console earlier) — corrected so a fresh install now matches production exactly.
+
+Verified: a new smoke suite (`scripts/demoGenerator.smoke.ts`, all passing — generic honest fallback, genuine personalization at confidence, LOW-confidence and snippet-digest content never trusted for customer-facing copy, real working contact links, repository round-trips), all 7 smoke suites passing together, clean `tsc --noEmit` on both tsconfigs, clean `vite build`, and a full live integration pass against real local D1 — a real demo was generated and served as actual HTML with the correct category palette and real business name, and the interaction-logging bug was caught, fixed, and re-verified working end-to-end.
+
+**What remains for this to matter in practice:** exactly the same as every other phase — it activates the moment a real prospect reaches INTERESTED and gets an offer, which starts with you updating a real prospect's status in the CRM.
+
+---
+
 ## -3. Phase 6 — Prospect Intelligence (deep research) (COMPLETE, this session)
 
 Answers "why would THIS specific business pay us?" using real, live research — not the generic category-level evidence used elsewhere. This also activates a capability (`analyzeProspect`/the LLM connection) that existed in the codebase but was never actually being called — outreach and offers were previously template-only even with an LLM key connected.

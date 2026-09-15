@@ -40,6 +40,7 @@ import { generateOutreachMessages } from '../lib/outreachGenerator';
 import { researchProspect } from '../services/prospectIntelligence';
 import { generateOffer } from '../lib/offerGenerator';
 import { generateDesignBrief } from '../lib/designBriefGenerator';
+import { generateProspectDemo } from '../lib/demoGenerator';
 import { createProjectFromWonOffer } from '../lib/projectTracker';
 import { computeCategoryRealWorldStats, statsForCategory } from '../lib/realRevenue';
 import { computeRecommendedActions } from '../lib/recommendedActions';
@@ -703,11 +704,13 @@ export class AgentEngine {
           await this.repo.upsertOffer(offer);
           const brief = generateDesignBrief(offer, p);
           await this.repo.upsertDesignBrief(brief);
+          const demo = generateProspectDemo(p, offer, intel);
+          await this.repo.upsertProspectDemo(demo);
           await this.repo.appendProspectInteraction({
             id: uid('pint'),
             prospectId: p.id,
             kind: 'OFFER_DRAFTED',
-            summary: `Offer drafted: $${offer.price} over ${offer.timelineDaysMin}-${offer.timelineDaysMax} days, with a design brief — pending human review and send.`,
+            summary: `Offer drafted: $${offer.price} over ${offer.timelineDaysMin}-${offer.timelineDaysMax} days, with a design brief and working demo page — pending human review and send.`,
             createdAt: now,
           });
         }

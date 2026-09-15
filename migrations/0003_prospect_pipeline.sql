@@ -57,7 +57,7 @@ CREATE TABLE IF NOT EXISTS prospect_interactions (
   id            TEXT PRIMARY KEY,
   prospect_id   TEXT NOT NULL REFERENCES prospects(id) ON DELETE CASCADE,
   kind          TEXT NOT NULL
-                 CHECK (kind IN ('DISCOVERED','QUALIFIED','OUTREACH_GENERATED','STATUS_CHANGE','NOTE','FOLLOW_UP_SET')),
+                 CHECK (kind IN ('DISCOVERED','QUALIFIED','OUTREACH_GENERATED','STATUS_CHANGE','NOTE','FOLLOW_UP_SET','OFFER_DRAFTED','PROJECT_STARTED','INTELLIGENCE_GATHERED','DEMO_BUILT')),
   summary       TEXT NOT NULL,
   created_at    TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
 );

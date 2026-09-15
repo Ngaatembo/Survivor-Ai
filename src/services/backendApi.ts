@@ -29,6 +29,7 @@ import type {
   Project,
   ProjectMilestoneKey,
   Prospect,
+  ProspectDemo,
   ProspectInteraction,
   ProspectIntelligence,
   ProspectStatus,
@@ -76,6 +77,9 @@ export interface BackendState {
   realRevenue: RealRevenueEntry[];
   learningEvents: LearningEvent[];
   prospectIntelligence: ProspectIntelligence[];
+  // The worker's /state strips the full html to keep the payload bounded —
+  // fetch the actual page at GET /demo/{prospectId} when needed.
+  prospectDemos: Omit<ProspectDemo, 'html'>[];
 }
 
 export class BackendError extends Error {
@@ -231,4 +235,21 @@ export function updateProjectOutcome(
  *  now, rather than waiting for the capped per-cycle automatic pass. */
 export function researchProspectNow(prospectId: string): Promise<{ ok: true; intelligence: ProspectIntelligence }> {
   return postJson('/prospects/research', { prospectId });
+}
+
+/** Phase 3 (deepened): regenerate a prospect's real, working demo page —
+ *  e.g. after fresh deep research or an updated offer. Requires an
+ *  existing offer for this prospect. Returns the metadata plus the
+ *  shareable URL; fetch the actual page separately at demoUrl. */
+export function regenerateProspectDemo(
+  prospectId: string,
+): Promise<{ ok: true; demo: Omit<ProspectDemo, 'html'>; demoUrl: string }> {
+  return postJson('/prospects/demo', { prospectId });
+}
+
+/** The shareable link for a prospect's demo page — the same page GET
+ *  /demo/{prospectId} on the backend serves as real HTML, ready to send
+ *  to the actual business ("here's what your website could look like"). */
+export function demoUrl(prospectId: string): string {
+  return `${env.apiBaseUrl}/demo/${prospectId}`;
 }

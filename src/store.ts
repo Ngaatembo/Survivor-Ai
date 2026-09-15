@@ -25,6 +25,7 @@ import type {
   Project,
   ProjectMilestoneKey,
   Prospect,
+  ProspectDemo,
   ProspectInteraction,
   ProspectIntelligence,
   ProspectStatus,
@@ -48,6 +49,7 @@ import { createSearchProvider } from './services/providers/search';
 import { env, featureFlags } from './config/env';
 import { computeProfit, generateLearningEvent, foldRealRevenueIntoMemory, computeCategoryRealWorldStats, statsForCategory } from './lib/realRevenue';
 import { researchProspect } from './services/prospectIntelligence';
+import { generateProspectDemo } from './lib/demoGenerator';
 import {
   fetchBackendState,
   fetchBackendHealth,
@@ -58,6 +60,8 @@ import {
   addRealRevenueEntry as apiAddRealRevenueEntry,
   updateProjectOutcome as apiUpdateProjectOutcome,
   researchProspectNow as apiResearchProspectNow,
+  regenerateProspectDemo as apiRegenerateProspectDemo,
+  demoUrl as apiDemoUrl,
 } from './services/backendApi';
 
 const delay = (ms: number) => new Promise((r) => setTimeout(r, ms));
@@ -92,6 +96,7 @@ function seedInitialState() {
     realRevenue: [] as RealRevenueEntry[],
     learningEvents: [] as LearningEvent[],
     prospectIntelligence: [] as ProspectIntelligence[],
+    prospectDemos: [] as Omit<ProspectDemo, 'html'>[],
   };
 }
 
@@ -134,6 +139,9 @@ interface SurviveState {
   realRevenue: RealRevenueEntry[];
   learningEvents: LearningEvent[];
   prospectIntelligence: ProspectIntelligence[];
+  // Metadata only — the full HTML lives in the repo (demo mode) or is
+  // fetched on demand from the backend (live mode), never persisted here.
+  prospectDemos: Omit<ProspectDemo, 'html'>[];
   loop: LoopState;
   backend: BackendSyncState;
 
@@ -177,6 +185,13 @@ interface SurviveState {
    *  same researchProspect() function directly against the local
    *  search/LLM providers. Requires live search to be connected. */
   researchProspectNow: (prospectId: string) => Promise<void>;
+  /** Phase 3 (deepened) — manually regenerate a prospect's real, working
+   *  demo page right now. Requires an existing offer for this prospect. */
+  regenerateProspectDemo: (prospectId: string) => Promise<void>;
+  /** Open the actual demo page in a new tab — the real backend URL in
+   *  live mode, or a local Blob URL built from the repo's stored HTML in
+   *  demo mode (there's no server to serve it from there). */
+  viewProspectDemo: (prospectId: string) => Promise<void>;
   _runAuto: () => Promise<void>;
 }
 
@@ -284,6 +299,7 @@ export const useStore = create<SurviveState>()(
               realRevenue: state.realRevenue,
               learningEvents: state.learningEvents,
               prospectIntelligence: state.prospectIntelligence,
+              prospectDemos: state.prospectDemos,
               backend: {
                 connected: true,
                 syncing: false,
@@ -465,6 +481,54 @@ export const useStore = create<SurviveState>()(
           const intel = await researchProspect(search, llm, prospect);
           await repo.upsertProspectIntelligence(intel);
           set({ prospectIntelligence: await repo.listProspectIntelligence() } as any);
+        },
+
+        regenerateProspectDemo: async (prospectId: string) => {
+          if (featureFlags.backend) {
+            try {
+              await apiRegenerateProspectDemo(prospectId);
+              await get().syncFromBackend();
+            } catch (e) {
+              const message = e instanceof BackendError ? e.message : (e as Error).message;
+              get().logEvent('WARNING', `Failed to regenerate demo: ${message}`);
+            }
+            return;
+          }
+          const [prospects, offers, intelligenceList] = await Promise.all([
+            repo.listProspects(),
+            repo.listOffers(),
+            repo.listProspectIntelligence(),
+          ]);
+          const prospect = prospects.find((p) => p.id === prospectId);
+          if (!prospect) {
+            get().logEvent('WARNING', `Failed to regenerate demo: no prospect found with id ${prospectId}.`);
+            return;
+          }
+          const offer = offers.find((o) => o.prospectId === prospectId);
+          if (!offer) {
+            get().logEvent('WARNING', 'Failed to regenerate demo: no offer exists for this prospect yet.');
+            return;
+          }
+          const intel = intelligenceList.find((i) => i.prospectId === prospectId);
+          const demo = generateProspectDemo(prospect, offer, intel);
+          await repo.upsertProspectDemo(demo);
+          const allDemos = await repo.listProspectDemos();
+          set({ prospectDemos: allDemos.map(({ html, ...meta }) => meta) } as any);
+        },
+
+        viewProspectDemo: async (prospectId: string) => {
+          if (featureFlags.backend) {
+            (globalThis as any).open(apiDemoUrl(prospectId), '_blank', 'noopener,noreferrer');
+            return;
+          }
+          const demos = await repo.listProspectDemos();
+          const demo = demos.find((d) => d.prospectId === prospectId);
+          if (!demo) {
+            get().logEvent('WARNING', 'No demo found for this prospect yet.');
+            return;
+          }
+          const blobUrl = URL.createObjectURL(new Blob([demo.html], { type: 'text/html' }));
+          (globalThis as any).open(blobUrl, '_blank', 'noopener,noreferrer');
         },
 
         logEvent: (type: AgentEvent['type'], message: string) =>
