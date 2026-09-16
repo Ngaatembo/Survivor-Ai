@@ -32,7 +32,7 @@ import { recordResult, lessonFromExperiment } from '../services/memory';
 import { discoverLive } from '../services/liveResearch';
 import { discoverProspects } from '../services/prospectDiscovery';
 import type { EngineHooks, EngineRepository } from './repository';
-import { createSeedSnapshot, SURVIVAL_THRESHOLD } from './seed';
+import { createSeedSnapshot, computeSurvivalStatus } from './seed';
 import type { LLMProvider, SearchProvider } from '../services/providers/types';
 import { evaluateOpportunity, VALIDATION_SCORE_THRESHOLD } from '../lib/decisionEngine';
 import { generateBusinessModel } from '../lib/businessModel';
@@ -42,6 +42,7 @@ import { researchMarketPrice } from '../services/marketPricing';
 import { generateOffer } from '../lib/offerGenerator';
 import { generateDesignBrief } from '../lib/designBriefGenerator';
 import { generateProspectDemo } from '../lib/demoGenerator';
+import { buildMissionLadder, evaluateMissions } from '../lib/missions';
 import { createProjectFromWonOffer } from '../lib/projectTracker';
 import { computeCategoryRealWorldStats, statsForCategory } from '../lib/realRevenue';
 import { computeRecommendedActions } from '../lib/recommendedActions';
@@ -96,7 +97,7 @@ export interface CycleOutcome {
   decision: Decision | null;
   experiment: Experiment | null;
   balance: number;
-  finalStatus: 'ALIVE' | 'AT_RISK' | 'DEAD';
+  finalStatus: 'ALIVE' | 'AT_RISK' | 'CRITICAL' | 'DEAD';
 }
 
 export class AgentEngine {
@@ -123,6 +124,9 @@ export class AgentEngine {
     for (const tx of snap.transactions) await this.repo.appendTransaction(tx);
     for (const evt of snap.events) await this.repo.appendEvent(evt);
     for (const strat of snap.strategies) await this.repo.appendStrategy(strat);
+    // Survivor 2.0 §10 — the mission ladder, scaled to this agent's actual
+    // starting capital.
+    await this.repo.upsertMissions(buildMissionLadder(snap.agent.startingCapital));
   }
 
   private async safeGetAgent() {
@@ -161,8 +165,7 @@ export class AgentEngine {
     } finally {
       const finalTx = await this.repo.listTransactions();
       const finalBalance = balanceFrom(finalTx);
-      const releaseStatus =
-        finalBalance <= 0 ? 'DEAD' : finalBalance < SURVIVAL_THRESHOLD ? 'AT_RISK' : 'ALIVE';
+      const releaseStatus = computeSurvivalStatus(finalBalance);
       await this.repo.releaseCycleLock(releaseStatus);
     }
   }
@@ -806,8 +809,25 @@ export class AgentEngine {
      * set exactly once, on every exit path (success, abort, or throw). */
     transactions = await this.repo.listTransactions();
     const finalBalance = balanceFrom(transactions);
-    const finalStatus: CycleOutcome['finalStatus'] =
-      finalBalance <= 0 ? 'DEAD' : finalBalance < SURVIVAL_THRESHOLD ? 'AT_RISK' : 'ALIVE';
+    const finalStatus: CycleOutcome['finalStatus'] = computeSurvivalStatus(finalBalance);
+
+    // Survivor 2.0 §10 — evaluate the mission ladder against the real
+    // final balance for this cycle; log once when a mission completes.
+    const currentMissions = await this.repo.listMissions();
+    if (currentMissions.length > 0) {
+      const updatedAgent = await this.repo.getAgent();
+      const withStrategy = currentMissions.map((m) =>
+        m.status === 'ACTIVE' ? { ...m, strategy: updatedAgent.currentStrategy || m.strategy } : m,
+      );
+      const evaluated = evaluateMissions(withStrategy, finalBalance);
+      const newlyCompleted = evaluated.filter(
+        (m, i) => m.status === 'COMPLETED' && currentMissions[i]?.status !== 'COMPLETED',
+      );
+      await this.repo.upsertMissions(evaluated);
+      for (const m of newlyCompleted) {
+        await hooks.log('DECISION', `Mission complete: "${m.objective}" — reached $${finalBalance.toFixed(2)} (target $${m.targetBalance.toFixed(2)}).`);
+      }
+    }
 
     return { cycle, decision, experiment, balance: finalBalance, finalStatus };
 
@@ -854,7 +874,7 @@ export class AgentEngine {
   }
 }
 
-type AgentStatusLike = 'ALIVE' | 'AT_RISK' | 'DEAD' | 'RESEARCHING' | 'EXECUTING' | 'PAUSED';
+type AgentStatusLike = 'ALIVE' | 'AT_RISK' | 'CRITICAL' | 'DEAD' | 'RESEARCHING' | 'EXECUTING' | 'PAUSED';
 
 async function aborted(cycle: AgentCycle, transactions: Transaction[]): Promise<CycleOutcome | null> {
   const balance = balanceFrom(transactions);
@@ -863,6 +883,6 @@ async function aborted(cycle: AgentCycle, transactions: Transaction[]): Promise<
     decision: null,
     experiment: null,
     balance,
-    finalStatus: balance <= 0 ? 'DEAD' : balance < SURVIVAL_THRESHOLD ? 'AT_RISK' : 'ALIVE',
+    finalStatus: computeSurvivalStatus(balance),
   };
 }

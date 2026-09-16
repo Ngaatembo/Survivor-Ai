@@ -9,6 +9,7 @@
 export type AgentStatus =
   | 'ALIVE'
   | 'AT_RISK'
+  | 'CRITICAL'
   | 'DEAD'
   | 'RESEARCHING'
   | 'EXECUTING'
@@ -559,6 +560,31 @@ export interface ProspectIntelligence {
   sources: ResearchSource[];
   generatedAt: number;
   updatedAt: number;
+}
+
+/* ---------------------------------- missions --------------------------------- */
+
+/**
+ * A concrete, structured survival objective (Survivor 2.0 §10) — replaces
+ * the freeform Agent.currentObjective string with something the
+ * dashboard can show progress against and learn from. The standard
+ * ladder (make first $1 -> reach $10 -> ... -> recover starting capital
+ * -> reach $100) is defined once in lib/missions.ts; only one mission is
+ * ACTIVE at a time, activated in order as each completes.
+ */
+export type MissionStatus = 'ACTIVE' | 'COMPLETED' | 'FAILED';
+
+export interface Mission {
+  id: string;
+  sequence: number; // fixed ladder position, so ordering never depends on timestamps
+  objective: string; // e.g. "Make first $1"
+  targetBalance: number; // the wallet balance that completes this mission
+  strategy: string; // human-readable current approach, mirrors Agent.currentStrategy
+  status: MissionStatus;
+  expectedRevenue?: string; // e.g. "$20-$60" — a range, never a false-precision number
+  startedAt: number;
+  completedAt?: number;
+  lessonsLearned: string[]; // filled in from real_revenue/learning_events once completed
 }
 
 /* ------------------------------ market pricing ------------------------------ */

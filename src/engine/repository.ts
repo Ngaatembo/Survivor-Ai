@@ -18,6 +18,7 @@ import type {
   LearningEvent,
   MarketPriceResearch,
   MemoryEntry,
+  Mission,
   Offer,
   Opportunity,
   OpportunityDecision,
@@ -187,6 +188,11 @@ export interface EngineRepository {
   // per opportunity, regenerated (upserted) as research improves.
   listMarketPriceResearch(): Promise<MarketPriceResearch[]>;
   upsertMarketPriceResearch(research: MarketPriceResearch): Promise<void>;
+
+  // missions (Survivor 2.0 §10) — the structured ladder of survival
+  // milestones. Bulk-replaced each cycle as missions complete/activate.
+  listMissions(): Promise<Mission[]>;
+  upsertMissions(missions: Mission[]): Promise<void>;
 }
 
 /** Engine callbacks so the host can render progress / stay in sync. */

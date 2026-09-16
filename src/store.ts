@@ -19,6 +19,7 @@ import type {
   LearningEvent,
   MarketPriceResearch,
   MemoryEntry,
+  Mission,
   Offer,
   Opportunity,
   OpportunityDecision,
@@ -99,6 +100,7 @@ function seedInitialState() {
     prospectIntelligence: [] as ProspectIntelligence[],
     prospectDemos: [] as Omit<ProspectDemo, 'html'>[],
     marketPriceResearch: [] as MarketPriceResearch[],
+    missions: [] as Mission[],
   };
 }
 
@@ -145,6 +147,7 @@ interface SurviveState {
   // fetched on demand from the backend (live mode), never persisted here.
   prospectDemos: Omit<ProspectDemo, 'html'>[];
   marketPriceResearch: MarketPriceResearch[];
+  missions: Mission[];
   loop: LoopState;
   backend: BackendSyncState;
 
@@ -304,6 +307,7 @@ export const useStore = create<SurviveState>()(
               prospectIntelligence: state.prospectIntelligence,
               prospectDemos: state.prospectDemos,
               marketPriceResearch: state.marketPriceResearch,
+              missions: state.missions,
               backend: {
                 connected: true,
                 syncing: false,

@@ -5,6 +5,22 @@
 
 ---
 
+## -6. Survivor 2.0, Phase 1 — Survival Core (COMPLETE, this session)
+
+The user shared a larger "Economic Survival Agent" vision document. Per that document's own advice (§26 — don't build every strategy at once, start with the smallest real loop), this session built only **Phase 1: Survival Core** — the rest (action-approval workflow, strategy performance tracking, economic experiments, survival runs) remains future work.
+
+- **`AgentStatus` extended with a `CRITICAL` tier** — `ALIVE → AT_RISK → CRITICAL → DEAD`, matching the document's ALIVE/LOW_FUNDS/CRITICAL/DEAD ladder (kept the existing `AT_RISK` name rather than a bigger rename). The three places that used to compute this inline and separately are now one shared `computeSurvivalStatus()` helper.
+- **Mission ladder** (`src/lib/missions.ts`) — 5 structured survival milestones (first dollar of profit → +25% → 2x → 5x → 10x starting capital), replacing the freeform `Agent.currentObjective` string. **Deliberately scaled relative to actual starting capital** rather than the document's flat $1/$10/$25/$50/$100 figures, since the production agent already starts at $50 and those flat targets would already be exceeded on cycle 1 — the smoke suite explicitly verifies the ladder never uses hardcoded dollar figures.
+- Wired into the cycle: the ladder generates once on first seed, gets evaluated against the real simulated balance every cycle, and completed missions get logged with a recorded lesson.
+- **Dashboard**: the existing Survival Meter now shows the current mission and its target alongside the balance meter.
+- New D1 migration `0010_missions.sql` (fully idempotent) + Supabase schema.
+
+Verified: a new smoke suite (`scripts/missions.smoke.ts`, all passing — target scaling across different starting capitals, in-order completion, lessons/timestamps recorded, never reverting a completed mission, repository round-trip), all 10 smoke suites passing together, clean `tsc --noEmit` on both tsconfigs, clean `vite build`, and a live integration pass against real local D1 confirming the ladder generates with correctly-scaled targets on first seed.
+
+**What remains for this to matter in practice:** nothing — this is purely internal state/UI, already active on every cycle. The rest of the Survivor 2.0 vision (Phases 2-6: decision engine reframing, action-approval workflow, strategy performance tracking, economic experiments, survival runs) is real, substantial future work, not yet started.
+
+---
+
 ## -5. Real market pricing (COMPLETE, this session)
 
 Fixed a real, substantive flaw flagged directly by the user: offer prices (e.g. $16 for a website) were never grounded in what the market actually charges — they came from a bare formula (`modeled monthly revenue ÷ 4 assumed engagements`, floor of just $5) with no connection to real going rates.

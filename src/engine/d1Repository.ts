@@ -42,6 +42,7 @@ import type {
   ProspectInteraction,
   ProspectIntelligence,
   MarketPriceResearch,
+  Mission,
   RealRevenueEntry,
   RecommendedAction,
   ResearchReport,
@@ -831,6 +832,7 @@ export class D1Repository implements EngineRepository {
   async reset({ seed = true }: { seed?: boolean } = {}): Promise<void> {
     const tables = [
       'transactions',
+      'missions',
       'experiment_results', // no agent_id column; deleted via experiments join below
       'experiments',
       'agent_memory',
@@ -1907,6 +1909,59 @@ export class D1Repository implements EngineRepository {
       sources: this.a(r.sources),
       generatedAt: this.ms(r.generated_at),
       updatedAt: this.ms(r.updated_at),
+    };
+  }
+
+  /* ----------------------------------- missions ---------------------------------- */
+
+  async listMissions(): Promise<Mission[]> {
+    const { results } = await this.db
+      .prepare('SELECT * FROM missions WHERE agent_id = ? ORDER BY sequence ASC')
+      .bind(this.agentId)
+      .all();
+    return results.map((r: any) => this.mapMission(r));
+  }
+
+  /** The whole ladder is small (5 fixed steps) and always fully
+   *  regenerated/re-evaluated together each cycle — simplest and safest
+   *  to replace the full set in one batch rather than diff-upsert. */
+  async upsertMissions(missions: Mission[]): Promise<void> {
+    const del = this.db.prepare('DELETE FROM missions WHERE agent_id = ?').bind(this.agentId);
+    const inserts = missions.map((m) =>
+      this.db
+        .prepare(
+          `INSERT INTO missions (id, agent_id, sequence, objective, target_balance, strategy, status, expected_revenue, started_at, completed_at, lessons_learned)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        )
+        .bind(
+          m.id,
+          this.agentId,
+          m.sequence,
+          m.objective,
+          m.targetBalance,
+          m.strategy,
+          m.status,
+          m.expectedRevenue ?? null,
+          this.iso(m.startedAt),
+          m.completedAt ? this.iso(m.completedAt) : null,
+          this.j(m.lessonsLearned),
+        ),
+    );
+    await this.db.batch([del, ...inserts]);
+  }
+
+  private mapMission(r: any): Mission {
+    return {
+      id: r.id,
+      sequence: r.sequence,
+      objective: r.objective,
+      targetBalance: this.n(r.target_balance),
+      strategy: r.strategy,
+      status: r.status,
+      expectedRevenue: r.expected_revenue ?? undefined,
+      startedAt: this.ms(r.started_at),
+      completedAt: r.completed_at ? this.ms(r.completed_at) : undefined,
+      lessonsLearned: this.a<string>(r.lessons_learned),
     };
   }
 }

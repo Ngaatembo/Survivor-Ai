@@ -429,6 +429,25 @@ create table market_price_research (
 );
 create index idx_market_price_research_opportunity on market_price_research(opportunity_id);
 
+-- missions — Survivor 2.0 §10: the structured mission ladder, replacing
+-- the freeform agents.current_objective string.
+create type mission_status as enum ('ACTIVE', 'COMPLETED', 'FAILED');
+
+create table missions (
+  id                  text primary key,
+  agent_id            text not null references agents(id) on delete cascade,
+  sequence            int not null,
+  objective           text not null default '',
+  target_balance      numeric(12,2) not null default 0,
+  strategy            text not null default '',
+  status              mission_status not null default 'ACTIVE',
+  expected_revenue    text,
+  started_at          timestamptz not null default now(),
+  completed_at        timestamptz,
+  lessons_learned     jsonb not null default '[]'
+);
+create index idx_missions_agent on missions(agent_id, sequence);
+
 -- research_sources -----------------------------------------------------------
 
 create table research_sources (

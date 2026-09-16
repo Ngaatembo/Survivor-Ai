@@ -19,6 +19,19 @@ import { strategyFromMemory } from '../services/ai';
 
 export const STARTING_CAPITAL = 50;
 export const SURVIVAL_THRESHOLD = 5;
+/** Below this, the agent is CRITICAL — closer to DEAD than merely
+ *  AT_RISK (Survivor 2.0 §4's ALIVE/LOW_FUNDS/CRITICAL/DEAD ladder,
+ *  named AT_RISK/CRITICAL here to keep the existing AgentStatus values). */
+export const CRITICAL_THRESHOLD = 2;
+
+/** The single source of truth for balance -> survival-status mapping —
+ *  previously duplicated three times inline across agentEngine.ts. */
+export function computeSurvivalStatus(balance: number): 'ALIVE' | 'AT_RISK' | 'CRITICAL' | 'DEAD' {
+  if (balance <= 0) return 'DEAD';
+  if (balance < CRITICAL_THRESHOLD) return 'CRITICAL';
+  if (balance < SURVIVAL_THRESHOLD) return 'AT_RISK';
+  return 'ALIVE';
+}
 export const AGENT_ID = 'agent-survive-01';
 
 export function seedOpportunities(): Opportunity[] {

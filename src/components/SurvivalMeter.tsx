@@ -1,5 +1,6 @@
 import { useStore, useWalletTotals } from '../store';
 import { usd } from '../lib/format';
+import { currentMission } from '../lib/missions';
 
 export function SurvivalMeter() {
   const { balance } = useWalletTotals();
@@ -7,6 +8,9 @@ export function SurvivalMeter() {
   const starting = useStore((s) => s.agent.startingCapital);
   const experiments = useStore((s) => s.experiments);
   const cycles = useStore((s) => s.agent.totalCyclesRun);
+  const status = useStore((s) => s.agent.status);
+  const missions = useStore((s) => s.missions);
+  const mission = currentMission(missions);
 
   // Runway: average simulated expense per completed cycle, assume ~7 days/cycle.
   const avgBurn =
@@ -19,10 +23,22 @@ export function SurvivalMeter() {
   const scaleMax = Math.max(starting, balance, threshold * 2);
   const pct = Math.max(0, Math.min(100, (balance / scaleMax) * 100));
   const markerPct = (threshold / scaleMax) * 100;
-  const tone = balance <= 0 ? 'dead' : balance < threshold ? 'warn' : '';
+  const tone = balance <= 0 ? 'dead' : status === 'CRITICAL' ? 'dead' : status === 'AT_RISK' ? 'warn' : '';
 
   return (
     <div>
+      {mission && (
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
+          <div>
+            <div className="mono-label">Current mission</div>
+            <div style={{ fontSize: 15, fontWeight: 600, marginTop: 2 }}>{mission.objective}</div>
+          </div>
+          <div style={{ textAlign: 'right' }}>
+            <div className="mono-label">Target</div>
+            <div className="num" style={{ fontSize: 15, marginTop: 2 }}>{usd(mission.targetBalance)}</div>
+          </div>
+        </div>
+      )}
       <div className="meter">
         <div className={`meter-fill ${tone}`} style={{ width: `${pct}%` }} />
         <div className="meter-marker" style={{ left: `${markerPct}%` }} title={`Survival threshold $${threshold}`} />

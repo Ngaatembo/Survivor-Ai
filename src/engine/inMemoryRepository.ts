@@ -25,6 +25,7 @@ import type {
   ProspectInteraction,
   ProspectIntelligence,
   MarketPriceResearch,
+  Mission,
   RealRevenueEntry,
   RecommendedAction,
   ResearchReport,
@@ -58,6 +59,7 @@ interface InMemoryState {
   prospectIntelligence: ProspectIntelligence[];
   prospectDemos: ProspectDemo[];
   marketPriceResearch: MarketPriceResearch[];
+  missions: Mission[];
 }
 
 export class InMemoryRepository implements EngineRepository {
@@ -85,6 +87,7 @@ export class InMemoryRepository implements EngineRepository {
     prospectIntelligence: [],
     prospectDemos: [],
     marketPriceResearch: [],
+    missions: [],
   };
 
   /** Load a snapshot (e.g. produced by createSeedState). */
@@ -238,6 +241,7 @@ export class InMemoryRepository implements EngineRepository {
       prospectIntelligence: [],
       prospectDemos: [],
       marketPriceResearch: [],
+      missions: [],
     };
   }
 
@@ -372,5 +376,12 @@ export class InMemoryRepository implements EngineRepository {
       research,
       ...this.state.marketPriceResearch.filter((r) => r.opportunityId !== research.opportunityId),
     ];
+  }
+
+  async listMissions() {
+    return this.state.missions;
+  }
+  async upsertMissions(missions: Mission[]) {
+    this.state.missions = missions;
   }
 }

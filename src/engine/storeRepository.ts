@@ -28,6 +28,7 @@ import type {
   ProspectInteraction,
   ProspectIntelligence,
   MarketPriceResearch,
+  Mission,
   RealRevenueEntry,
   RecommendedAction,
   ResearchReport,
@@ -76,6 +77,7 @@ export function createStoreRepository(get: Get, set: Set, reseed: () => StateSha
   let prospectIntelligence: ProspectIntelligence[] = [];
   let prospectDemos: ProspectDemo[] = [];
   let marketPriceResearch: MarketPriceResearch[] = [];
+  let missions: Mission[] = [];
   return {
     async getAgent() {
       return get().agent;
@@ -221,6 +223,7 @@ export function createStoreRepository(get: Get, set: Set, reseed: () => StateSha
       prospectIntelligence = [];
       prospectDemos = [];
       marketPriceResearch = [];
+      missions = [];
       set(reseed() as any);
     },
 
@@ -338,6 +341,13 @@ export function createStoreRepository(get: Get, set: Set, reseed: () => StateSha
     },
     async upsertMarketPriceResearch(research) {
       marketPriceResearch = [research, ...marketPriceResearch.filter((r) => r.opportunityId !== research.opportunityId)];
+    },
+
+    async listMissions() {
+      return missions;
+    },
+    async upsertMissions(next) {
+      missions = next;
     },
   };
 }

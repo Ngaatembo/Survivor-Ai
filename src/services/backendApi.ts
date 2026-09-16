@@ -23,6 +23,7 @@ import type {
   LearningEvent,
   MarketPriceResearch,
   MemoryEntry,
+  Mission,
   Offer,
   Opportunity,
   OpportunityDecision,
@@ -82,6 +83,7 @@ export interface BackendState {
   // fetch the actual page at GET /demo/{prospectId} when needed.
   prospectDemos: Omit<ProspectDemo, 'html'>[];
   marketPriceResearch: MarketPriceResearch[];
+  missions: Mission[];
 }
 
 export class BackendError extends Error {

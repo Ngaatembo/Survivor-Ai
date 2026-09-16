@@ -212,6 +212,7 @@ export default {
           prospectIntelligence,
           prospectDemos,
           marketPriceResearch,
+          missions,
         ] = await Promise.all([
           repo.listOpportunities(),
           repo.listExperiments(),
@@ -235,6 +236,7 @@ export default {
           repo.listProspectIntelligence(),
           repo.listProspectDemos(),
           repo.listMarketPriceResearch(),
+          repo.listMissions(),
         ]);
         return json({
           ok: true,
@@ -273,6 +275,8 @@ export default {
           prospectDemos: prospectDemos.map(({ html, ...meta }) => meta),
           // Real market pricing research (replaces the old formula guess).
           marketPriceResearch,
+          // Survivor 2.0 §10 — the structured mission ladder.
+          missions,
         });
       } catch (e) {
         return json({ ok: false, error: (e as Error).message }, { status: 500 });

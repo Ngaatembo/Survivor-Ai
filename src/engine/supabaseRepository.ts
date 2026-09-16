@@ -34,6 +34,7 @@ import type {
   ProspectInteraction,
   ProspectIntelligence,
   MarketPriceResearch,
+  Mission,
   RealRevenueEntry,
   RecommendedAction,
   ResearchReport,
@@ -1526,6 +1527,50 @@ export class SupabaseRepository implements EngineRepository {
       sources: (r.sources ?? []) as MarketPriceResearch['sources'],
       generatedAt: Date.parse(r.generated_at) || Date.now(),
       updatedAt: Date.parse(r.updated_at) || Date.now(),
+    };
+  }
+
+  /* ----------------------------------- missions ---------------------------------- */
+
+  async listMissions(): Promise<Mission[]> {
+    const { data, error } = await this.db.from('missions').select('*').eq('agent_id', this.agentId).order('sequence', { ascending: true });
+    if (error) throw new Error(error.message);
+    return (data ?? []).map((r: any) => this.mapMission(r));
+  }
+
+  async upsertMissions(missions: Mission[]): Promise<void> {
+    const { error: delError } = await this.db.from('missions').delete().eq('agent_id', this.agentId);
+    if (delError) throw new Error(delError.message);
+    if (!missions.length) return;
+    const rows = missions.map((m) => ({
+      id: m.id,
+      agent_id: this.agentId,
+      sequence: m.sequence,
+      objective: m.objective,
+      target_balance: m.targetBalance,
+      strategy: m.strategy,
+      status: m.status,
+      expected_revenue: m.expectedRevenue ?? null,
+      started_at: new Date(m.startedAt).toISOString(),
+      completed_at: m.completedAt ? new Date(m.completedAt).toISOString() : null,
+      lessons_learned: m.lessonsLearned,
+    }));
+    const { error } = await this.db.from('missions').insert(rows);
+    if (error) throw new Error(error.message);
+  }
+
+  private mapMission(r: any): Mission {
+    return {
+      id: r.id,
+      sequence: r.sequence,
+      objective: r.objective,
+      targetBalance: this.n(r.target_balance),
+      strategy: r.strategy,
+      status: r.status,
+      expectedRevenue: r.expected_revenue ?? undefined,
+      startedAt: Date.parse(r.started_at) || Date.now(),
+      completedAt: r.completed_at ? Date.parse(r.completed_at) : undefined,
+      lessonsLearned: (r.lessons_learned ?? []) as string[],
     };
   }
 }
