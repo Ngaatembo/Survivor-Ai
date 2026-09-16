@@ -127,6 +127,10 @@ console.log('--- computeCategoryRealWorldStats: correct close rate, avg days, av
   assert(Math.abs(catStats!.realCloseRate - 2 / 3) < 0.001, `realCloseRate = won/decided (got ${catStats!.realCloseRate})`);
   assert(catStats!.avgRealTimeToRevenueDays === 5, 'avg days computed correctly (4,6 -> 5)');
   assert(catStats!.avgDealValue === 150, 'avg deal value computed correctly (100,200 -> 150)');
+  assert(catStats!.lostCount === 1, `lostCount counts correctly (got ${catStats!.lostCount})`);
+  assert(catStats!.totalRevenue === 300, `totalRevenue sums real_revenue amounts (100+200=300, got ${catStats!.totalRevenue})`);
+  assert(catStats!.totalProfit === 180, `totalProfit sums real_revenue profit (90+90=180, got ${catStats!.totalProfit})`);
+  assert(catStats!.entryCount === 2, `entryCount counts real_revenue entries, not decided prospects (got ${catStats!.entryCount})`);
 
   const noStats = statsForCategory(stats, 'Digital Business');
   assert(noStats === undefined, 'no fabricated stats for a category with no data');
@@ -140,7 +144,7 @@ console.log('--- scoreOpportunity: backward compatible, blends only above thresh
   assert(withoutStats.total === withEmptyStats.total, 'omitting categoryStats matches passing an empty array');
 
   const strongStats: CategoryRealWorldStats[] = [
-    { category: opp.category, decidedCount: 5, wonCount: 5, realCloseRate: 1, avgRealTimeToRevenueDays: 2, avgDealValue: 100 },
+    { category: opp.category, decidedCount: 5, wonCount: 5, lostCount: 0, realCloseRate: 1, avgRealTimeToRevenueDays: 2, avgDealValue: 100, totalRevenue: 500, totalProfit: 400, entryCount: 5 },
   ];
   const withStrongStats = scoreOpportunity(opp, strongStats);
   assert(withStrongStats.total >= withoutStats.total, `a perfect real-world track record never scores lower (${withStrongStats.total} >= ${withoutStats.total})`);
@@ -154,7 +158,7 @@ console.log('--- realRevenueScore / evaluateOpportunity: categoryStats blending,
   assert(plain === withEmpty, 'omitting learningEvents/categoryStats matches passing empty arrays');
 
   const weakStats: CategoryRealWorldStats[] = [
-    { category: opp.category, decidedCount: 5, wonCount: 0, realCloseRate: 0, avgRealTimeToRevenueDays: 60, avgDealValue: 10 },
+    { category: opp.category, decidedCount: 5, wonCount: 0, lostCount: 5, realCloseRate: 0, avgRealTimeToRevenueDays: 60, avgDealValue: 10, totalRevenue: 0, totalProfit: 0, entryCount: 0 },
   ];
   const withWeakStats = realRevenueScore(opp, [], [], weakStats);
   assert(withWeakStats < plain, `a category with 0% real close rate and slow real time-to-revenue scores lower (${withWeakStats} < ${plain})`);
@@ -171,7 +175,7 @@ console.log('--- scoreProspect: blends probabilityOfClose, adds an explanatory f
   );
   assert(!noStats.factors.some((f) => f.includes('Blended with')), 'no blend factor when no categoryStats given');
 
-  const belowThreshold: CategoryRealWorldStats = { category: 'x', decidedCount: 2, wonCount: 2, realCloseRate: 1, avgRealTimeToRevenueDays: 5, avgDealValue: 100 };
+  const belowThreshold: CategoryRealWorldStats = { category: 'x', decidedCount: 2, wonCount: 2, lostCount: 0, realCloseRate: 1, avgRealTimeToRevenueDays: 5, avgDealValue: 100, totalRevenue: 200, totalProfit: 150, entryCount: 2 };
   const stillNoBlend = scoreProspect(
     { websitePresence: 'NONE_FOUND', contactChannel: 'WHATSAPP', sourcesCount: 2, hasCommercialSignals: true, hasUrgencySignal: false },
     undefined,
@@ -179,7 +183,7 @@ console.log('--- scoreProspect: blends probabilityOfClose, adds an explanatory f
   );
   assert(stillNoBlend.probabilityOfClose === noStats.probabilityOfClose, 'below sample threshold, probabilityOfClose is unchanged');
 
-  const strongTrackRecord: CategoryRealWorldStats = { category: 'x', decidedCount: 10, wonCount: 10, realCloseRate: 1, avgRealTimeToRevenueDays: 5, avgDealValue: 100 };
+  const strongTrackRecord: CategoryRealWorldStats = { category: 'x', decidedCount: 10, wonCount: 10, lostCount: 0, realCloseRate: 1, avgRealTimeToRevenueDays: 5, avgDealValue: 100, totalRevenue: 1000, totalProfit: 800, entryCount: 10 };
   const withBlend = scoreProspect(
     { websitePresence: 'NONE_FOUND', contactChannel: 'WHATSAPP', sourcesCount: 2, hasCommercialSignals: true, hasUrgencySignal: false },
     undefined,
@@ -201,14 +205,14 @@ console.log('--- computeRecommendedActions: real-world weighting nudges prospect
   assert(!!contactAction, 'a CONTACT_PROSPECT action is produced for a DISCOVERED prospect');
 
   const strongCategoryStats: CategoryRealWorldStats[] = [
-    { category: opp.category, decidedCount: 10, wonCount: 8, realCloseRate: 0.8, avgRealTimeToRevenueDays: 5, avgDealValue: 100 },
+    { category: opp.category, decidedCount: 10, wonCount: 8, lostCount: 2, realCloseRate: 0.8, avgRealTimeToRevenueDays: 5, avgDealValue: 100, totalRevenue: 800, totalProfit: 640, entryCount: 8 },
   ];
   const withStatsActions = computeRecommendedActions([opp], [], [model], [], [prospect], [], [], strongCategoryStats);
   const boostedAction = withStatsActions.find((a) => a.kind === 'CONTACT_PROSPECT');
   assert(!!boostedAction && boostedAction.expectedValue > contactAction!.expectedValue, `a category with a strong real close rate boosts the action's expectedValue (${boostedAction?.expectedValue} > ${contactAction!.expectedValue})`);
 
   const weakCategoryStats: CategoryRealWorldStats[] = [
-    { category: opp.category, decidedCount: 10, wonCount: 0, realCloseRate: 0, avgRealTimeToRevenueDays: 60, avgDealValue: 10 },
+    { category: opp.category, decidedCount: 10, wonCount: 0, lostCount: 10, realCloseRate: 0, avgRealTimeToRevenueDays: 60, avgDealValue: 10, totalRevenue: 0, totalProfit: 0, entryCount: 0 },
   ];
   const withWeakStatsActions = computeRecommendedActions([opp], [], [model], [], [prospect], [], [], weakCategoryStats);
   const reducedAction = withWeakStatsActions.find((a) => a.kind === 'CONTACT_PROSPECT');

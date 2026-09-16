@@ -5,6 +5,20 @@
 
 ---
 
+## -8. Survivor 2.0, §18 — Strategy Performance table (COMPLETE, this session)
+
+Extends the existing `CategoryRealWorldStats` (Phase 5) with the fields needed for a genuine performance table, rather than building a parallel tracking system from scratch.
+
+- **`CategoryRealWorldStats`** gained `lostCount`, `totalRevenue`, `totalProfit`, `entryCount` (previously only had `wonCount`/`realCloseRate`/averages) — purely additive, fully backward compatible.
+- **New "Strategy performance" table** in the Analytics view: category, attempts, won, lost, success rate, total revenue, total profit, avg time to revenue, avg deal value — sorted by real profit. An honest empty state until at least one prospect is decided or one payment is recorded.
+- No database changes — computed live from data already loaded into the dashboard, same as the Data Quality panel.
+
+Verified: extended test coverage in `scripts/intelligence.smoke.ts` (all passing) for the new fields, all 11 smoke suites passing together, clean `tsc --noEmit` on both tsconfigs, clean `vite build`.
+
+**What remains of Survivor 2.0:** the action-approval workflow (§12), a full survival-score formalization, economic experiments (§19), and survival-run history (§21) are all real, substantial future work, not started.
+
+---
+
 ## -7. Survivor 2.0, Phase 2 (partial) — Decision Engine adapts to survival status (COMPLETE, this session)
 
 The "What should I do now?" panel already existed and covered much of §8's ask (a ranked, reasoned action list). The one real gap: ranking never adapted to the current wallet — §4 explicitly calls for prioritizing fast/cheap actions once funds are low, and nothing did that.

@@ -1,7 +1,7 @@
 import { useMemo } from 'react';
 import { useStore } from '../store';
 import { Badge, Panel, KV, Sparkline } from './ui';
-import { comparePredictionToActual, aggregateRealityComparison, predictionErrorTrend } from '../lib/realRevenue';
+import { comparePredictionToActual, aggregateRealityComparison, predictionErrorTrend, computeCategoryRealWorldStats } from '../lib/realRevenue';
 
 function DeltaBadge({ pct }: { pct?: number }) {
   if (pct === undefined) return <span className="faint small">no data yet</span>;
@@ -14,6 +14,15 @@ export function Analytics() {
   const businessModels = useStore((s) => s.businessModels);
   const realRevenue = useStore((s) => s.realRevenue);
   const learningEvents = useStore((s) => s.learningEvents);
+  const prospects = useStore((s) => s.prospects);
+
+  const strategyStats = useMemo(
+    () =>
+      computeCategoryRealWorldStats(opportunities, prospects, realRevenue)
+        .filter((s) => s.decidedCount > 0 || s.entryCount > 0)
+        .sort((a, b) => b.totalProfit - a.totalProfit),
+    [opportunities, prospects, realRevenue],
+  );
 
   const comparisons = useMemo(
     () =>
@@ -107,6 +116,55 @@ export function Analytics() {
             ))}
           </div>
         </>
+      )}
+
+      <h3 style={{ marginBottom: 10 }}>Strategy performance</h3>
+      {strategyStats.length === 0 ? (
+        <div className="empty">
+          No strategy (category) has any decided prospects or recorded revenue yet — this table populates
+          once at least one prospect is marked WON/LOST or a payment is recorded.
+        </div>
+      ) : (
+        <div style={{ overflowX: 'auto', marginBottom: 20 }}>
+          <table className="data-table">
+            <thead>
+              <tr>
+                <th>Strategy (category)</th>
+                <th>Attempts</th>
+                <th>Won</th>
+                <th>Lost</th>
+                <th>Success rate</th>
+                <th>Revenue</th>
+                <th>Profit</th>
+                <th>Avg time to revenue</th>
+                <th>Avg deal value</th>
+              </tr>
+            </thead>
+            <tbody>
+              {strategyStats.map((s) => (
+                <tr key={s.category}>
+                  <td>{s.category}</td>
+                  <td>{s.decidedCount}</td>
+                  <td>{s.wonCount}</td>
+                  <td>{s.lostCount}</td>
+                  <td>
+                    {s.decidedCount > 0 ? (
+                      <Badge tone={s.realCloseRate >= 0.3 ? 'green' : s.realCloseRate > 0 ? 'blue' : 'red'}>
+                        {Math.round(s.realCloseRate * 100)}%
+                      </Badge>
+                    ) : (
+                      <span className="faint small">—</span>
+                    )}
+                  </td>
+                  <td>${s.totalRevenue.toFixed(2)}</td>
+                  <td>${s.totalProfit.toFixed(2)}</td>
+                  <td>{s.avgRealTimeToRevenueDays !== undefined ? `${s.avgRealTimeToRevenueDays}d` : '—'}</td>
+                  <td>{s.avgDealValue !== undefined ? `$${s.avgDealValue.toFixed(2)}` : '—'}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
       )}
 
       <h3 style={{ marginBottom: 10 }}>Learning events</h3>

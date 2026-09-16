@@ -282,9 +282,13 @@ export interface CategoryRealWorldStats {
   category: string;
   decidedCount: number; // WON + LOST prospects in this category
   wonCount: number;
+  lostCount: number;
   realCloseRate: number; // wonCount / decidedCount
   avgRealTimeToRevenueDays?: number; // avg daysFromDiscoveryToPayment, this category's real_revenue entries
   avgDealValue?: number; // avg amountReceived, this category's real_revenue entries
+  totalRevenue: number; // sum of amountReceived, this category's real_revenue entries
+  totalProfit: number; // sum of profit, this category's real_revenue entries
+  entryCount: number; // number of real_revenue entries (distinct from decidedCount — a WON prospect may have 0 or several payments)
 }
 
 /** Real-world track record per opportunity category — the input every
@@ -297,13 +301,13 @@ export function computeCategoryRealWorldStats(
   realRevenue: RealRevenueEntry[],
 ): CategoryRealWorldStats[] {
   const categoryOf = new Map(opportunities.map((o) => [o.id, o.category]));
-  const byCategory = new Map<string, { won: number; lost: number; days: number[]; deals: number[] }>();
+  const byCategory = new Map<string, { won: number; lost: number; days: number[]; deals: number[]; profits: number[] }>();
 
   for (const p of prospects) {
     if (p.status !== 'WON' && p.status !== 'LOST') continue;
     const category = categoryOf.get(p.opportunityId);
     if (!category) continue;
-    const bucket = byCategory.get(category) ?? { won: 0, lost: 0, days: [], deals: [] };
+    const bucket = byCategory.get(category) ?? { won: 0, lost: 0, days: [], deals: [], profits: [] };
     if (p.status === 'WON') bucket.won++;
     else bucket.lost++;
     byCategory.set(category, bucket);
@@ -311,9 +315,10 @@ export function computeCategoryRealWorldStats(
   for (const r of realRevenue) {
     const category = categoryOf.get(r.opportunityId);
     if (!category) continue;
-    const bucket = byCategory.get(category) ?? { won: 0, lost: 0, days: [], deals: [] };
+    const bucket = byCategory.get(category) ?? { won: 0, lost: 0, days: [], deals: [], profits: [] };
     bucket.days.push(r.daysFromDiscoveryToPayment);
     bucket.deals.push(r.amountReceived);
+    bucket.profits.push(r.profit);
     byCategory.set(category, bucket);
   }
 
@@ -323,9 +328,13 @@ export function computeCategoryRealWorldStats(
       category,
       decidedCount,
       wonCount: b.won,
+      lostCount: b.lost,
       realCloseRate: decidedCount > 0 ? Math.round((b.won / decidedCount) * 1000) / 1000 : 0,
       avgRealTimeToRevenueDays: b.days.length ? Math.round(b.days.reduce((s, d) => s + d, 0) / b.days.length) : undefined,
       avgDealValue: b.deals.length ? Math.round((b.deals.reduce((s, d) => s + d, 0) / b.deals.length) * 100) / 100 : undefined,
+      totalRevenue: Math.round(b.deals.reduce((s, d) => s + d, 0) * 100) / 100,
+      totalProfit: Math.round(b.profits.reduce((s, p) => s + p, 0) * 100) / 100,
+      entryCount: b.deals.length,
     };
   });
 }
