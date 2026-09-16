@@ -68,6 +68,7 @@ export function computeRecommendedActions(
   offers: Offer[] = [],
   projects: Project[] = [],
   categoryStats: CategoryRealWorldStats[] = [],
+  survivalStatus: 'ALIVE' | 'AT_RISK' | 'CRITICAL' | 'DEAD' = 'ALIVE',
   now: number = Date.now(),
   recentWindowMs: number = 2 * 60 * 60 * 1000,
 ): RecommendedAction[] {
@@ -219,7 +220,20 @@ export function computeRecommendedActions(
     });
   }
 
-  inputs.sort((a, b) => b.expectedValue - a.expectedValue || b.urgency - a.urgency);
+  // Survivor 2.0 §4/§8 — the decision engine must adapt to the current
+  // wallet. When funds are healthy, rank purely by expected value (the
+  // existing behavior). As survival status worsens, progressively favor
+  // low-effort (fast/cheap) actions over slower/costlier ones, even at
+  // some expected-value cost — a small guaranteed win beats a bigger,
+  // slower bet when capital is running out. Bounded and explainable:
+  // never a full effort veto, just a graduated multiplier.
+  function survivalWeight(effort: number): number {
+    if (survivalStatus === 'ALIVE') return 1;
+    if (survivalStatus === 'AT_RISK') return 1 - (effort - 1) * 0.08; // effort 5 -> 0.68x
+    return 1 - (effort - 1) * 0.18; // CRITICAL/DEAD: effort 5 -> 0.28x
+  }
+
+  inputs.sort((a, b) => b.expectedValue * survivalWeight(b.effort) - a.expectedValue * survivalWeight(a.effort) || b.urgency - a.urgency);
 
   return inputs.slice(0, 10).map((input, i) => ({
     id: uid('act'),

@@ -116,7 +116,15 @@ export function CommandCenter({ go }: { go: (v: View) => void }) {
       <div className="grid cols-2" style={{ gridTemplateColumns: '1.3fr 1fr', marginBottom: 14 }}>
         <Panel
           title="What should I do now?"
-          right={<span className="faint small mono">ranked by expected real-world value</span>}
+          right={
+            <span className="faint small mono">
+              {agent.status === 'ALIVE'
+                ? 'ranked by expected value'
+                : agent.status === 'AT_RISK'
+                  ? 'ranked by expected value, favoring lower-effort actions'
+                  : 'ranked by expected value, strongly favoring fast/cheap actions (low funds)'}
+            </span>
+          }
         >
           {actions.length === 0 ? (
             <div className="empty">

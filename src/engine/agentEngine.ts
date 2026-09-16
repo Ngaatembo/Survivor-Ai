@@ -777,6 +777,7 @@ export class AgentEngine {
         const finalOffers = await this.repo.listOffers();
         const finalProjects = await this.repo.listProjects();
         const finalCategoryStats = computeCategoryRealWorldStats(freshOpps, finalProspects, await this.repo.listRealRevenue());
+        const currentSurvivalStatus = computeSurvivalStatus(balanceFrom(await this.repo.listTransactions()));
         const actions = computeRecommendedActions(
           freshOpps,
           decisions,
@@ -786,6 +787,7 @@ export class AgentEngine {
           finalOffers,
           finalProjects,
           finalCategoryStats,
+          currentSurvivalStatus,
         );
         await this.repo.replaceActions(actions);
         if (actions[0]) {

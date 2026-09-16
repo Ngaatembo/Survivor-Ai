@@ -5,6 +5,20 @@
 
 ---
 
+## -7. Survivor 2.0, Phase 2 (partial) — Decision Engine adapts to survival status (COMPLETE, this session)
+
+The "What should I do now?" panel already existed and covered much of §8's ask (a ranked, reasoned action list). The one real gap: ranking never adapted to the current wallet — §4 explicitly calls for prioritizing fast/cheap actions once funds are low, and nothing did that.
+
+- **`computeRecommendedActions()`** now takes the agent's current survival status (`ALIVE`/`AT_RISK`/`CRITICAL`/`DEAD`) and applies a graduated weighting: at `ALIVE`, ranking is unchanged (pure expected value). At `AT_RISK`, higher-effort actions are mildly discounted. At `CRITICAL`, the discount is much stronger — a smaller, faster, cheaper action can now genuinely outrank a bigger, slower one, matching §4's "avoid unnecessary experiments, prioritize fast potential revenue and minimal upfront cost." Bounded and explainable throughout — never a hard veto on high-effort actions, just a multiplier.
+- Wired into the cycle: the real current survival status (computed from the real simulated balance) now feeds directly into ranking every cycle.
+- Dashboard: the panel now states in plain language whether it's currently favoring low-effort actions and why.
+
+Verified: a new smoke suite (`scripts/survivalRanking.smoke.ts`, all passing) demonstrates the exact intended behavior with a precisely-tuned pair of actions — under `ALIVE`, the bigger/slower action correctly ranks first; under `CRITICAL`, the smaller/faster action correctly overtakes it despite a lower raw value. All 11 smoke suites pass together, clean `tsc --noEmit` on both tsconfigs, clean `vite build`. No database changes — this is pure ranking logic.
+
+**What remains of Survivor 2.0 Phase 2 and beyond:** a more complete "survival score" formalization, the action-approval workflow (§12), strategy performance tracking (§18), economic experiments (§19), and survival-run history (§21) are all real, substantial future work, not started.
+
+---
+
 ## -6. Survivor 2.0, Phase 1 — Survival Core (COMPLETE, this session)
 
 The user shared a larger "Economic Survival Agent" vision document. Per that document's own advice (§26 — don't build every strategy at once, start with the smallest real loop), this session built only **Phase 1: Survival Core** — the rest (action-approval workflow, strategy performance tracking, economic experiments, survival runs) remains future work.
