@@ -1,7 +1,8 @@
 /* ============================================================================
  * Environment detection — browser side.
- * Empty/unset means "not connected" and the engine falls back to the local
- * rule engine + SAMPLE knowledge base. Never put service-role keys here.
+ * Empty/unset means "not connected". In production/backend mode the Worker
+ * is the sole source of truth and does not fall back to SAMPLE data.
+ * Never put service-role keys here.
  * ========================================================================== */
 
 function pick(...vals: (string | undefined)[]): string {
