@@ -72,6 +72,9 @@ export interface ProspectIntelligenceAnalysis {
 }
 
 export interface LLMOpportunityAnalysis {
+  /** Optional model-discovered identity for open-ended opportunity research. */
+  name?: string;
+  category?: Opportunity['category'];
   howMoneyMade: string;
   capitalRequiredMin: number;
   capitalRequiredMax: number;
