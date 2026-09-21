@@ -17,7 +17,7 @@ import type { LLMProvider } from './providers/types';
 import { runSearch, type SearchEconomyContext } from './searchEconomy';
 
 /** Queries used to sweep each category in a live discovery pass. */
-export const DISCOVERY_QUERIES: { category: Category; query: string }[] = [
+export const DISCOVERY_QUERIES: { category: Category; query: string; openEnded?: boolean }[] = [
   // Revenue-first discovery: search for evidence of a buyer/problem/channel,
   // not generic "ways to make money" lists. This makes scarce web-search
   // calls useful for finding something we can actually sell, while the
@@ -28,6 +28,11 @@ export const DISCOVERY_QUERIES: { category: Category; query: string }[] = [
   { category: 'E-Commerce', query: 'small businesses seeking ecommerce website setup online ordering payment delivery services Zimbabwe Africa' },
   { category: 'Local / Real-World', query: 'Zimbabwe small businesses contact website online booking digital marketing automation services needed' },
   { category: 'Finance', query: 'retail forex crypto trading success rates retail investors lose money regulator data' },
+
+  // Open-ended discovery deliberately looks outside the existing NWT Dev service lanes.
+  { category: 'Services', openEnded: true, query: 'people and businesses currently paying for profitable low-capital services or solving urgent problems that a solo operator can monetize Zimbabwe Africa online' },
+  { category: 'Digital Business', openEnded: true, query: 'unexpected emerging business opportunities with real buyers and current prices low startup capital Africa Zimbabwe online 2026' },
+  { category: 'Local / Real-World', openEnded: true, query: 'Zimbabwe businesses consumers communities paying for overlooked products services jobs or intermediaries with low startup cost 2026' },
 ];
 
 const FINANCE_HINTS = ['forex', 'crypto', 'trading', 'betting', 'prediction market', 'day trading', 'cfd'];
@@ -68,11 +73,11 @@ export async function discoverLive(
   let cacheHits = 0;
   let budgetExceeded = 0;
 
-  for (const { category, query } of DISCOVERY_QUERIES) {
+  for (const { category, query, openEnded } of DISCOVERY_QUERIES) {
     const searchOutcome = await runSearch(ctx, {
       purpose: 'OPPORTUNITY_DISCOVERY',
       query,
-      entityId: category,
+      entityId: openEnded ? `OPEN:${category}:${query.slice(0, 80)}` : category,
       max: 5,
     });
     if (searchOutcome.budgetExceeded) {
@@ -84,23 +89,23 @@ export async function discoverLive(
     queriesRun += 1;
     if (results.length === 0) continue;
 
-    const candidateName = candidateFromQuery(category);
-    const name = `${candidateName} (live research)`;
-
-    // Cache hits mean we already paid for this evidence recently. If the
-    // category already produced a stored opportunity, do not spend another
-    // LLM call re-analyzing the same snippets every 30 minutes.
-    if (dedupeAgainst.some((n) => n.toLowerCase().includes(candidateName.toLowerCase()))) {
-      sourcesCount += results.length;
-      continue; // existing opportunity already owns this evidence
-    }
-
+    const seedName = candidateFromQuery(category);
     const snippets = results.map((r) => `${r.title} — ${r.snippet}`);
     const analysis = llm?.analyzeOpportunity
-      ? await llm.analyzeOpportunity({ name: candidateName, category, snippets }).catch(() => null)
+      ? await llm.analyzeOpportunity({ name: seedName, category, snippets }).catch(() => null)
       : null;
 
-    const isFinance = category === 'Finance' || FINANCE_HINTS.some((h) => query.includes(h));
+    // Open-ended scans can produce a genuinely new opportunity name/category
+    // from the evidence instead of being forced into a predefined service.
+    const candidateName = openEnded && analysis?.name?.trim() ? analysis.name.trim() : seedName;
+    const discoveredCategory = openEnded && analysis?.category ? analysis.category : category;
+    const name = `\${candidateName} (live research)`;
+
+    if (dedupeAgainst.some((n) => n.toLowerCase().includes(candidateName.toLowerCase()))) {
+      sourcesCount += results.length;
+      continue;
+    }
+    const isFinance = discoveredCategory === 'Finance' || FINANCE_HINTS.some((h) => query.toLowerCase().includes(h));
 
     const sources = results.map((r, i) => ({
       id: uid('src'),
@@ -127,14 +132,14 @@ export async function discoverLive(
     const opp: Opportunity = {
       id: uid('opp-live'),
       name,
-      category,
-      tags: ['live research', category.toLowerCase()],
+      category: discoveredCategory,
+      tags: ['live research', category.toLowerCase(), ...(openEnded ? ['open-ended discovery', 'unexpected-opportunity'] : [])],
       dataSource,
       researchStage: 'DISCOVERED',
       lifecycleState: 'DISCOVERED',
       description:
         analysis?.summary ||
-        `Opportunity surfaced by live web research in the ${category} category. Attributes extracted by ${llm?.label ?? 'rule engine'} from ${results.length} sources pending verification.`,
+        `Opportunity surfaced by live web research in the ${discoveredCategory} category. Attributes extracted by ${llm?.label ?? 'rule engine'} from ${results.length} sources pending verification.`,
       howMoneyMade: analysis?.howMoneyMade || 'Mechanism pending verification from live sources.',
       capitalRequiredMin: clampNum(analysis?.capitalRequiredMin ?? 10, 0, 5000),
       capitalRequiredMax: clampNum(analysis?.capitalRequiredMax ?? 50, 0, 10000),
@@ -147,7 +152,7 @@ export async function discoverLive(
       risk: riskNum,
       riskLevel: isFinance ? 'High' : riskLevels[riskNum - 1],
       geographicRelevance:
-        category === 'Local / Real-World' ? ['Zimbabwe', 'Africa'] : ['Global online'],
+        discoveredCategory === 'Local / Real-World' ? ['Zimbabwe', 'Africa'] : ['Global online'],
       evidenceTier: tier,
       evidenceNotes:
         analysis?.evidenceNotes ||
