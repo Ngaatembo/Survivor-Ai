@@ -28,7 +28,7 @@ export function salesReadiness(
   prospect: Prospect,
   intelligence?: ProspectIntelligence,
   offer?: Offer,
-  demo?: ProspectDemo,
+  demo?: Omit<ProspectDemo, 'html'>,
   outreach?: OutreachMessageSet,
   now = Date.now(),
 ): SalesReadiness {
