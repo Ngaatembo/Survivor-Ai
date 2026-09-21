@@ -148,6 +148,9 @@ export async function lookupEcoCashSandboxTransaction(
   if (!config.username || !config.password) {
     throw new Error('EcoCash sandbox Basic Auth credentials are incomplete');
   }
+  if (!endUserId.trim() || !clientCorrelator.trim()) {
+    throw new Error('endUserId and clientCorrelator are required');
+  }
 
   const baseUrl = config.baseUrl || DEFAULT_BASE_URL;
   if (!/sandbox|test|developers\\.ecocash\\.co\\.zw/i.test(baseUrl)) {
@@ -221,7 +224,6 @@ export async function verifyEcoCashWebhook(
   const digest = new Uint8Array(await crypto.subtle.sign('HMAC', key, new TextEncoder().encode(rawBody)));
   const normalized = signature.replace(/^sha256=/i, '').trim();
 
-  const expectedHex = Array.from(digest).map((b) => b.toString(16).padStart(2, '0')).join('');
   if (constantTimeEqual(digest, hexToBytes(normalized) ?? new Uint8Array())) return true;
 
   let expectedBase64 = '';
