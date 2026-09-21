@@ -33,6 +33,7 @@ import type {
   ProspectDemo,
   ProspectInteraction,
   ProspectIntelligence,
+  ProspectVerification,
   MarketPriceResearch,
   Mission,
   RealRevenueEntry,
@@ -921,6 +922,7 @@ export class SupabaseRepository implements EngineRepository {
       social_links: p.socialLinks,
       contact_channel: p.contactChannel,
       contact_value: p.contactValue ?? null,
+      verification: p.verification ?? {},
       evidence_notes: p.evidenceNotes,
       priority: p.priority,
       score: p.score,
@@ -952,6 +954,7 @@ export class SupabaseRepository implements EngineRepository {
       socialLinks: r.social_links ?? [],
       contactChannel: r.contact_channel ?? 'UNKNOWN',
       contactValue: r.contact_value ?? undefined,
+      verification: r.verification ?? undefined,
       sources: (r.prospect_sources ?? []).map((s: any) => ({
         id: s.id,
         title: s.title,
