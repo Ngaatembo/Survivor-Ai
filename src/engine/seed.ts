@@ -6,15 +6,11 @@
 import type {
   Agent,
   AgentEvent,
-  Opportunity,
   Strategy,
   Transaction,
 } from '../types';
-import { SAMPLE_OPPORTUNITIES, INITIAL_DISCOVERY_IDS } from '../data/sampleData';
 import { uid } from '../lib/format';
-import { scoreOpportunity } from '../lib/scoring';
 import { openingLedger } from '../services/wallet';
-import { advanceStage, scoreAll, rankOpportunities } from '../services/research';
 import { strategyFromMemory } from '../services/ai';
 
 export const STARTING_CAPITAL = 50;
@@ -34,18 +30,9 @@ export function computeSurvivalStatus(balance: number): 'ALIVE' | 'AT_RISK' | 'C
 }
 export const AGENT_ID = 'agent-survive-01';
 
-export function seedOpportunities(): Opportunity[] {
-  let opps = SAMPLE_OPPORTUNITIES.map((o) => ({ ...o }));
-  opps = advanceStage(opps, INITIAL_DISCOVERY_IDS, 'DISCOVERED');
-  opps = advanceStage(opps, INITIAL_DISCOVERY_IDS, 'RESEARCHED');
-  opps = advanceStage(opps, INITIAL_DISCOVERY_IDS, 'VERIFIED');
-  opps = scoreAll(opps);
-  opps = rankOpportunities(opps);
-  return opps.map((o) =>
-    INITIAL_DISCOVERY_IDS.includes(o.id)
-      ? { ...o, researchStage: 'RANKED' as const, score: scoreOpportunity(o) }
-      : o,
-  );
+/** Production starts with no opportunities. Live web research creates them. */
+export function seedOpportunities() {
+  return [];
 }
 
 export interface SeedSnapshot {
@@ -66,13 +53,13 @@ export function createSeedSnapshot(now: number = Date.now()): SeedSnapshot {
       id: uid('evt'),
       type: 'SYSTEM',
       message:
-        'SURVIVE AI agent initialized. Simulated capital $50.00 — no real money, accounts or APIs are connected.',
+        'SURVIVE AI agent initialized with a $50.00 test budget. All opportunities must come from live research; no sample data is loaded.',
       createdAt: now - 4000,
     },
     {
       id: uid('evt'),
       type: 'SYSTEM',
-      message: `Seeded SAMPLE knowledge base loaded: ${opportunities.length} opportunities (${INITIAL_DISCOVERY_IDS.length} pre-researched). Live web research requires connected search + LLM providers.`,
+      message: 'Production data mode: no sample opportunities loaded. Survivor will populate opportunities from live research only.',
       createdAt: now - 3000,
     },
     {
