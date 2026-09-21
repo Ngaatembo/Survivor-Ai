@@ -43,8 +43,8 @@ export function ResearchEngine({ onOpenOpp }: { onOpenOpp: (id: string) => void 
     <div className="view-enter">
       <div className="info-banner">
         <strong>Research process:</strong> DISCOVER → RESEARCH → VERIFY → ANALYZE → SCORE → RANK → RECOMMEND.
-        Every claim carries an evidence tier; nothing from the SAMPLE knowledge base is presented as
-        live fact. Live web search is currently <strong>not connected</strong>.
+        Every claim carries an evidence tier. Production mode uses live backend research when the configured
+        search provider is available; it never promotes legacy SAMPLE data to live fact.
       </div>
 
       <Panel title="Live pipeline — current cycle" style={{ marginBottom: 14 }}>
