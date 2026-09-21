@@ -47,6 +47,7 @@ import { buildMissionLadder, evaluateMissions } from '../lib/missions';
 import { createProjectFromWonOffer } from '../lib/projectTracker';
 import { computeCategoryRealWorldStats, statsForCategory } from '../lib/realRevenue';
 import { computeRecommendedActions } from '../lib/recommendedActions';
+import { rankRevenueProspects } from '../lib/revenueConversion';
 
 export const STEP_ORDER: CycleStepKey[] = [
   'RESEARCH',
@@ -653,22 +654,23 @@ export class AgentEngine {
         // research otherwise.
         const allProspects = await this.repo.listProspects();
         const existingIntelligence = await this.repo.listProspectIntelligence();
+        const revenueCandidates = rankRevenueProspects(allProspects, 5);
+        const ENGAGED_STATUSES = new Set(['INTERESTED', 'PROPOSAL_SENT', 'NEGOTIATING', 'WON']);
+        const offerCandidates = [
+          ...revenueCandidates.map((candidate) => candidate.prospect),
+          ...allProspects
+            .filter((p) => ENGAGED_STATUSES.has(p.status) && !revenueCandidates.some((candidate) => candidate.prospect.id === p.id))
+            .sort((a, b) => b.score.expectedValue - a.score.expectedValue),
+        ];
         if (hasLiveSearch) {
           // Phase 4/12: prospects that already have an intelligence report
           // are excluded above (no repeat research within its cache TTL);
           // among the rest, still prioritize by expected value first so a
           // budget-limited cycle spends its few searches on the prospects
           // most likely to matter, not just whichever were discovered first.
-          const needsResearch = allProspects
-            .filter(
-              (p) =>
-                p.priority !== 'DO_NOT_CONTACT' &&
-                p.status !== 'WON' &&
-                p.status !== 'LOST' &&
-                p.status !== 'NOT_INTERESTED' &&
-                !existingIntelligence.some((i) => i.prospectId === p.id),
-            )
-            .sort((a, b) => b.score.expectedValue - a.score.expectedValue)
+          const needsResearch = revenueCandidates
+            .map((candidate) => candidate.prospect)
+            .filter((p) => !existingIntelligence.some((i) => i.prospectId === p.id))
             .slice(0, 3);
           for (const p of needsResearch) {
             const statusChanged = p.status === 'INTERESTED' || p.status === 'REPLIED';
@@ -696,16 +698,9 @@ export class AgentEngine {
         // per cycle; messages are prepared for human approval only — nothing
         // here sends anything.
         const existingOutreach = await this.repo.listOutreachMessages();
-        const needsOutreach = allProspects
-          .filter(
-            (p) =>
-              p.priority !== 'DO_NOT_CONTACT' &&
-              p.status !== 'WON' &&
-              p.status !== 'LOST' &&
-              p.status !== 'NOT_INTERESTED' &&
-              !existingOutreach.some((m) => m.prospectId === p.id),
-          )
-          .sort((a, b) => b.score.expectedValue - a.score.expectedValue)
+        const needsOutreach = revenueCandidates
+          .map((candidate) => candidate.prospect)
+          .filter((p) => !existingOutreach.some((m) => m.prospectId === p.id))
           .slice(0, 5);
         for (const p of needsOutreach) {
           const model = businessModels.find((m) => m.opportunityId === p.opportunityId);
@@ -728,14 +723,13 @@ export class AgentEngine {
         // about to produce an offer that doesn't have researched pricing
         // yet, look up real going rates via live search before quoting a
         // client. Capped implicitly by needsOffer's own cap below.
-        const ENGAGED_STATUSES = new Set(['INTERESTED', 'PROPOSAL_SENT', 'NEGOTIATING', 'WON']);
         const existingOffers = await this.repo.listOffers();
         const latestIntelligence = await this.repo.listProspectIntelligence();
 
         // Revenue-acquisition improvement: a strong qualified prospect should
         // have a sales package prepared before first contact. This remains
         // draft-only and is capped at five prospects per cycle.
-        const needsOffer = allProspects
+        const needsOffer = offerCandidates
           .filter(
             (p) =>
               !existingOffers.some((o) => o.prospectId === p.id) &&
@@ -744,7 +738,6 @@ export class AgentEngine {
                 (p.status === 'QUALIFIED' && (p.priority === 'HIGH' || p.priority === 'MEDIUM') && p.score.total >= 60)
               ),
           )
-          .sort((a, b) => b.score.expectedValue - a.score.expectedValue)
           .slice(0, 5);
 
         if (hasLiveSearch) {

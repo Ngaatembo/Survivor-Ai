@@ -21,6 +21,7 @@ import { realRevenueScore } from './decisionEngine';
 import { nextIncompleteMilestone, isOverdue } from './projectTracker';
 import { statsForCategory, type CategoryRealWorldStats } from './realRevenue';
 import { uid } from './format';
+import { rankRevenueProspects } from './revenueConversion';
 import type { MemoryEntry } from '../types';
 
 /** Phase 5 §21 — weight a prospect action's expectedValue by this
@@ -142,6 +143,11 @@ export function computeRecommendedActions(
     }
   }
 
+  // Keep the human queue aligned with the small sales-ready cohort
+  // used by the autonomous conversion engine.
+  const revenueCandidates = rankRevenueProspects(prospects, 5);
+  const revenueRank = new Map(revenueCandidates.map((candidate, index) => [candidate.prospect.id, index + 1]));
+
   // Prospect-driven actions (build-spec §16 examples: "Contact Business X",
   // "Follow up with Business Y"). Never suggests contacting a DO_NOT_CONTACT
   // prospect or one already past outreach without a due follow-up.
@@ -150,13 +156,15 @@ export function computeRecommendedActions(
     const actionWeight = realWorldActionWeight(categoryOf.get(p.opportunityId), categoryStats);
 
     if (p.status === 'DISCOVERED' || p.status === 'QUALIFIED') {
+      const conversionRank = revenueRank.get(p.id);
+      const conversionBoost = conversionRank ? 1 + (6 - conversionRank) * 0.08 : 1;
       inputs.push({
         kind: 'CONTACT_PROSPECT',
         prospect: p,
-        title: `Contact ${p.businessName}`,
-        description: `${p.priority} priority — ${p.evidenceNotes} Estimated deal $${p.score.expectedDealValue.toFixed(0)}, ~${Math.round(p.score.probabilityOfClose * 100)}% probability of close.`,
-        expectedValue: Math.round(p.score.expectedValue * actionWeight * 100) / 100,
-        urgency: p.priority === 'HIGH' ? 5 : p.priority === 'MEDIUM' ? 3 : 1,
+        title: `${conversionRank ? 'Priority contact' : 'Contact'} ${p.businessName}`,
+        description: `${p.priority} priority — ${p.evidenceNotes} Estimated deal $${p.score.expectedDealValue.toFixed(0)}, ~${Math.round(p.score.probabilityOfClose * 100)}% probability of close.${conversionRank ? ` Revenue conversion rank #${conversionRank}: current sales-ready cohort.` : ''}`,
+        expectedValue: Math.round(p.score.expectedValue * actionWeight * conversionBoost * 100) / 100,
+        urgency: conversionRank ? 5 : p.priority === 'HIGH' ? 5 : p.priority === 'MEDIUM' ? 3 : 1,
         effort: 1,
       });
     } else if (p.nextFollowUpAt && p.nextFollowUpAt <= now) {
