@@ -19,7 +19,7 @@ const closedStatuses = new Set(['WON', 'LOST', 'NOT_INTERESTED']);
 
 export function computeMoneyMetrics(
   prospects: Prospect[],
-  offers: Offer[],
+  _offers: Offer[],
   realRevenue: RealRevenueEntry[],
 ): MoneyMetrics {
   const contacted = prospects.filter((p) => p.status !== 'DISCOVERED' && p.status !== 'QUALIFIED').length;
