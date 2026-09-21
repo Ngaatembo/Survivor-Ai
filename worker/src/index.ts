@@ -405,10 +405,29 @@ export default {
 
     if (url.pathname === '/health') {
       const backend = env.DB_BACKEND ?? 'd1';
+      let lastCycle: Record<string, unknown> | null = null;
+      try {
+        const { repo } = buildEngine(env);
+        const raw = await repo.getKV('runtime:last_cycle');
+        if (raw) lastCycle = JSON.parse(raw) as Record<string, unknown>;
+      } catch {
+        // Health is deliberately liveness-first: a missing optional heartbeat
+        // must not turn a healthy Worker into a 500 response.
+      }
+      const lastCycleAt = typeof lastCycle?.at === 'string' ? Date.parse(lastCycle.at) : NaN;
+      const ageMinutes = Number.isFinite(lastCycleAt) ? Math.max(0, (Date.now() - lastCycleAt) / 60000) : null;
       return json({
         ok: true,
         service: 'survive-ai',
         time: new Date().toISOString(),
+        runtime: {
+          cronConfigured: true,
+          cronSchedule: '*/30 * * * *',
+          timezone: 'UTC',
+          lastCycle,
+          lastCycleAgeMinutes: ageMinutes === null ? null : Math.round(ageMinutes * 10) / 10,
+          stale: ageMinutes !== null ? ageMinutes > 75 : null,
+        },
         connectors: {
           db: { backend, connected: backend === 'supabase' ? Boolean(env.SUPABASE_URL && env.SUPABASE_SERVICE_ROLE_KEY) : Boolean(env.DB) },
           llm: Boolean(env.ANTHROPIC_API_KEY || env.OPENAI_API_KEY),
