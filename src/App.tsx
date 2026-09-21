@@ -30,6 +30,7 @@ export type View =
   | 'experiments'
   | 'memory'
   | 'wallet'
+  | 'treasury'
   | 'activity'
   | 'reports'
   | 'architecture';
