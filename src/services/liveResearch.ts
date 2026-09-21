@@ -18,11 +18,15 @@ import { runSearch, type SearchEconomyContext } from './searchEconomy';
 
 /** Queries used to sweep each category in a live discovery pass. */
 export const DISCOVERY_QUERIES: { category: Category; query: string }[] = [
-  { category: 'Digital Business', query: 'legitimate low-cost online business models AI services 2025 beginners make money' },
-  { category: 'Services', query: 'freelance services beginners can offer online to earn first income fast' },
-  { category: 'Content', query: 'content creator business models that make money newsletter youtube affiliate 2025' },
-  { category: 'E-Commerce', query: 'low budget e-commerce business models digital products print on demand reselling' },
-  { category: 'Local / Real-World', query: 'small business opportunities Africa Zimbabwe youth low capital 2025' },
+  // Revenue-first discovery: search for evidence of a buyer/problem/channel,
+  // not generic "ways to make money" lists. This makes scarce web-search
+  // calls useful for finding something we can actually sell, while the
+  // opportunity scorer still decides whether the evidence is worth pursuing.
+  { category: 'Digital Business', query: 'small businesses actively seeking affordable AI automation website booking lead generation services Zimbabwe Africa' },
+  { category: 'Services', query: 'businesses hiring freelancers for website design social media automation lead generation Zimbabwe Africa' },
+  { category: 'Content', query: 'businesses looking for content creators video social media marketing services Zimbabwe Africa' },
+  { category: 'E-Commerce', query: 'small businesses seeking ecommerce website setup online ordering payment delivery services Zimbabwe Africa' },
+  { category: 'Local / Real-World', query: 'Zimbabwe small businesses contact website online booking digital marketing automation services needed' },
   { category: 'Finance', query: 'retail forex crypto trading success rates retail investors lose money regulator data' },
 ];
 
@@ -80,17 +84,21 @@ export async function discoverLive(
     queriesRun += 1;
     if (results.length === 0) continue;
 
-    const snippets = results.map((r) => `${r.title} — ${r.snippet}`);
     const candidateName = candidateFromQuery(category);
+    const name = `${candidateName} (live research)`;
+
+    // Cache hits mean we already paid for this evidence recently. If the
+    // category already produced a stored opportunity, do not spend another
+    // LLM call re-analyzing the same snippets every 30 minutes.
+    if (dedupeAgainst.some((n) => n.toLowerCase().includes(candidateName.toLowerCase()))) {
+      sourcesCount += results.length;
+      continue; // existing opportunity already owns this evidence
+    }
+
+    const snippets = results.map((r) => `${r.title} — ${r.snippet}`);
     const analysis = llm?.analyzeOpportunity
       ? await llm.analyzeOpportunity({ name: candidateName, category, snippets }).catch(() => null)
       : null;
-
-    const name = `${candidateName} (live research)`;
-    if (dedupeAgainst.some((n) => n.toLowerCase().includes(candidateName.toLowerCase()))) {
-      sourcesCount += results.length;
-      continue; // don't duplicate a model we already hold
-    }
 
     const isFinance = category === 'Finance' || FINANCE_HINTS.some((h) => query.includes(h));
 
@@ -168,12 +176,12 @@ export async function discoverLive(
 
 function candidateFromQuery(category: Category): string {
   const map: Record<Category, string> = {
-    'Digital Business': 'AI-enabled digital service (live-sourced)',
-    Content: 'Content monetization model (live-sourced)',
-    'E-Commerce': 'Low-budget e-commerce model (live-sourced)',
-    Services: 'Online freelance service (live-sourced)',
+    'Digital Business': 'AI automation & website service (live-sourced)',
+    Content: 'Business content service (live-sourced)',
+    'E-Commerce': 'E-commerce setup service (live-sourced)',
+    Services: 'Business freelance service (live-sourced)',
     Finance: 'Financial / trading strategy (live-sourced)',
-    'Local / Real-World': 'Local low-capital business (live-sourced)',
+    'Local / Real-World': 'Local business digital service (live-sourced)',
   };
   return map[category];
 }
