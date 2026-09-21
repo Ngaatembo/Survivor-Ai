@@ -655,6 +655,13 @@ export class AgentEngine {
         const allProspects = await this.repo.listProspects();
         const existingIntelligence = await this.repo.listProspectIntelligence();
         const revenueCandidates = rankRevenueProspects(allProspects, 5);
+        const ENGAGED_STATUSES = new Set(['INTERESTED', 'PROPOSAL_SENT', 'NEGOTIATING', 'WON']);
+        const offerCandidates = [
+          ...revenueCandidates.map((candidate) => candidate.prospect),
+          ...allProspects
+            .filter((p) => ENGAGED_STATUSES.has(p.status) && !revenueCandidates.some((candidate) => candidate.prospect.id === p.id))
+            .sort((a, b) => b.score.expectedValue - a.score.expectedValue),
+        ];
         if (hasLiveSearch) {
           // Phase 4/12: prospects that already have an intelligence report
           // are excluded above (no repeat research within its cache TTL);
@@ -716,15 +723,13 @@ export class AgentEngine {
         // about to produce an offer that doesn't have researched pricing
         // yet, look up real going rates via live search before quoting a
         // client. Capped implicitly by needsOffer's own cap below.
-        const ENGAGED_STATUSES = new Set(['INTERESTED', 'PROPOSAL_SENT', 'NEGOTIATING', 'WON']);
         const existingOffers = await this.repo.listOffers();
         const latestIntelligence = await this.repo.listProspectIntelligence();
 
         // Revenue-acquisition improvement: a strong qualified prospect should
         // have a sales package prepared before first contact. This remains
         // draft-only and is capped at five prospects per cycle.
-        const needsOffer = revenueCandidates
-          .map((candidate) => candidate.prospect)
+        const needsOffer = offerCandidates
           .filter(
             (p) =>
               !existingOffers.some((o) => o.prospectId === p.id) &&
