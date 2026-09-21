@@ -34,6 +34,7 @@ import {
   offersAwaitingSend,
 } from '../../src/lib/revenueFunnel';
 import { computeSurvivalStatus } from '../../src/engine/seed';
+import { computeMoneyMetrics } from '../../src/lib/moneyMetrics';
 import type { Env } from './env';
 
 const json = (data: unknown, init?: ResponseInit) =>
@@ -286,6 +287,7 @@ export default {
             (p) => p.status === 'WON' && !realRevenue.some((r) => r.prospectId === p.id),
           ).length,
         };
+        const moneyMetrics = computeMoneyMetrics(prospects, offers, realRevenue);
 
         return json({
           ok: true,
@@ -299,6 +301,7 @@ export default {
             dealMetrics,
             searchROI,
             humanActionQueue,
+            moneyMetrics,
             survivalStatus,
           },
           opportunities,
