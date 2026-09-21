@@ -153,14 +153,14 @@ export async function lookupEcoCashSandboxTransaction(
   }
 
   const baseUrl = config.baseUrl || DEFAULT_BASE_URL;
-  if (!/sandbox|test|developers\\.ecocash\\.co\\.zw/i.test(baseUrl)) {
+  if (!/sandbox|test|developers\.ecocash\.co\.zw/i.test(baseUrl)) {
     throw new Error('EcoCash transaction lookup is restricted to the sandbox endpoint');
   }
 
   const encodedEndUserId = encodeURIComponent(endUserId);
   const encodedClientCorrelator = encodeURIComponent(clientCorrelator);
   const url =
-    `${baseUrl.replace(/\\/$/, '')}/sandbox/payment/v1/${encodedEndUserId}/transactions/amount/${encodedClientCorrelator}`;
+    `${baseUrl.replace(/\/$/, '')}/sandbox/payment/v1/${encodedEndUserId}/transactions/amount/${encodedClientCorrelator}`;
 
   const response = await fetch(url, {
     method: 'GET',
