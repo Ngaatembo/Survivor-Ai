@@ -48,6 +48,22 @@ export const DISCOVERY_QUERIES: { category: Category; query: string; openEnded?:
 
 const FINANCE_HINTS = ['forex', 'crypto', 'trading', 'betting', 'prediction market', 'day trading', 'cfd'];
 
+const HIGH_RISK_PLATFORM_HINTS = [
+  'deposit money',
+  'pay upfront',
+  'buy a course',
+  'guaranteed income',
+  'get rich quick',
+  'double your money',
+  'binary options',
+  'investment opportunity',
+];
+
+function isSuspiciousMonetizationText(text: string): boolean {
+  const normalized = text.toLowerCase();
+  return HIGH_RISK_PLATFORM_HINTS.some((hint) => normalized.includes(hint));
+}
+
 function clampInt(n: number, lo: number, hi: number): number {
   const v = Math.round(Number(n));
   if (!Number.isFinite(v)) return lo;
@@ -116,6 +132,13 @@ export async function discoverLive(
       sourcesCount += results.length;
       continue;
     }
+    const evidenceText = [
+      query,
+      ...results.map((r) => `${r.title} ${r.snippet}`),
+      analysis?.summary ?? '',
+      analysis?.howMoneyMade ?? '',
+    ].join(' ');
+    const suspiciousMonetization = isSuspiciousMonetizationText(evidenceText);
     const isFinance = discoveredCategory === 'Finance' || FINANCE_HINTS.some((h) => query.toLowerCase().includes(h));
 
     const sources = results.map((r, i) => ({
@@ -177,10 +200,12 @@ export async function discoverLive(
       examples: (analysis?.examples ?? []).slice(0, 4),
       sources,
       dateResearched: Date.now(),
-      executionBlocked: isFinance,
+      executionBlocked: isFinance || suspiciousMonetization,
       blockReason: isFinance
         ? 'High-risk financial speculation. Research-only category: never auto-executed; requires explicit human authorization, limits and audit controls.'
-        : undefined,
+        : suspiciousMonetization
+          ? 'Potential high-risk/get-rich-quick monetization pattern detected in research evidence. Research-only until independently verified.'
+          : undefined,
     };
     // Score it immediately so ranking/decision can use it.
     opp.score = scoreOpportunity(opp);
