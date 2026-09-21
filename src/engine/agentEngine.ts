@@ -118,8 +118,19 @@ export class AgentEngine {
   /** Seed the repository on first run (idempotent — safe to call every boot). */
   async ensureSeeded(): Promise<void> {
     const agent = await this.safeGetAgent();
-    if (agent) return;
     const snap = createSeedSnapshot();
+
+    // Repair/bootstrap the simulated wallet independently of agent creation.
+    // This matters after a manual D1 reset: the agent row may exist while its
+    // append-only ledger is empty. The opening deposit is inserted exactly
+    // once, so normal boots cannot mint another $50.
+    if (agent) {
+      const transactions = await this.repo.listTransactions();
+      if (transactions.length === 0) {
+        await this.repo.appendTransaction(snap.transactions[0]);
+      }
+      return;
+    }
     // Create the agent row FIRST and idempotently — createAgentIfMissing()
     // is a no-op if a concurrent boot already created it (ON CONFLICT DO
     // NOTHING / upsert), so this is safe under concurrent cold starts.

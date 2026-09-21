@@ -186,7 +186,7 @@ CREATE INDEX idx_memory_agent ON agent_memory(agent_id, kind);
 
 CREATE TABLE transactions (
   id                    TEXT PRIMARY KEY,
-  agent_id              TEXT NOT NULL REFERENCES agents(id) ON DELETE CASCADE,
+  agent_id              TEXT NOT NULL,   -- scoped by D1Repository; no DB FK needed for wallet ledger
   type                  TEXT NOT NULL CHECK (type IN ('DEPOSIT','REVENUE','EXPENSE','REFUND','PROFIT','LOSS')),
   amount                REAL NOT NULL,   -- signed: + in, - out
   description           TEXT NOT NULL,
