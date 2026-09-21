@@ -6,12 +6,13 @@
  * into a plausible first-attempt result, so the loop can learn.
  * ========================================================================== */
 
-import type { ExperimentOutcome, MemoryEntry, Opportunity } from '../types';
+import type { ExperimentOutcome, MarketPriceResearch, MemoryEntry, Opportunity } from '../types';
 
 export interface SimulationInput {
   opportunity: Opportunity;
   budget: number;
   memory?: MemoryEntry; // what the agent already learned about this opportunity
+  marketPrice?: MarketPriceResearch; // real researched rate, when available
 }
 
 export interface SimulationResult {
@@ -71,21 +72,43 @@ export function simulateExperiment({ opportunity: o, budget, memory }: Simulatio
   );
 
   let actualRevenue = 0;
-  const revMax = Math.max(0, o.revenuePotentialMonthlyMax);
-  const revMin = Math.max(0, o.revenuePotentialMonthlyMin);
 
-  // First experiments capture only a small slice of modeled monthly potential —
-  // revenue scales with budget adequacy, and stays modest for tiny tests.
-  const budgetFactor = 0.6 + 0.4 * Math.min(1, budget / Math.max(5, o.capitalRequiredMin || 5));
+  const text = [o.name, o.description, o.howMoneyMade, ...(o.tags ?? [])].join(' ').toLowerCase();
+  const isWebsite = /website|web design|web development|landing page|business site|web site|online presence|booking site|restaurant site|company site/.test(text);
 
-  if (outcome === 'SUCCESS') {
-    const ceiling = Math.min(Math.max(10, revMax * 0.12), 65);
-    actualRevenue = round2(rand(4, ceiling) * budgetFactor);
-  } else if (outcome === 'PARTIAL_SUCCESS') {
-    actualRevenue = round2(rand(0, Math.min(Math.max(3, revMin * 0.2), 14)) * budgetFactor);
-  } else if (outcome === 'INCONCLUSIVE') {
-    actualRevenue = round2(Math.random() < 0.4 ? rand(0, 3) : 0);
+  // A test budget is acquisition/validation spend, NOT the selling price.
+  // A successful $5 test can therefore produce a $150+ service sale.
+  // Prefer live market research when it exists.
+  let priceMin = marketPrice?.priceMin ?? 0;
+  let priceMax = marketPrice?.priceMax ?? 0;
+
+  // Configured NWT Dev website pricing ladder. These are actual sell prices,
+  // not a percentage of the experiment budget.
+  if (priceMax <= 0 && isWebsite) {
+    if (/e-?commerce|online store|shop|payment gateway|custom app|advanced booking|admin panel/.test(text)) {
+      priceMin = 450; priceMax = 450;
+    } else if (/booking|reservation|restaurant|hotel|guest house|car rental|multi-page|5-page|cms|dashboard/.test(text)) {
+      priceMin = 350; priceMax = 350;
+    } else if (/business|company|contractor|service|4-page|four-page|5-page/.test(text)) {
+      priceMin = 250; priceMax = 250;
+    } else {
+      priceMin = 150; priceMax = 150;
+    }
   }
+
+  if (outcome === 'SUCCESS' && priceMax > 0) {
+    actualRevenue = round2(rand(priceMin, Math.max(priceMin, priceMax)));
+  } else if (outcome === 'PARTIAL_SUCCESS' && priceMax > 0) {
+    // Partial success means a smaller paid job/deposit rather than inventing
+    // a tiny $10–$15 revenue figure.
+    actualRevenue = round2(rand(priceMin * 0.25, priceMax * 0.5));
+  } else if (outcome === 'INCONCLUSIVE') {
+    actualRevenue = 0;
+  }
+
+  // If there is no evidence-backed market price for a non-website model,
+  // do not manufacture a fake revenue number from the monthly potential.
+  // The next research cycle can obtain a real market range first.
 
   // Slow-ramp models realistically return nothing on a first short experiment.
   if (o.timeToRevenueDaysMin >= 45 && outcome !== 'SUCCESS') actualRevenue = 0;
