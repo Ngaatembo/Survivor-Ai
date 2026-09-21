@@ -2,6 +2,7 @@ import { useStore, useWalletTotals, backendConfigured } from '../store';
 import { Panel, Stat, Badge, DataSourceBadge } from './ui';
 import { SurvivalMeter } from './SurvivalMeter';
 import { LoopPipeline } from './LoopPipeline';
+import { HumanHome } from './HumanHome';
 import { usd, usdWhole, pct, timeAgo } from '../lib/format';
 import type { View } from '../App';
 
@@ -57,6 +58,10 @@ export function CommandCenter({ go }: { go: (v: View) => void }) {
         </div>
       )}
 
+      <HumanHome go={go} />
+
+      <details className="tech-details">
+        <summary>Technical view — simulated wallet, autonomous loop, survival</summary>
       <div className="grid cols-4" style={{ marginBottom: 14 }}>
         <Panel tight>
           <Stat label="Current balance" value={usd(balance)} tone={profit >= 0 ? 'neu' : 'neu'} sub={`started with ${usd(agent.startingCapital)}`} />
@@ -264,6 +269,7 @@ export function CommandCenter({ go }: { go: (v: View) => void }) {
           </div>
         </Panel>
       </div>
+      </details>
     </div>
   );
 }

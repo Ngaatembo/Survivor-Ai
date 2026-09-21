@@ -684,3 +684,71 @@ label.check { display: inline-flex; align-items: center; gap: 6px; font-size: 12
 .data-table tbody tr:hover {
   background: var(--border-soft);
 }
+
+/* ============================================================================
+   Frontend 2.0 — human-facing Command Center (Stage 1). Reuses the existing
+   tokens above; adds no new palette. Touch targets >= 44px, body text >= 14px.
+   ========================================================================== */
+.human-home { max-width: 860px; margin-bottom: 18px; }
+.human-home h1, .human-home h2 { margin: 0; }
+.home-head { margin: 2px 0 20px; }
+.home-title { font-size: 26px; font-weight: 650; letter-spacing: -0.015em; }
+.home-sub { color: var(--text-2); font-size: 14px; margin-top: 2px; }
+.home-status { display: flex; flex-wrap: wrap; gap: 6px 16px; margin-top: 12px; font-size: 13px; color: var(--text-2); }
+.home-summary { margin: 12px 0 0; font-size: 16px; line-height: 1.55; max-width: 62ch; }
+
+.card-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 10px; }
+.card-head h2 { font-size: 15px; font-weight: 600; color: var(--text-2); }
+.block { margin-bottom: 22px; }
+
+.state-badge { display: inline-flex; align-items: center; gap: 5px; font-size: 12px; font-weight: 600; padding: 3px 9px; border-radius: 999px; white-space: nowrap; }
+.state-live { color: var(--green); background: var(--green-dim); }
+.state-sim { color: var(--purple); background: var(--purple-dim); }
+.state-sample { color: var(--amber); background: var(--amber-dim); }
+.state-na { color: var(--red); background: var(--red-dim); }
+
+.money-card { background: var(--panel-2); border: 1px solid var(--border-strong); border-left: 4px solid var(--green); border-radius: var(--radius); padding: 18px; margin-bottom: 22px; }
+.money-card.muted-card { border-left-color: var(--border-strong); }
+.money-main { display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; }
+.money-title { font-size: 20px; font-weight: 650; line-height: 1.3; }
+.money-value { font-size: 30px; font-weight: 700; color: var(--green); text-align: right; font-variant-numeric: tabular-nums; line-height: 1.1; }
+.money-value small { display: block; font-size: 12px; font-weight: 500; color: var(--muted); margin-top: 2px; }
+.money-why { margin: 12px 0; font-size: 15px; line-height: 1.55; color: var(--text-2); max-width: 62ch; }
+.money-meta { display: flex; flex-wrap: wrap; gap: 4px 20px; margin: 8px 0 12px; font-size: 14px; }
+.money-meta small { color: var(--muted); margin-right: 4px; }
+.prep { display: flex; flex-wrap: wrap; gap: 4px 14px; font-size: 13px; }
+.prep .ok { color: var(--green); }
+.prep .no { color: var(--faint); }
+
+.act-row { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 14px; }
+.btn.big { min-height: 44px; padding: 0 16px; font-size: 14px; display: inline-flex; align-items: center; justify-content: center; }
+a.btn { text-decoration: none; }
+.confirm-row { margin-top: 14px; font-size: 14px; line-height: 1.5; color: var(--text-2); }
+
+.action-list { display: grid; gap: 10px; }
+.action-card { background: var(--panel); border: 1px solid var(--border); border-radius: var(--radius); padding: 14px; }
+.action-top { display: flex; align-items: baseline; gap: 10px; margin-bottom: 4px; }
+.action-title { flex: 1; font-size: 15px; font-weight: 600; line-height: 1.35; }
+.action-ev { font-weight: 650; color: var(--green); font-variant-numeric: tabular-nums; }
+.rank { color: var(--faint); font-size: 13px; }
+.clamp { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+
+.away-list { margin: 0; padding-left: 18px; font-size: 15px; line-height: 1.7; }
+
+.pulse-group { border: 1px solid var(--border); border-radius: var(--radius); padding: 14px; margin-bottom: 12px; background: var(--panel); }
+.pulse-group.sim { border-style: dashed; background: transparent; }
+.pulse-group-head { display: flex; justify-content: space-between; align-items: center; gap: 10px; margin-bottom: 12px; font-size: 14px; font-weight: 600; }
+.pulse-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 14px; }
+.pulse-value { font-size: 22px; font-weight: 650; font-variant-numeric: tabular-nums; }
+.pulse-label { font-size: 13px; color: var(--text-2); }
+
+.tech-details { margin-top: 8px; }
+.tech-details > summary { cursor: pointer; min-height: 44px; display: flex; align-items: center; color: var(--muted); font-size: 14px; }
+.tech-details[open] > summary { margin-bottom: 14px; }
+
+@media (max-width: 560px) {
+  .money-main { flex-direction: column; gap: 8px; }
+  .money-value { text-align: left; }
+  .home-title { font-size: 24px; }
+  .act-row .btn { flex: 1 1 calc(50% - 8px); }
+}
