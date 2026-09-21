@@ -1,5 +1,4 @@
 /* ============================================================================
-import { calculateTreasurySnapshot, authorizeSpend, createConfirmedExpense, DEFAULT_TREASURY_POLICY, type TreasuryPolicy, type SpendRequest } from '../../src/lib/treasury';
  * SURVIVE AI — Cloudflare Worker entry point.
  *
  * Runs the SAME AgentEngine as the browser, against Supabase, on a cron.
@@ -36,8 +35,45 @@ import {
 } from '../../src/lib/revenueFunnel';
 import { computeSurvivalStatus } from '../../src/engine/seed';
 import { computeMoneyMetrics } from '../../src/lib/moneyMetrics';
+import {
+  calculateTreasurySnapshot,
+  authorizeSpend,
+  createConfirmedExpense,
+  DEFAULT_TREASURY_POLICY,
+  type TreasuryPolicy,
+  type SpendRequest,
+} from '../../src/lib/treasury';
 import type { Env } from './env';
-import { ecoCashStatus } from './paymentProvider';
+import {
+  ecoCashStatus,
+  createEcoCashSandboxCharge,
+  verifyEcoCashWebhook,
+} from './paymentProvider';
+
+
+function ecoCashConfig(env: Env) {
+  return {
+    baseUrl: env.ECOCASH_BASE_URL ?? 'https://developers.ecocash.co.zw',
+    username: env.ECOCASH_USERNAME ?? env.ECOCASH_CLIENT_ID,
+    password: env.ECOCASH_PASSWORD ?? env.ECOCASH_CLIENT_SECRET,
+    merchantCode: env.ECOCASH_MERCHANT_CODE,
+    merchantPin: env.ECOCASH_MERCHANT_PIN,
+    merchantNumber: env.ECOCASH_MERCHANT_NUMBER,
+    webhookSecret: env.ECOCASH_WEBHOOK_SECRET,
+  };
+}
+
+function paymentStatusFromProvider(value: unknown): 'PENDING' | 'CONFIRMED' | 'FAILED' {
+  const s = String(value ?? '').toUpperCase();
+  if (['SUCCESS', 'SUCCESSFUL', 'COMPLETED', 'COMPLETE', 'PAID', 'CONFIRMED'].some((x) => s.includes(x))) return 'CONFIRMED';
+  if (['FAILED', 'FAILURE', 'REJECTED', 'DECLINED', 'CANCELLED', 'CANCELED', 'ERROR'].some((x) => s.includes(x))) return 'FAILED';
+  return 'PENDING';
+}
+
+async function sha256Hex(value: string): Promise<string> {
+  const digest = new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(value)));
+  return Array.from(digest).map((b) => b.toString(16).padStart(2, '0')).join('');
+}
 
 const json = (data: unknown, init?: ResponseInit) =>
   new Response(JSON.stringify(data, null, 2), {
@@ -148,15 +184,174 @@ export default {
 
     if (req.method === 'OPTIONS') return new Response(null, { status: 204 });
 
+
     if (url.pathname === '/payments/status' && req.method === 'GET') {
       return json({
         ok: true,
-        payment: ecoCashStatus({
-          baseUrl: env.ECOCASH_BASE_URL,
-          clientId: env.ECOCASH_CLIENT_ID,
-          clientSecret: env.ECOCASH_CLIENT_SECRET,
-        }),
+        payment: ecoCashStatus(ecoCashConfig(env)),
       });
+    }
+
+    if (url.pathname === '/payments/ecocash/sandbox-charge' && req.method === 'POST') {
+      const secret = req.headers.get('x-trigger-secret');
+      if (!env.TRIGGER_SECRET || secret !== env.TRIGGER_SECRET) {
+        return json({ ok: false, error: 'unauthorized' }, { status: 401 });
+      }
+      let body: any;
+      try { body = await req.json(); } catch { return json({ ok: false, error: 'invalid JSON body' }, { status: 400 }); }
+      const amount = body?.amount;
+      const endUserId = typeof body?.endUserId === 'string' ? body.endUserId.trim() : '';
+      const description = typeof body?.description === 'string' && body.description.trim() ? body.description.trim() : 'Survivor AI sandbox test';
+      if (typeof amount !== 'number' || !Number.isFinite(amount) || amount <= 0 || amount > 50) {
+        return json({ ok: false, error: 'sandbox amount must be a positive number no greater than 50' }, { status: 400 });
+      }
+      if (!endUserId) return json({ ok: false, error: 'endUserId is required (use a whitelisted EcoCash sandbox number)' }, { status: 400 });
+
+      const config = ecoCashConfig(env);
+      const status = ecoCashStatus(config);
+      if (!status.configured || status.mode !== 'SANDBOX') {
+        return json({ ok: false, error: 'EcoCash sandbox credentials are not configured' }, { status: 503 });
+      }
+
+      try {
+        const { repo } = buildEngine(env);
+        const now = Date.now();
+        const id = 'pay_' + crypto.randomUUID();
+        const clientCorrelator = 'SURVIVE-' + now + '-' + crypto.randomUUID().slice(0, 8);
+        const referenceCode = 'SURVIVE-' + now;
+        const notifyUrl = url.origin + '/payments/ecocash/webhook';
+
+        await env.DB.prepare(
+          `INSERT INTO payment_intents
+             (id, agent_id, provider, direction, amount, currency, description, end_user_id,
+              client_correlator, reference_code, status, notify_url, created_at, updated_at)
+           VALUES (?, ?, 'ECOCASH', 'INBOUND', ?, 'USD', ?, ?, ?, ?, 'CREATED', ?, ?, ?)`
+        ).bind(id, env.AGENT_ID ?? 'agent-survive-01', amount, description, endUserId, clientCorrelator, referenceCode, notifyUrl, new Date(now).toISOString(), new Date(now).toISOString()).run();
+
+        const result = await createEcoCashSandboxCharge(config, {
+          clientCorrelator,
+          referenceCode,
+          endUserId,
+          amount,
+          currency: 'USD',
+          description,
+          notifyUrl,
+        });
+
+        const responseBody = result.body as any;
+        const providerStatus = responseBody?.transactionOperationStatus ?? responseBody?.status ?? null;
+        const paymentStatus = paymentStatusFromProvider(providerStatus);
+        await env.DB.prepare(
+          `UPDATE payment_intents
+             SET external_id = COALESCE(?, external_id),
+                 provider_status = ?, provider_response = ?, status = ?, updated_at = ?
+             WHERE id = ?`
+        ).bind(
+          responseBody?.id != null ? String(responseBody.id) : null,
+          providerStatus ? String(providerStatus) : null,
+          JSON.stringify(responseBody),
+          paymentStatus,
+          new Date().toISOString(),
+          id,
+        ).run();
+
+        return json({
+          ok: result.ok,
+          sandbox: true,
+          paymentIntentId: id,
+          clientCorrelator,
+          referenceCode,
+          httpStatus: result.httpStatus,
+          provider: responseBody,
+          note: 'Sandbox only. No real money was moved by Survivor-AI.',
+        }, { status: result.ok ? 200 : 502 });
+      } catch (e) {
+        return json({ ok: false, error: (e as Error).message }, { status: 500 });
+      }
+    }
+
+    if (url.pathname === '/payments/ecocash/webhook' && req.method === 'POST') {
+      const rawBody = await req.text();
+      if (!await verifyEcoCashWebhook(rawBody, req.headers, env.ECOCASH_WEBHOOK_SECRET)) {
+        return json({ ok: false, error: 'invalid webhook signature' }, { status: 401 });
+      }
+
+      let body: any;
+      try { body = JSON.parse(rawBody); } catch { return json({ ok: false, error: 'invalid JSON webhook payload' }, { status: 400 }); }
+
+      try {
+        const { repo } = buildEngine(env);
+        const externalEventId = String(body?.id ?? body?.eventId ?? body?.transactionId ?? body?.serverReferenceCode ?? body?.referenceCode ?? await sha256Hex(rawBody));
+        const payloadHash = await sha256Hex(rawBody);
+        const insertEvent = await env.DB.prepare(
+          `INSERT OR IGNORE INTO payment_provider_events
+             (id, provider, external_event_id, event_type, signature_verified, payload_hash, payload_json, status, received_at)
+           VALUES (?, 'ECOCASH', ?, 'WEBHOOK', 1, ?, ?, 'RECEIVED', ?)`
+        ).bind('pevt_' + externalEventId, externalEventId, payloadHash, rawBody, new Date().toISOString()).run();
+
+        if (insertEvent.meta.changes === 0) {
+          return json({ ok: true, duplicate: true });
+        }
+
+        const referenceCode = String(body?.referenceCode ?? body?.clientCorrelator ?? '');
+        const externalId = body?.id != null ? String(body.id) : null;
+        const intent = await env.DB.prepare(
+          `SELECT * FROM payment_intents
+           WHERE reference_code = ? OR client_correlator = ? OR (? IS NOT NULL AND external_id = ?)
+           ORDER BY created_at DESC LIMIT 1`
+        ).bind(referenceCode, referenceCode, externalId, externalId).first<any>();
+
+        if (!intent) {
+          await env.DB.prepare(
+            `UPDATE payment_provider_events SET status = 'UNMATCHED', processed_at = ? WHERE external_event_id = ?`
+          ).bind(new Date().toISOString(), externalEventId).run();
+          return json({ ok: true, matched: false });
+        }
+
+        const providerStatus = body?.transactionOperationStatus ?? body?.status ?? body?.transactionStatus ?? '';
+        const paymentStatus = paymentStatusFromProvider(providerStatus);
+        await env.DB.prepare(
+          `UPDATE payment_intents
+             SET external_id = COALESCE(?, external_id),
+                 provider_status = ?, provider_response = ?, status = ?,
+                 updated_at = ?, confirmed_at = CASE WHEN ? = 'CONFIRMED' THEN ? ELSE confirmed_at END
+             WHERE id = ?`
+        ).bind(
+          externalId,
+          String(providerStatus),
+          rawBody,
+          paymentStatus,
+          new Date().toISOString(),
+          paymentStatus,
+          new Date().toISOString(),
+          intent.id,
+        ).run();
+
+        if (paymentStatus === 'CONFIRMED') {
+          const txId = 'tx_ecocash_' + intent.id;
+          const existing = await env.DB.prepare('SELECT id FROM transactions WHERE id = ?').bind(txId).first<{ id: string }>();
+          if (!existing) {
+            const currentTransactions = await repo.listTransactions();
+            const balanceBefore = currentTransactions.reduce((sum, tx) => sum + tx.amount, 0);
+            await repo.appendTransaction({
+              id: txId,
+              type: 'REVENUE',
+              amount: Number(intent.amount),
+              description: '[ECOCASH] Payment confirmed: ' + intent.reference_code,
+              balanceAfter: balanceBefore + Number(intent.amount),
+              createdAt: Date.now(),
+            });
+          }
+        }
+
+        await env.DB.prepare(
+          `UPDATE payment_provider_events SET status = 'PROCESSED', processed_at = ? WHERE external_event_id = ?`
+        ).bind(new Date().toISOString(), externalEventId).run();
+
+        return json({ ok: true, matched: true, paymentIntentId: intent.id, status: paymentStatus });
+      } catch (e) {
+        return json({ ok: false, error: (e as Error).message }, { status: 500 });
+      }
     }
 
     if (url.pathname === '/health') {
