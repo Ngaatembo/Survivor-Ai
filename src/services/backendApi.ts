@@ -90,11 +90,22 @@ export interface BackendHealth {
   ok: boolean;
   service: string;
   time: string;
+  runtime?: {
+    cronConfigured: boolean;
+    cronSchedule: string;
+    timezone: string;
+    lastCycle: Record<string, unknown> | null;
+    lastCycleAgeMinutes: number | null;
+    stale: boolean | null;
+  };
   connectors: {
     db: { backend: string; connected: boolean };
     llm: boolean;
     search: boolean;
-    payments: false;
+    payments: {
+      sandboxConfigured: boolean;
+      productionExecutionEnabled: boolean;
+    };
   };
 }
 
