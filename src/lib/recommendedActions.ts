@@ -21,6 +21,7 @@ import { realRevenueScore } from './decisionEngine';
 import { nextIncompleteMilestone, isOverdue } from './projectTracker';
 import { statsForCategory, type CategoryRealWorldStats } from './realRevenue';
 import { uid } from './format';
+import { rankRevenueProspects } from './revenueConversion';
 import type { MemoryEntry } from '../types';
 
 /** Phase 5 §21 — weight a prospect action's expectedValue by this
@@ -141,6 +142,11 @@ export function computeRecommendedActions(
       });
     }
   }
+
+  // Keep the human queue aligned with the small sales-ready cohort
+  // used by the autonomous conversion engine.
+  const revenueCandidates = rankRevenueProspects(prospects, 5);
+  const revenueRank = new Map(revenueCandidates.map((candidate, index) => [candidate.prospect.id, index + 1]));
 
   // Prospect-driven actions (build-spec §16 examples: "Contact Business X",
   // "Follow up with Business Y"). Never suggests contacting a DO_NOT_CONTACT
