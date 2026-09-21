@@ -1,15 +1,16 @@
 /* ============================================================================
  * SURVIVE AI — Cloudflare Worker entry point.
  *
- * Runs the SAME AgentEngine as the browser, against Supabase, on a cron.
+ * Runs the AgentEngine headlessly against Cloudflare D1 on a cron.
  *
  *   POST /cycles/run        run one research cycle now  (header: x-trigger-secret)
  *   GET  /health            liveness + connector status
  *   GET  /status            agent snapshot (balance, status, counts)
  *   scheduled (cron)        runs one cycle every 30 minutes
  *
- * The worker holds all secrets (service role key, API keys) — they never
- * touch the browser. Real-money providers are intentionally absent.
+ * The worker holds all secrets (API keys and payment credentials) — they never
+ * touch the browser. EcoCash is currently sandbox-only; real-money execution
+ * remains disabled by policy and there is no autonomous payment path.
  * ========================================================================== */
 
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
@@ -142,7 +143,7 @@ function buildEngine(env: Env): {
 }
 
 async function runCycle(env: Env): Promise<Response> {
-  const { engine, connections } = buildEngine(env);
+  const { engine, repo, connections } = buildEngine(env);
   try {
     await engine.ensureSeeded();
     const outcome = await engine.runCycle({
@@ -155,6 +156,17 @@ async function runCycle(env: Env): Promise<Response> {
         { status: 409 },
       );
     }
+    try {
+      await repo.setKV('runtime:last_cycle', JSON.stringify({
+        at: new Date().toISOString(),
+        cycleIndex: outcome.cycle.index,
+        status: outcome.finalStatus,
+        balance: outcome.balance,
+      }));
+    } catch (heartbeatError) {
+      console.warn('[runtime] failed to persist cycle heartbeat:', (heartbeatError as Error).message);
+    }
+
     return json({
       ok: true,
       cycleIndex: outcome.cycle.index,
@@ -371,21 +383,14 @@ export default {
           intent.id,
         ).run();
 
+        // EcoCash sandbox transactions are simulated test events. They must
+        // never become REVENUE in the economic ledger. A sandbox confirmation
+        // only reconciles payment/provider ledgers; real revenue is recorded
+        // separately by the human after an actual production payment.
         if (paymentStatus === 'CONFIRMED') {
-          const txId = 'tx_ecocash_' + intent.id;
-          const existing = await env.DB.prepare('SELECT id FROM transactions WHERE id = ?').bind(txId).first<{ id: string }>();
-          if (!existing) {
-            const currentTransactions = await repo.listTransactions();
-            const balanceBefore = currentTransactions.reduce((sum, tx) => sum + tx.amount, 0);
-            await repo.appendTransaction({
-              id: txId,
-              type: 'REVENUE',
-              amount: Number(intent.amount),
-              description: '[ECOCASH] Payment confirmed: ' + intent.reference_code,
-              balanceAfter: balanceBefore + Number(intent.amount),
-              createdAt: Date.now(),
-            });
-          }
+          await env.DB.prepare(
+            `UPDATE payment_provider_events SET event_type = 'SANDBOX_PAYMENT_CONFIRMED' WHERE external_event_id = ?`
+          ).bind(externalEventId).run();
         }
 
         await env.DB.prepare(
@@ -408,7 +413,10 @@ export default {
           db: { backend, connected: backend === 'supabase' ? Boolean(env.SUPABASE_URL && env.SUPABASE_SERVICE_ROLE_KEY) : Boolean(env.DB) },
           llm: Boolean(env.ANTHROPIC_API_KEY || env.OPENAI_API_KEY),
           search: Boolean(env.TAVILY_API_KEY || env.BRAVE_API_KEY),
-          payments: false, // never enabled on the worker
+          payments: {
+            sandboxConfigured: ecoCashStatus(ecoCashConfig(env)).configured,
+            productionExecutionEnabled: false,
+          },
         },
       });
     }
@@ -1072,11 +1080,26 @@ export default {
     ctx.waitUntil(
       (async () => {
         try {
-          const { engine } = buildEngine(env);
+          const { engine, repo } = buildEngine(env);
           await engine.ensureSeeded();
           const outcome = await engine.runCycle({ useLive: true, stepDelay: 0 });
+          if (outcome) {
+            try {
+              await repo.setKV('runtime:last_cycle', JSON.stringify({
+                at: new Date().toISOString(),
+                cycleIndex: outcome.cycle.index,
+                status: outcome.finalStatus,
+                balance: outcome.balance,
+                trigger: 'cron',
+              }));
+            } catch (heartbeatError) {
+              console.warn('[cron] heartbeat write failed:', (heartbeatError as Error).message);
+            }
+          }
           console.log(
-            `[cron] cycle ${outcome?.cycle.index} complete — status ${outcome?.finalStatus}, balance $${outcome?.balance.toFixed(2)}`,
+            outcome
+              ? `[cron] cycle ${outcome.cycle.index} complete — status ${outcome.finalStatus}, balance ${outcome.balance.toFixed(2)}`
+              : '[cron] no cycle executed (agent unavailable/dead or cycle lock not acquired)',
           );
         } catch (e) {
           console.error('[cron] cycle failed:', (e as Error).message);
