@@ -111,3 +111,33 @@ The live discovery engine now includes dedicated research tracks for:
 - low-capital digital products and micro-SaaS.
 
 These queries pass through the existing search-economy cache/budget and the existing verification, scoring, pricing, prospect, offer, and human-approval pipeline.
+
+
+## Cross-border payout reality
+
+Survivor should treat international revenue as valid even when the buyer is outside Zimbabwe, but every opportunity must include a **verified payout path** before it is marked executable.
+
+- Upwork currently supports freelancers in 180+ countries and lists Payoneer as a withdrawal option outside the U.S.; its help pages say withdrawal methods vary by location. citeturn0search0turn1search3
+- Upwork's current Payoneer instructions require the Payoneer account to be registered/verified in the freelancer's own name. citeturn1search4
+- Payoneer says it supports cross-border payments across 190+ countries and territories, but also explicitly says product availability is jurisdiction- and eligibility-dependent. Survivor must therefore verify the user's actual onboarding eligibility before relying on it. citeturn1search5
+- Apify explicitly supports paid Actors and agentic payments, with KYC required for eligible agentic-payment publishers; its documentation also describes monthly payouts after billing/identity verification. citeturn0search4turn0search5
+- Stripe's current supported-country list does not list Zimbabwe. Survivor must not recommend creating a Stripe account using another country's identity or address. citeturn1search0
+- PayPal's current seller-onboarding table marks Zimbabwe as **Send only**, so Survivor should not assume PayPal is a reliable Zimbabwe receiving route merely because Zimbabwe has a PayPal country code. citeturn1search8
+
+### New execution rule
+
+For every international opportunity, store:
+
+**buyer country → platform → service/product → gross price → platform fee → payout method → Zimbabwe availability evidence → expected net USD → time to payout → KYC requirements**
+
+An opportunity with attractive demand but no verified legal payout path is **RESEARCH_ONLY**, not executable.
+
+### Priority international lanes to investigate
+
+1. Upwork/other legitimate freelance marketplaces for high-value technical work.
+2. Paid AI agents/MCP/automation tools on marketplaces that handle billing and payouts.
+3. Productized B2B services sold directly to foreign customers using a payout method the user can legally receive in Zimbabwe.
+4. Affiliate/partner programs only after verifying both program eligibility and payout corridor.
+5. Digital products/micro-SaaS where the platform itself handles customer payment and creator payout.
+
+Survivor must reject any strategy that depends on fake country information, borrowed identities, VPN-based location deception, fake tax information, or circumventing platform restrictions.
