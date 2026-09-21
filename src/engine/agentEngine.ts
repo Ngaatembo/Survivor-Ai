@@ -654,14 +654,13 @@ export class AgentEngine {
         // research otherwise.
         const allProspects = await this.repo.listProspects();
         const existingIntelligence = await this.repo.listProspectIntelligence();
+        const revenueCandidates = rankRevenueProspects(allProspects, 5);
         if (hasLiveSearch) {
           // Phase 4/12: prospects that already have an intelligence report
           // are excluded above (no repeat research within its cache TTL);
           // among the rest, still prioritize by expected value first so a
           // budget-limited cycle spends its few searches on the prospects
           // most likely to matter, not just whichever were discovered first.
-          const revenueCandidates = rankRevenueProspects(allProspects, 5);
-
           const needsResearch = revenueCandidates
             .map((candidate) => candidate.prospect)
             .filter((p) => !existingIntelligence.some((i) => i.prospectId === p.id))
@@ -736,7 +735,7 @@ export class AgentEngine {
           )
           .slice(0, 5);
 
-                if (hasLiveSearch) {
+        if (hasLiveSearch) {
           const existingPricing = await this.repo.listMarketPriceResearch();
           const oppsNeedingPricing = new Map<string, Opportunity>();
           for (const p of needsOffer) {
