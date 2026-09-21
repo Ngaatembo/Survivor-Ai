@@ -83,7 +83,7 @@ export function CommandCenter({ go }: { go: (v: View) => void }) {
 
       <div className="grid cols-4" style={{ marginBottom: 14 }}>
         <Panel tight>
-          <Stat label="Opportunities discovered" value={discovered.length} sub={`of ${opportunities.length} in knowledge base`} />
+          <Stat label="Opportunities discovered" value={discovered.length} sub={`of ${opportunities.length} live opportunities`} />
         </Panel>
         <Panel tight>
           <Stat label="Experiments run" value={experiments.length} sub={`${successful} positive · ${failed} failed`} />
@@ -258,7 +258,7 @@ export function CommandCenter({ go }: { go: (v: View) => void }) {
           )}
         </Panel>
 
-        <Panel title="Recent activity" right={<DataSourceBadge source={backendConfigured ? 'LIVE' : 'SAMPLE'} />}>
+        <Panel title="Recent activity" right={<DataSourceBadge source="LIVE" />}>
           <div className="feed" style={{ maxHeight: 280, overflowY: 'auto' }}>
             {[...events].reverse().slice(0, 9).map((e) => (
               <div key={e.id} className="event">
