@@ -196,6 +196,7 @@ create table prospects (
   social_links                text[] not null default '{}',
   contact_channel              contact_channel not null default 'UNKNOWN',
   contact_value                text,
+  verification                 jsonb not null default '{}'::jsonb,
   evidence_notes               text not null default '',
   priority                    prospect_priority not null default 'LOW',
   score                       jsonb not null default '{}', -- LeadScoreBreakdown

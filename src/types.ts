@@ -460,6 +460,24 @@ export type WebsitePresence = 'NONE_FOUND' | 'SOCIAL_ONLY' | 'WEAK_OR_OUTDATED' 
 
 export type ContactChannel = 'PHONE' | 'WHATSAPP' | 'EMAIL' | 'FACEBOOK' | 'INSTAGRAM' | 'WEBSITE_FORM' | 'UNKNOWN';
 
+export type ProspectVerificationStatus = 'VERIFIED' | 'PROVISIONAL' | 'CONFLICT' | 'UNVERIFIED';
+
+export interface ProspectVerification {
+  status: ProspectVerificationStatus;
+  confidence: number; // 0..100, evidence-based identity/contact confidence
+  verifiedBusinessName?: string;
+  verifiedContactChannel?: ContactChannel;
+  verifiedContactValue?: string;
+  businessNameMatchScore: number; // 0..1
+  contactMatchScore: number; // 0..1
+  independentSources: number;
+  contactSources: number;
+  sourceUrls: string[];
+  conflictingContacts: string[];
+  notes: string[];
+  verifiedAt: number;
+}
+
 /** Explainable lead-scoring breakdown (build-spec §12). Every number here is
  *  derived from a field already stored on the prospect — no opaque score. */
 export interface LeadScoreBreakdown {
@@ -488,7 +506,10 @@ export interface Prospect {
   socialLinks: string[];
 
   contactChannel: ContactChannel;
-  contactValue?: string; // phone number, page URL, etc. — only if publicly found
+  contactValue?: string; // only populated with a verified/provisional public contact
+
+  /** Independent evidence that the business identity/contact belongs to this prospect. */
+  verification?: ProspectVerification;
 
   sources: ResearchSource[];
   evidenceNotes: string;
