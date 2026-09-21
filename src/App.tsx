@@ -12,6 +12,7 @@ import { DecisionCenter } from './components/DecisionCenter';
 import { Experiments } from './components/Experiments';
 import { MemoryView } from './components/MemoryView';
 import { Wallet } from './components/Wallet';
+import { Treasury } from './components/Treasury';
 import { ActivityLog } from './components/ActivityLog';
 import { Reports } from './components/Reports';
 import { Architecture } from './components/Architecture';
@@ -46,6 +47,7 @@ const NAV: { id: View; label: string; icon: string; section: string }[] = [
   { id: 'analytics', label: 'Performance', icon: '📊', section: 'ANALYTICS' },
   { id: 'economics', label: 'Economic Efficiency', icon: '⚖', section: 'ANALYTICS' },
   { id: 'wallet', label: 'Simulated Wallet', icon: '◇', section: 'ANALYTICS' },
+  { id: 'treasury', label: 'Treasury', icon: '₿', section: 'ANALYTICS' },
   { id: 'activity', label: 'Activity Log', icon: '☰', section: 'SYSTEM' },
   { id: 'architecture', label: 'Architecture & Safety', icon: '⬡', section: 'SYSTEM' },
 ];
@@ -62,6 +64,7 @@ const TITLES: Record<View, string> = {
   experiments: 'Experiment System',
   memory: 'Agent Memory',
   wallet: 'Simulated Wallet',
+  treasury: 'Survivor Treasury',
   activity: 'Activity Log',
   reports: 'Research Reports',
   architecture: 'Architecture & Safety',
@@ -226,6 +229,7 @@ export function App() {
           {view === 'experiments' && <Experiments />}
           {view === 'memory' && <MemoryView />}
           {view === 'wallet' && <Wallet />}
+          {view === 'treasury' && <Treasury />}
           {view === 'activity' && <ActivityLog />}
           {view === 'reports' && <Reports />}
           {view === 'architecture' && <Architecture />}
