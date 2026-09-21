@@ -1,7 +1,7 @@
 /* ============================================================================
  * Search providers — Tavily and Brave. Pure fetch; works in browser & worker.
- * Both fail soft: the engine then uses the SAMPLE knowledge base and tags
- * results appropriately.
+ * Both fail soft: the live discovery layer receives an empty result set and
+ * the production Worker never substitutes legacy SAMPLE records.
  * ========================================================================== */
 
 import type { SearchProvider, SearchResult } from './types';
