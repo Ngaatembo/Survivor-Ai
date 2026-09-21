@@ -33,6 +33,18 @@ const checks = [
         read('worker/src/index.ts').includes("if (!env.TRIGGER_SECRET || secret !== env.TRIGGER_SECRET)"),
   },
   {
+    name: 'deployment does not expose frontend secrets',
+    ok: !read('.github/workflows/deploy.yml').includes('VITE_TAVILY_API_KEY') &&
+        !read('.github/workflows/deploy.yml').includes('VITE_BRAVE_API_KEY') &&
+        !read('.github/workflows/deploy.yml').includes('VITE_ANTHROPIC_API_KEY') &&
+        !read('.github/workflows/deploy.yml').includes('VITE_OPENAI_API_KEY'),
+  },
+  {
+    name: 'EcoCash production execution is hard-disabled',
+    ok: read('worker/src/paymentProvider.ts').includes('production execution') &&
+        read('worker/src/index.ts').includes('productionExecutionEnabled: false'),
+  },
+  {
     name: 'cron trigger is configured',
     ok: read('worker/wrangler.toml').includes('crons = ["*/30 * * * *"]') &&
         read('worker/src/index.ts').includes('async scheduled('),
