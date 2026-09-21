@@ -7,7 +7,7 @@
 import type { LLMOpportunityAnalysis, LLMProvider, MarketPriceAnalysis, ProspectIntelligenceAnalysis } from './types';
 
 const ANALYSIS_SCHEMA_HINT = `Return ONLY minified JSON with this shape:
-{"howMoneyMade":string,"capitalRequiredMin":number,"capitalRequiredMax":number,
+{"name":string,"category":"Digital Business|Content|E-Commerce|Services|Finance|Local / Real-World","howMoneyMade":string,"capitalRequiredMin":number,"capitalRequiredMax":number,
 "timeToRevenueDaysMin":number,"timeToRevenueDaysMax":number,"skills":string[],
 "difficulty":1-5,"competition":1-5,"scalability":1-5,"risk":1-5,
 "successProbability":0-1,"revenuePotentialMonthlyMin":number,
@@ -90,7 +90,7 @@ class AnthropicProvider implements LLMProvider {
   }): Promise<Partial<LLMOpportunityAnalysis> | null> {
     const raw = await this.complete(
       'You are a rigorous, skeptical small-business research analyst. Never present marketing claims as fact. Mark uncertain evidence accordingly.',
-      `Analyze this income model: "${input.name}" (category: ${input.category}).\n\nEvidence from the open web:\n${input.snippets
+      `Analyze this income model or open-ended opportunity scan: "${input.name}" (category hint: ${input.category}). If the evidence reveals a different concrete opportunity, name it and classify it accordingly. Never force the evidence into the supplied category.\n\nEvidence from the open web:\n${input.snippets
         .slice(0, 6)
         .map((s, i) => `[${i + 1}] ${s}`)
         .join('\n')}\n\n${ANALYSIS_SCHEMA_HINT}`,
