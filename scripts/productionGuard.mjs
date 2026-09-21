@@ -18,6 +18,11 @@ const checks = [
     ok: read('src/services/liveResearch.ts').includes('production Worker never repopulates from the legacy SAMPLE knowledge base'),
   },
   {
+    name: 'production engine has no SAMPLE import',
+    ok: !read('src/engine/agentEngine.ts').includes('sampleData') &&
+        !read('worker/src/index.ts').includes('sampleData'),
+  },
+  {
     name: 'real-money execution remains disabled',
     ok: read('src/lib/treasury.ts').includes('realMoneyExecutionEnabled: false') &&
         read('worker/src/index.ts').includes('productionExecutionEnabled: false'),
