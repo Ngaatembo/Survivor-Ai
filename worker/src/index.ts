@@ -66,9 +66,15 @@ function ecoCashConfig(env: Env) {
 }
 
 function paymentStatusFromProvider(value: unknown): 'PENDING' | 'CONFIRMED' | 'FAILED' {
-  const s = String(value ?? '').toUpperCase();
-  if (['SUCCESS', 'SUCCESSFUL', 'COMPLETED', 'COMPLETE', 'PAID', 'CONFIRMED'].some((x) => s.includes(x))) return 'CONFIRMED';
-  if (['FAILED', 'FAILURE', 'REJECTED', 'DECLINED', 'CANCELLED', 'CANCELED', 'ERROR'].some((x) => s.includes(x))) return 'FAILED';
+  const s = String(value ?? '').trim().toUpperCase();
+  // Match provider status values as tokens rather than substring-searching
+  // them. This prevents values such as "UNSUCCESSFUL" or "INCOMPLETE" from
+  // being incorrectly classified as confirmed.
+  const normalized = s.replace(/[^A-Z0-9]+/g, '_').replace(/^_+|_+$/g, '');
+  const confirmed = new Set(['SUCCESS', 'SUCCESSFUL', 'COMPLETED', 'COMPLETE', 'PAID', 'CONFIRMED']);
+  const failed = new Set(['FAILED', 'FAILURE', 'REJECTED', 'DECLINED', 'CANCELLED', 'CANCELED', 'ERROR', 'UNSUCCESSFUL', 'INCOMPLETE']);
+  if (confirmed.has(normalized)) return 'CONFIRMED';
+  if (failed.has(normalized)) return 'FAILED';
   return 'PENDING';
 }
 
