@@ -136,6 +136,50 @@ export async function createEcoCashSandboxCharge(
   return { ok: response.ok, httpStatus: response.status, body };
 }
 
+/**
+ * Looks up an EcoCash EIP sandbox transaction using the exact GET path
+ * exposed by the Developer Portal/API Playground.
+ */
+export async function lookupEcoCashSandboxTransaction(
+  config: EcoCashConfig,
+  endUserId: string,
+  clientCorrelator: string,
+): Promise<EcoCashChargeResult> {
+  if (!config.username || !config.password) {
+    throw new Error('EcoCash sandbox Basic Auth credentials are incomplete');
+  }
+  if (!endUserId.trim() || !clientCorrelator.trim()) {
+    throw new Error('endUserId and clientCorrelator are required');
+  }
+
+  const baseUrl = config.baseUrl || DEFAULT_BASE_URL;
+  if (!/sandbox|test|developers\.ecocash\.co\.zw/i.test(baseUrl)) {
+    throw new Error('EcoCash transaction lookup is restricted to the sandbox endpoint');
+  }
+
+  const encodedEndUserId = encodeURIComponent(endUserId);
+  const encodedClientCorrelator = encodeURIComponent(clientCorrelator);
+  const url =
+    `${baseUrl.replace(/\/$/, '')}/sandbox/payment/v1/${encodedEndUserId}/transactions/amount/${encodedClientCorrelator}`;
+
+  const response = await fetch(url, {
+    method: 'GET',
+    headers: {
+      Authorization: basicAuth(config.username, config.password),
+      Accept: 'application/json',
+    },
+  });
+
+  let body: unknown = null;
+  try {
+    body = await response.json();
+  } catch {
+    body = await response.text();
+  }
+
+  return { ok: response.ok, httpStatus: response.status, body };
+}
+
 function hexToBytes(hex: string): Uint8Array | null {
   if (!/^[0-9a-f]+$/i.test(hex) || hex.length % 2 !== 0) return null;
   const bytes = new Uint8Array(hex.length / 2);
@@ -180,7 +224,6 @@ export async function verifyEcoCashWebhook(
   const digest = new Uint8Array(await crypto.subtle.sign('HMAC', key, new TextEncoder().encode(rawBody)));
   const normalized = signature.replace(/^sha256=/i, '').trim();
 
-  const expectedHex = Array.from(digest).map((b) => b.toString(16).padStart(2, '0')).join('');
   if (constantTimeEqual(digest, hexToBytes(normalized) ?? new Uint8Array())) return true;
 
   let expectedBase64 = '';
