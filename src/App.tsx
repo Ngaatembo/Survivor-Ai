@@ -34,18 +34,18 @@ export type View =
   | 'architecture';
 
 const NAV: { id: View; label: string; icon: string; section: string }[] = [
-  { id: 'command', label: 'Command Center', icon: '▣', section: 'OVERVIEW' },
-  { id: 'research', label: 'Research Engine', icon: '◎', section: 'OVERVIEW' },
-  { id: 'explorer', label: 'Opportunity Explorer', icon: '▤', section: 'DISCOVERY' },
-  { id: 'prospects', label: 'Prospects / CRM', icon: '☎', section: 'DISCOVERY' },
-  { id: 'projects', label: 'Delivery Projects', icon: '🛠', section: 'DISCOVERY' },
-  { id: 'analytics', label: 'Analytics', icon: '📊', section: 'DISCOVERY' },
-  { id: 'economics', label: 'Economic Efficiency', icon: '⚖', section: 'DISCOVERY' },
-  { id: 'decision', label: 'Decision Center', icon: '➤', section: 'DISCOVERY' },
-  { id: 'reports', label: 'Research Reports', icon: '▦', section: 'DISCOVERY' },
-  { id: 'experiments', label: 'Experiments', icon: '▶', section: 'OPERATIONS' },
-  { id: 'memory', label: 'Memory', icon: '◉', section: 'OPERATIONS' },
-  { id: 'wallet', label: 'Simulated Wallet', icon: '◇', section: 'OPERATIONS' },
+  { id: 'command', label: 'Command Center', icon: '▣', section: 'HOME' },
+  { id: 'research', label: 'Research Engine', icon: '◎', section: 'DISCOVER' },
+  { id: 'explorer', label: 'Opportunities', icon: '▤', section: 'DISCOVER' },
+  { id: 'prospects', label: 'Prospects', icon: '☎', section: 'REVENUE' },
+  { id: 'projects', label: 'Delivery', icon: '🛠', section: 'REVENUE' },
+  { id: 'decision', label: 'Decisions', icon: '➤', section: 'INTELLIGENCE' },
+  { id: 'reports', label: 'Reports', icon: '▦', section: 'INTELLIGENCE' },
+  { id: 'memory', label: 'Memory', icon: '◉', section: 'INTELLIGENCE' },
+  { id: 'experiments', label: 'Experiments', icon: '▶', section: 'INTELLIGENCE' },
+  { id: 'analytics', label: 'Performance', icon: '📊', section: 'ANALYTICS' },
+  { id: 'economics', label: 'Economic Efficiency', icon: '⚖', section: 'ANALYTICS' },
+  { id: 'wallet', label: 'Simulated Wallet', icon: '◇', section: 'ANALYTICS' },
   { id: 'activity', label: 'Activity Log', icon: '☰', section: 'SYSTEM' },
   { id: 'architecture', label: 'Architecture & Safety', icon: '⬡', section: 'SYSTEM' },
 ];
@@ -99,13 +99,13 @@ export function App() {
           <div className="brand-name">
             <span className="tick">▮</span> SURVIVE AI
           </div>
-          <div className="brand-sub">autonomous economic lab · v0.1</div>
+          <div className="brand-sub">economic intelligence & action center</div>
           <button className="sidebar-close" onClick={() => setNavOpen(false)} aria-label="Close menu">
             ✕
           </button>
         </div>
         <nav className="nav">
-          {(['OVERVIEW', 'DISCOVERY', 'OPERATIONS', 'SYSTEM'] as const).map((section) => (
+          {(['HOME', 'DISCOVER', 'REVENUE', 'INTELLIGENCE', 'ANALYTICS', 'SYSTEM'] as const).map((section) => (
             <div key={section}>
               <div className="nav-section">{section}</div>
               {NAV.filter((n) => n.section === section).map((n) => (
