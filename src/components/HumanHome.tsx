@@ -23,7 +23,6 @@ const effortLabel = (n: number) => (n <= 2 ? 'Low' : n === 3 ? 'Medium' : 'High'
 
 function useLiveState(): DataState {
   const connected = useStore((s) => s.backend.connected);
-  if (!backendConfigured) return 'SAMPLE';
   return connected ? 'LIVE' : 'UNAVAILABLE';
 }
 
@@ -461,7 +460,7 @@ function Header() {
   const attention = q ? q.queue.length : null;
 
   let status: string;
-  if (!backendConfigured) status = '◇ Demo mode — sample data kept in this browser';
+  if (!backendConfigured) status = '⚠ Live backend is not configured — no sample data is shown';
   else if (backend.connected) status = `● Connected to the live backend${backend.lastSyncedAt ? ` · synced ${timeAgo(backend.lastSyncedAt)}` : ''}`;
   else if (backend.error) status = '⚠ Backend unreachable — showing the last data received';
   else status = '… Connecting to the backend';
