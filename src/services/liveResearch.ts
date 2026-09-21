@@ -99,7 +99,7 @@ export async function discoverLive(
     // from the evidence instead of being forced into a predefined service.
     const candidateName = openEnded && analysis?.name?.trim() ? analysis.name.trim() : seedName;
     const discoveredCategory = openEnded && analysis?.category ? analysis.category : category;
-    const name = `\${candidateName} (live research)`;
+    const name = `${candidateName} (live research)`;
 
     if (dedupeAgainst.some((n) => n.toLowerCase().includes(candidateName.toLowerCase()))) {
       sourcesCount += results.length;
