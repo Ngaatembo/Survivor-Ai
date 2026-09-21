@@ -280,7 +280,7 @@ export class AgentEngine {
           `LIVE discovery: ${queriesRun} fresh search(es), ${cacheHits} served from cache, ${budgetExceeded} skipped (budget), ${sourcesCount} sources cited, ${liveOpps.length} new opportunities tagged LIVE${liveLlm?.connected ? ` and analyzed by ${liveLlm.label}` : ' (analysis pending LLM connector)'}.`,
         );
       } else {
-        await hooks.log('DISCOVERY', `Live search: ${cacheHits} cached / ${budgetExceeded} budget-limited, no new models this cycle — continuing from knowledge base.`);
+        await hooks.log('DISCOVERY', `Live search: ${cacheHits} cached / ${budgetExceeded} budget-limited, no new models this cycle — continuing with persisted opportunities only.`);
       }
     }
 
