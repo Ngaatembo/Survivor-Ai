@@ -11,6 +11,7 @@
 import type { ContactChannel, Prospect, ProspectVerification, ResearchSource } from '../types';
 import type { SearchEconomyContext } from './searchEconomy';
 import { runSearch } from './searchEconomy';
+import { uid } from '../lib/format';
 import type { SearchResult } from './providers/types';
 
 const GENERIC = new Set([
@@ -89,7 +90,7 @@ function normalizePhone(value?: string): string {
 
 function sourceFor(result: SearchResult, note: string): ResearchSource {
   return {
-    id: `verify-${Math.random().toString(36).slice(2, 10)}`,
+    id: uid('vsrc'),
     title: result.title.slice(0, 140),
     url: result.url,
     kind: 'web',
@@ -235,12 +236,22 @@ export async function verifyProspect(
     verifiedAt: now,
   };
 
+  const verificationSources = identityResults
+    .slice(0, 8)
+    .map((x) => sourceFor(x.r, 'Identity/contact verification source.'));
+
+  const mergedSources = [
+    ...prospect.sources,
+    ...verificationSources.filter((s) => !prospect.sources.some((existing) => existing.url && existing.url === s.url)),
+  ];
+
   const next: Prospect = {
     ...prospect,
     businessName: verification.verifiedBusinessName ?? prospect.businessName,
     contactChannel: verification.verifiedContactChannel ?? (status === 'CONFLICT' ? 'UNKNOWN' : prospect.contactChannel),
     contactValue: verification.verifiedContactValue,
     verification,
+    sources: mergedSources,
     evidenceNotes: `${prospect.evidenceNotes} Verification: ${verification.notes.join(' ')}`.trim(),
     updatedAt: now,
   };
