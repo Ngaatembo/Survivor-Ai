@@ -6,6 +6,7 @@
 import type {
   Agent,
   AgentEvent,
+  Opportunity,
   Strategy,
   Transaction,
 } from '../types';
