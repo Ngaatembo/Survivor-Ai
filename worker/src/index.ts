@@ -47,6 +47,7 @@ import type { Env } from './env';
 import {
   ecoCashStatus,
   createEcoCashSandboxCharge,
+  lookupEcoCashSandboxTransaction,
   verifyEcoCashWebhook,
 } from './paymentProvider';
 
@@ -264,6 +265,49 @@ export default {
           httpStatus: result.httpStatus,
           provider: responseBody,
           note: 'Sandbox only. No real money was moved by Survivor-AI.',
+        }, { status: result.ok ? 200 : 502 });
+      } catch (e) {
+        return json({ ok: false, error: (e as Error).message }, { status: 500 });
+      }
+    }
+
+
+    if (url.pathname === '/payments/ecocash/sandbox-lookup' && req.method === 'GET') {
+      const secret = req.headers.get('x-trigger-secret');
+      if (!env.TRIGGER_SECRET || secret !== env.TRIGGER_SECRET) {
+        return json({ ok: false, error: 'unauthorized' }, { status: 401 });
+      }
+
+      const endUserId = url.searchParams.get('endUserId')?.trim() ?? '';
+      const clientCorrelator = url.searchParams.get('clientCorrelator')?.trim() ?? '';
+      if (!endUserId || !clientCorrelator) {
+        return json(
+          { ok: false, error: 'endUserId and clientCorrelator are required' },
+          { status: 400 },
+        );
+      }
+
+      try {
+        const config = ecoCashConfig(env);
+        const status = ecoCashStatus(config);
+        if (!status.configured || status.mode !== 'SANDBOX') {
+          return json({ ok: false, error: 'EcoCash sandbox credentials are not configured' }, { status: 503 });
+        }
+
+        const result = await lookupEcoCashSandboxTransaction(
+          config,
+          endUserId,
+          clientCorrelator,
+        );
+
+        return json({
+          ok: result.ok,
+          sandbox: true,
+          endUserId,
+          clientCorrelator,
+          httpStatus: result.httpStatus,
+          provider: result.body,
+          note: 'Lookup only. Survivor-AI does not move money from this endpoint.',
         }, { status: result.ok ? 200 : 502 });
       } catch (e) {
         return json({ ok: false, error: (e as Error).message }, { status: 500 });
