@@ -791,30 +791,10 @@ export const useStore = create<SurviveState>()(
       // Production is live-backend only. Never persist business state in the
       // browser: this prevents old sample/demo records from reappearing after
       // the system has switched to real research data.
-      partialize: () => ({
-
-
-            },
-      onRehydrateStorage: () => (state: any) => {
-        if (featureFlags.backend) {
-          // Nothing meaningful was persisted (see partialize above) — the
-          // first syncFromBackend() call (kicked off below) populates state.
-          return;
-        }
-        if (!state) return;
-        const balance = balanceFrom(state.transactions ?? []);
-        const status =
-          balance <= 0 ? 'DEAD' : balance < (state.agent?.survivalThreshold ?? 5) ? 'AT_RISK' : 'ALIVE';
-        useStore.setState({
-          agent: { ...state.agent, status },
-          loop: {
-            running: false,
-            busy: false,
-            currentStep: null,
-            activeCycleId: null,
-            activity: 'Idle — awaiting research instructions.',
-          },
-        });
+      partialize: () => ({}),
+      onRehydrateStorage: () => () => {
+        // Backend/D1 is the sole source of truth. Do not restore old browser
+        // state, including legacy SAMPLE/demo records.
       },
     },
   ),
