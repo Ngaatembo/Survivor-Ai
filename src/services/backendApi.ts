@@ -115,7 +115,7 @@ export interface EconomicEfficiencySnapshot {
   conversionByCategory: { category: string; discovered: number; won: number; lost: number; conversionRate: number | null }[];
   conversionByAcquisitionChannel: { channel: string; dealCount: number; totalRevenue: number; totalProfit: number; avgDealValue: number }[];
   dealMetrics: { avgDealSize: number | null; avgTimeToPaymentDays: number | null; dealCount: number };
-  moneyMetrics: MoneyMetrics;
+  moneyMetrics?: MoneyMetrics;
   searchROI: {
     searchesPerProspect: number | null;
     searchesPerQualifiedProspect: number | null;
