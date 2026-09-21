@@ -37,6 +37,7 @@ import {
 import { computeSurvivalStatus } from '../../src/engine/seed';
 import { computeMoneyMetrics } from '../../src/lib/moneyMetrics';
 import type { Env } from './env';
+import { ecoCashStatus } from './paymentProvider';
 
 const json = (data: unknown, init?: ResponseInit) =>
   new Response(JSON.stringify(data, null, 2), {
@@ -146,6 +147,17 @@ export default {
     const url = new URL(req.url);
 
     if (req.method === 'OPTIONS') return new Response(null, { status: 204 });
+
+    if (url.pathname === '/payments/status' && req.method === 'GET') {
+      return json({
+        ok: true,
+        payment: ecoCashStatus({
+          baseUrl: env.ECOCASH_BASE_URL,
+          clientId: env.ECOCASH_CLIENT_ID,
+          clientSecret: env.ECOCASH_CLIENT_SECRET,
+        }),
+      });
+    }
 
     if (url.pathname === '/health') {
       const backend = env.DB_BACKEND ?? 'd1';
