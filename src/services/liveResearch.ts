@@ -5,9 +5,8 @@
  *   opportunity attributes + evidence tier  →  LIVE opportunity with cited
  *   research_sources. Finance/high-risk results stay executionBlocked.
  *
- * Every failure degrades gracefully to the SAMPLE knowledge base — the
- * pipeline never produces fake "live" data: if no provider is connected it
- * returns an empty list and the caller tags the run as sample-based.
+ * Every failure degrades gracefully to an empty live result — the production
+ * Worker never repopulates from the legacy SAMPLE knowledge base.
  * ========================================================================== */
 
 import type { Category, DataSource, Opportunity } from '../types';
@@ -33,6 +32,18 @@ export const DISCOVERY_QUERIES: { category: Category; query: string; openEnded?:
   { category: 'Services', openEnded: true, query: 'people and businesses currently paying for profitable low-capital services or solving urgent problems that a solo operator can monetize Zimbabwe Africa online' },
   { category: 'Digital Business', openEnded: true, query: 'unexpected emerging business opportunities with real buyers and current prices low startup capital Africa Zimbabwe online 2026' },
   { category: 'Local / Real-World', openEnded: true, query: 'Zimbabwe businesses consumers communities paying for overlooked products services jobs or intermediaries with low startup cost 2026' },
+
+  // Additional monetization tracks: Survivor should search beyond generic
+  // "make money online" lists and look for actual buyer intent, distribution
+  // channels, and platforms where a small operator can sell a repeatable
+  // capability. These are research-only until evidence + economics pass the
+  // normal verification and scoring gates.
+  { category: 'Services', openEnded: true, query: '2026 remote companies hiring freelancers for AI application development automation web development research operations contract work Africa worldwide' },
+  { category: 'Digital Business', openEnded: true, query: '2026 AI agent marketplaces where developers can publish agents APIs data extraction research tools and get paid per use official platform documentation' },
+  { category: 'Digital Business', openEnded: true, query: '2026 API monetization marketplaces pay per request AI agents data APIs research scraping summarization services official platforms' },
+  { category: 'Services', openEnded: true, query: '2026 businesses paying for lead generation appointment setting website rescue SEO generative engine optimization WhatsApp automation services Africa Zimbabwe' },
+  { category: 'Content', openEnded: true, query: '2026 businesses paying for localized AI content translation Shona Ndebele Zimbabwe African market research digital products online services' },
+  { category: 'E-Commerce', openEnded: true, query: '2026 low capital digital products templates micro SaaS niche tools online services with verified buyers Africa global pricing' },
 ];
 
 const FINANCE_HINTS = ['forex', 'crypto', 'trading', 'betting', 'prediction market', 'day trading', 'cfd'];
