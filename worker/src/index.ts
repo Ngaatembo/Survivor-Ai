@@ -1,4 +1,5 @@
 /* ============================================================================
+import { calculateTreasurySnapshot, authorizeSpend, createConfirmedExpense, DEFAULT_TREASURY_POLICY, type TreasuryPolicy, type SpendRequest } from '../../src/lib/treasury';
  * SURVIVE AI — Cloudflare Worker entry point.
  *
  * Runs the SAME AgentEngine as the browser, against Supabase, on a cron.
@@ -688,6 +689,117 @@ export default {
           referral: typeof referral === 'boolean' ? referral : undefined,
         });
         return json({ ok: true, projectId });
+      } catch (e) {
+        return json({ ok: false, error: (e as Error).message }, { status: 500 });
+      }
+    }
+
+    if (url.pathname === '/treasury' && req.method === 'GET') {
+      try {
+        const { repo } = buildEngine(env);
+        const transactions = await repo.listTransactions();
+        const rawPolicy = await repo.getKV('treasury:policy');
+        const policy: TreasuryPolicy = rawPolicy ? { ...DEFAULT_TREASURY_POLICY, ...JSON.parse(rawPolicy) } : DEFAULT_TREASURY_POLICY;
+        const rawRequests = await repo.getKV('treasury:spend-requests');
+        const requests: SpendRequest[] = rawRequests ? JSON.parse(rawRequests) : [];
+        return json({ ok: true, treasury: calculateTreasurySnapshot(transactions, policy), spendRequests: requests.slice(-100) });
+      } catch (e) {
+        return json({ ok: false, error: (e as Error).message }, { status: 500 });
+      }
+    }
+
+    if (url.pathname === '/treasury/policy' && req.method === 'POST') {
+      let body: any;
+      try { body = await req.json(); } catch { return json({ ok: false, error: 'invalid JSON body' }, { status: 400 }); }
+      try {
+        const { repo } = buildEngine(env);
+        const currentRaw = await repo.getKV('treasury:policy');
+        const current: TreasuryPolicy = currentRaw ? { ...DEFAULT_TREASURY_POLICY, ...JSON.parse(currentRaw) } : DEFAULT_TREASURY_POLICY;
+        const next: TreasuryPolicy = {
+          ...current,
+          ...(typeof body?.protectedReserve === 'number' ? { protectedReserve: Math.max(0, body.protectedReserve) } : {}),
+          ...(typeof body?.autonomousDailyLimit === 'number' ? { autonomousDailyLimit: Math.max(0, body.autonomousDailyLimit) } : {}),
+          ...(typeof body?.autonomousPerTransactionLimit === 'number' ? { autonomousPerTransactionLimit: Math.max(0, body.autonomousPerTransactionLimit) } : {}),
+          ...(typeof body?.approvalPerTransactionLimit === 'number' ? { approvalPerTransactionLimit: Math.max(0, body.approvalPerTransactionLimit) } : {}),
+          ...(Array.isArray(body?.allowedVendors) ? { allowedVendors: body.allowedVendors.filter((v: unknown) => typeof v === 'string') } : {}),
+          ...(Array.isArray(body?.blockedCategories) ? { blockedCategories: body.blockedCategories.filter((v: unknown) => typeof v === 'string') } : {}),
+          realMoneyExecutionEnabled: false,
+          ...(typeof body?.emergencyFrozen === 'boolean' ? { emergencyFrozen: body.emergencyFrozen } : {}),
+        };
+        await repo.setKV('treasury:policy', JSON.stringify(next));
+        return json({ ok: true, policy: next });
+      } catch (e) {
+        return json({ ok: false, error: (e as Error).message }, { status: 500 });
+      }
+    }
+
+    if (url.pathname === '/treasury/spend-request' && req.method === 'POST') {
+      let body: any;
+      try { body = await req.json(); } catch { return json({ ok: false, error: 'invalid JSON body' }, { status: 400 }); }
+      if (typeof body?.vendor !== 'string' || typeof body?.purpose !== 'string' || typeof body?.category !== 'string' || typeof body?.amount !== 'number') {
+        return json({ ok: false, error: 'vendor, purpose, category and numeric amount are required' }, { status: 400 });
+      }
+      try {
+        const { repo } = buildEngine(env);
+        const transactions = await repo.listTransactions();
+        const rawPolicy = await repo.getKV('treasury:policy');
+        const policy: TreasuryPolicy = rawPolicy ? { ...DEFAULT_TREASURY_POLICY, ...JSON.parse(rawPolicy) } : DEFAULT_TREASURY_POLICY;
+        const snapshot = calculateTreasurySnapshot(transactions, policy);
+        const request: SpendRequest = {
+          id: `spend_${crypto.randomUUID()}`,
+          vendor: body.vendor.trim(),
+          amount: body.amount,
+          purpose: body.purpose.trim(),
+          category: body.category.trim(),
+          opportunityId: typeof body.opportunityId === 'string' ? body.opportunityId : undefined,
+          expectedRevenue: typeof body.expectedRevenue === 'number' ? body.expectedRevenue : undefined,
+          maxLoss: typeof body.maxLoss === 'number' ? body.maxLoss : undefined,
+          evidence: typeof body.evidence === 'string' ? body.evidence : undefined,
+          decision: authorizeSpend({ vendor: body.vendor, amount: body.amount, category: body.category }, snapshot),
+          status: 'PENDING',
+          createdAt: Date.now(),
+        };
+        if (request.decision === 'BLOCKED') request.status = 'REJECTED';
+        const raw = await repo.getKV('treasury:spend-requests');
+        const requests: SpendRequest[] = raw ? JSON.parse(raw) : [];
+        requests.push(request);
+        await repo.setKV('treasury:spend-requests', JSON.stringify(requests.slice(-500)));
+        await repo.appendEvent({
+          id: `evt_${crypto.randomUUID()}`,
+          type: 'WALLET',
+          message: `Treasury spend request ${request.id}: ${request.decision} — ${request.amount.toFixed(2)} to ${request.vendor}`,
+          createdAt: Date.now(),
+        });
+        return json({ ok: true, request, treasury: snapshot });
+      } catch (e) {
+        return json({ ok: false, error: (e as Error).message }, { status: 500 });
+      }
+    }
+
+    if (url.pathname === '/treasury/record-confirmed-expense' && req.method === 'POST') {
+      let body: any;
+      try { body = await req.json(); } catch { return json({ ok: false, error: 'invalid JSON body' }, { status: 400 }); }
+      if (typeof body?.requestId !== 'string') return json({ ok: false, error: 'requestId is required' }, { status: 400 });
+      try {
+        const { repo } = buildEngine(env);
+        const raw = await repo.getKV('treasury:spend-requests');
+        const requests: SpendRequest[] = raw ? JSON.parse(raw) : [];
+        const request = requests.find((r) => r.id === body.requestId);
+        if (!request) return json({ ok: false, error: 'spend request not found' }, { status: 404 });
+        if (request.decision === 'BLOCKED' || request.status === 'REJECTED') return json({ ok: false, error: 'blocked/rejected spend cannot be recorded' }, { status: 403 });
+        request.status = 'APPROVED';
+        request.reviewedAt = Date.now();
+        const tx = createConfirmedExpense(request, await repo.listTransactions());
+        await repo.appendTransaction(tx);
+        request.status = 'RECORDED';
+        await repo.setKV('treasury:spend-requests', JSON.stringify(requests));
+        await repo.appendEvent({
+          id: `evt_${crypto.randomUUID()}`,
+          type: 'WALLET',
+          message: `Confirmed expense recorded for ${request.vendor}: ${request.amount.toFixed(2)}. No payment was initiated by Survivor.`,
+          createdAt: Date.now(),
+        });
+        return json({ ok: true, transaction: tx, treasury: calculateTreasurySnapshot(await repo.listTransactions()) });
       } catch (e) {
         return json({ ok: false, error: (e as Error).message }, { status: 500 });
       }
