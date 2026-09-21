@@ -341,6 +341,7 @@ CREATE TABLE prospects (
   contact_channel              TEXT NOT NULL DEFAULT 'UNKNOWN'
                                 CHECK (contact_channel IN ('PHONE','WHATSAPP','EMAIL','FACEBOOK','INSTAGRAM','WEBSITE_FORM','UNKNOWN')),
   contact_value               TEXT,
+  verification                TEXT NOT NULL DEFAULT '{}', -- JSON ProspectVerification
   evidence_notes               TEXT NOT NULL DEFAULT '',
   priority                    TEXT NOT NULL DEFAULT 'LOW'
                                 CHECK (priority IN ('HIGH','MEDIUM','LOW','DO_NOT_CONTACT')),
