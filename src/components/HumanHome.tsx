@@ -422,10 +422,10 @@ function BusinessPulse() {
           <Pulse label="Prospects" value={prospects.length} />
           <Pulse label="Qualified" value={qualified} />
           <Pulse label="Offers" value={offers.length} sub={`${sent} sent`} />
-          <Pulse label="Contacted" value={ee?.moneyMetrics.contacted ?? '—'} />
+          <Pulse label="Contacted" value={ee?.moneyMetrics?.contacted ?? '—'} />
           <Pulse
             label="Response rate"
-            value={ee?.moneyMetrics.responseRate === null || ee?.moneyMetrics.responseRate === undefined ? '—' : `${Math.round(ee.moneyMetrics.responseRate * 100)}%`}
+            value={ee?.moneyMetrics?.responseRate === null || ee?.moneyMetrics?.responseRate === undefined ? '—' : `${Math.round(ee.moneyMetrics.responseRate * 100)}%`}
             sub="recorded responses / contacted"
           />
           <Pulse label="Customer revenue" value={paid === undefined ? '—' : usdWhole(paid)} sub="recorded payments only" />
