@@ -1,7 +1,6 @@
-# SURVIVE AI — Deployment guide (Supabase + Cloudflare Workers)
+# SURVIVE AI — Production deployment guide (D1 + Cloudflare Workers)
 
-This takes the prototype from *runs in your browser on seeded data* to *runs 24/7
-on a cron with live web research*, without rebuilding anything.
+This deploys the production path as a 24/7 Cloudflare Worker using D1, live web research, and the shared AgentEngine. SAMPLE records remain development/test fixtures and are never a production fallback.
 
 Architecture after deployment:
 
@@ -20,14 +19,17 @@ Architecture after deployment:
 
 ---
 
-## 1. Supabase (database)
+## 1. Cloudflare D1 (production database)
 
-1. Create a project at https://supabase.com.
-2. SQL Editor → paste and run **`supabase/schema.sql`**.
-3. Settings → API: copy **Project URL** and two keys:
-   - `anon` / `public` key — safe for the browser.
-   - `service_role` key — **server secret only** (the Worker uses this).
-4. Seed the sample knowledge base (optional but recommended):
+The production Worker is configured with the D1 database `survivor-ai` in `worker/wrangler.toml`.
+
+Apply schema/migrations deliberately with Wrangler against the **remote** D1 database. Do not assume a GitHub push applies migrations automatically.
+
+The Worker auto-initializes the production agent row on first cycle when the required tables exist. Starting simulated capital is $50 and `real_money_enabled` remains disabled.
+
+Supabase support is retained only as a legacy repository implementation; it is not the production default.
+
+Seed the development/sample knowledge base (optional; never required for production):
 
    ```bash
    cp .env.example .env
@@ -36,13 +38,13 @@ Architecture after deployment:
    npm run seed:supabase
    ```
 
-   The Worker also auto-seeds on its first run if empty (`engine.ensureSeeded()`).
+   The Worker auto-initializes production agent state on its first run if empty (`engine.ensureSeeded()`); it does not populate the legacy SAMPLE opportunity set.
 
 ## 2. API keys (live research)
 
 - **Search:** Tavily (https://tavily.com) or Brave Search API (https://brave.com/search/api/). Free tiers cover a discovery pass per cycle.
 - **LLM:** Anthropic Claude (https://console.anthropic.com) or OpenAI (https://platform.openai.com). The engine calls cheap models (`claude-haiku` / `gpt-4o-mini`).
-- No keys → the engine still runs on the SAMPLE knowledge base and rule engine; connectors read **NOT CONNECTED** honestly.
+- No search/LLM keys → live discovery yields no new LIVE opportunities. The production Worker does **not** silently substitute SAMPLE records.
 
 ## 3. Cloudflare Worker (24/7 scheduler)
 
@@ -73,7 +75,7 @@ curl https://survive-ai.<your-subdomain>.workers.dev/status
 ```
 
 The cron (`*/30 * * * *` in `worker/wrangler.toml`) runs one full loop every
-30 minutes: RESEARCH → DISCOVER (live search) → VERIFY → SCORE → RANK →
+30 minutes (Cloudflare Cron schedules are UTC): RESEARCH → DISCOVER (live search) → VERIFY → SCORE → RANK →
 SELECT → SIMULATE → MEASURE → LEARN. Finance models stay execution-blocked.
 
 ### Local worker development
@@ -138,10 +140,8 @@ git push -u origin main
 
 ## Safety reminders
 
-- All money remains **simulated**. The Worker has no payment connector.
-- `real_money_enabled` and `daily_spend_limit` on the `agents` table default to
-  off / zero. Future real-money actions must pass the (commented)
-  `real_money_approvals` table: explicit human approval, limit, and audit log.
+- Economic experiments remain simulated. EcoCash sandbox confirmations are test events only and are never counted as real revenue; real-world revenue is recorded separately by a human after an actual payment.
+- `real_money_enabled` and `daily_spend_limit` on the `agents` table remain off / zero. Treasury v1 is an authorization/accounting layer only; it does not send money.
 - Service-role key and API keys live **only** in Worker secrets / `.env` —
   never in the browser and never committed (`.gitignore` covers `.env` and
   `worker/.dev.vars`).
