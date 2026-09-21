@@ -47,7 +47,8 @@ export function rankRevenueProspects(
     .filter((p) =>
       (p.status === 'DISCOVERED' || p.status === 'QUALIFIED') &&
       p.priority !== 'DO_NOT_CONTACT' &&
-      Boolean(p.businessName.trim()),
+      Boolean(p.businessName.trim()) &&
+      p.verification?.status === 'VERIFIED',
     )
     .map((prospect) => {
       const lead = Math.max(0, Math.min(100, prospect.score.total));
@@ -56,11 +57,17 @@ export function rankRevenueProspects(
       const contact = CONTACT_WEIGHT[prospect.contactChannel] + (prospect.contactValue ? 4 : 0);
       const evidence = Math.min(12, prospect.sources.length * 2) + (prospect.evidenceNotes.trim().length >= 80 ? 3 : 0);
       const webGap = WEBSITE_SIGNAL[prospect.websitePresence];
+      const verification = prospect.verification;
+      const verificationSignal =
+        verification?.status === 'VERIFIED' ? 12 :
+        verification?.status === 'PROVISIONAL' ? 3 :
+        verification?.status === 'CONFLICT' ? -25 :
+        -10;
       const recencyDays = Math.max(0, (Date.now() - prospect.dateDiscovered) / 86_400_000);
       const recency = recencyDays <= 3 ? 5 : recencyDays <= 14 ? 3 : 1;
       const priority = PRIORITY_WEIGHT[prospect.priority];
 
-      const score = lead * 0.5 + evSignal + priority + contact * 0.65 + evidence * 0.7 + webGap * 0.6 + recency;
+      const score = lead * 0.5 + evSignal + priority + contact * 0.65 + evidence * 0.7 + webGap * 0.6 + verificationSignal + recency;
       const reasons: string[] = [];
       if (prospect.score.total >= 70) reasons.push(`lead score ${prospect.score.total}/100`);
       else if (prospect.score.total >= 60) reasons.push(`lead score ${prospect.score.total}/100`);
@@ -70,6 +77,7 @@ export function rankRevenueProspects(
       if (prospect.websitePresence === 'NONE_FOUND' || prospect.websitePresence === 'WEAK_OR_OUTDATED' || prospect.websitePresence === 'SOCIAL_ONLY') {
         reasons.push('clearer digital-service gap signal');
       }
+      reasons.push('business + contact independently verified');
       return { prospect, score, reasons: reasons.slice(0, 4) };
     })
     .sort((a, b) => b.score - a.score || b.prospect.score.expectedValue - a.prospect.score.expectedValue || b.prospect.score.total - a.prospect.score.total);
