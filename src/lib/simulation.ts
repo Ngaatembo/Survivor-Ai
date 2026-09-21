@@ -29,7 +29,7 @@ export interface SimulationResult {
 const rand = (min: number, max: number) => min + Math.random() * (max - min);
 const round2 = (n: number) => Math.round(n * 100) / 100;
 
-export function simulateExperiment({ opportunity: o, budget, memory }: SimulationInput): SimulationResult {
+export function simulateExperiment({ opportunity: o, budget, memory, marketPrice }: SimulationInput): SimulationResult {
   const actualCost = round2(budget);
 
   // --- Adjust base success probability -------------------------------------
