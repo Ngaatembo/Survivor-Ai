@@ -13,15 +13,18 @@
 
 import type { MarketPriceResearch, Opportunity, ResearchSource } from '../types';
 import { uid } from '../lib/format';
-import type { LLMProvider, SearchProvider } from './providers/types';
+import type { LLMProvider } from './providers/types';
+import { runSearch, type SearchEconomyContext } from './searchEconomy';
 
 const MAX_SNIPPETS = 8;
 
 async function gatherPricingSnippets(
-  search: SearchProvider,
+  ctx: SearchEconomyContext,
   service: string,
   region: string,
-): Promise<{ snippets: string[]; sources: ResearchSource[] }> {
+  opportunityId: string,
+  offerPending: boolean,
+): Promise<{ snippets: string[]; sources: ResearchSource[]; cacheHits: number; budgetExceeded: number }> {
   const queries = [
     `${service} price cost ${region}`,
     `how much does ${service} cost ${region} freelancer quote`,
@@ -30,16 +33,24 @@ async function gatherPricingSnippets(
 
   const sources: ResearchSource[] = [];
   const snippets: string[] = [];
+  let cacheHits = 0;
+  let budgetExceeded = 0;
 
   for (const q of queries) {
     if (snippets.length >= MAX_SNIPPETS) break;
-    let results: Awaited<ReturnType<SearchProvider['search']>>;
-    try {
-      results = await search.search(q, 4);
-    } catch {
-      results = [];
+    const searchOutcome = await runSearch(ctx, {
+      purpose: 'MARKET_PRICING',
+      query: q,
+      entityId: opportunityId,
+      offerPending,
+      max: 4,
+    });
+    if (searchOutcome.budgetExceeded) {
+      budgetExceeded += 1;
+      continue;
     }
-    for (const r of results) {
+    if (searchOutcome.cacheHit) cacheHits += 1;
+    for (const r of searchOutcome.results) {
       if (snippets.length >= MAX_SNIPPETS) break;
       snippets.push(`${r.title} — ${r.snippet}`);
       sources.push({
@@ -52,7 +63,7 @@ async function gatherPricingSnippets(
     }
   }
 
-  return { snippets, sources };
+  return { snippets, sources, cacheHits, budgetExceeded };
 }
 
 /** Fallback used when no LLM is connected, or the LLM call fails/returns
@@ -92,14 +103,15 @@ function digestFromSnippets(
  *  real snippet evidence; otherwise falls back to the honest digest
  *  above, which explicitly returns a $0 range rather than guessing. */
 export async function researchMarketPrice(
-  search: SearchProvider,
+  ctx: SearchEconomyContext,
   llm: LLMProvider | null,
   opp: Opportunity,
   now: number = Date.now(),
+  opts: { offerPending?: boolean } = {},
 ): Promise<MarketPriceResearch> {
   const service = opp.howMoneyMade || opp.name;
   const region = opp.geographicRelevance[0] ?? 'Zimbabwe';
-  const { snippets, sources } = await gatherPricingSnippets(search, service, region);
+  const { snippets, sources } = await gatherPricingSnippets(ctx, service, region, opp.id, opts.offerPending ?? true);
 
   let body:
     | Omit<MarketPriceResearch, 'id' | 'opportunityId' | 'sources' | 'generatedAt' | 'updatedAt'>

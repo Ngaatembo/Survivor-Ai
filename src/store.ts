@@ -45,12 +45,13 @@ import { recordResult, lessonFromExperiment } from './services/memory';
 import { decide, strategyFromMemory } from './services/ai';
 import { AgentEngine } from './engine/agentEngine';
 import { createStoreRepository } from './engine/storeRepository';
-import { createSeedSnapshot } from './engine/seed';
+import { createSeedSnapshot, computeSurvivalStatus } from './engine/seed';
 import { createLLMProvider } from './services/providers/llm';
-import { createSearchProvider } from './services/providers/search';
+import { createSearchProviders } from './services/providers/search';
 import { env, featureFlags } from './config/env';
 import { computeProfit, generateLearningEvent, foldRealRevenueIntoMemory, computeCategoryRealWorldStats, statsForCategory } from './lib/realRevenue';
 import { researchProspect } from './services/prospectIntelligence';
+import { loadEconomyState, saveEconomyState } from './services/searchEconomy';
 import { generateProspectDemo } from './lib/demoGenerator';
 import {
   fetchBackendState,
@@ -64,6 +65,7 @@ import {
   researchProspectNow as apiResearchProspectNow,
   regenerateProspectDemo as apiRegenerateProspectDemo,
   demoUrl as apiDemoUrl,
+  type EconomicEfficiencySnapshot,
 } from './services/backendApi';
 
 const delay = (ms: number) => new Promise((r) => setTimeout(r, ms));
@@ -101,6 +103,11 @@ function seedInitialState() {
     prospectDemos: [] as Omit<ProspectDemo, 'html'>[],
     marketPriceResearch: [] as MarketPriceResearch[],
     missions: [] as Mission[],
+    // Economic Survival Overhaul — only ever populated from the backend's
+    // /state (server-computed); the local browser demo does not attempt to
+    // recompute it, so it stays null there (the EconomicEfficiency panel
+    // renders an honest "backend-only" note in that mode).
+    economicEfficiency: null as EconomicEfficiencySnapshot | null,
   };
 }
 
@@ -148,6 +155,7 @@ interface SurviveState {
   prospectDemos: Omit<ProspectDemo, 'html'>[];
   marketPriceResearch: MarketPriceResearch[];
   missions: Mission[];
+  economicEfficiency: EconomicEfficiencySnapshot | null;
   loop: LoopState;
   backend: BackendSyncState;
 
@@ -225,7 +233,7 @@ export const useStore = create<SurviveState>()(
     (set, get) => {
       /* -------- engine wiring: providers from env (absent → rule engine) ------ */
       const llm = createLLMProvider({ anthropic: env.anthropicKey, openai: env.openaiKey });
-      const search = createSearchProvider({ tavily: env.tavilyKey, brave: env.braveKey });
+      const { tavily, brave } = createSearchProviders({ tavily: env.tavilyKey, brave: env.braveKey });
 
       const repo = createStoreRepository(
         () => get() as any,
@@ -235,7 +243,7 @@ export const useStore = create<SurviveState>()(
 
       const engine = new AgentEngine(
         repo,
-        { llm, search },
+        { llm, tavily, brave },
         {
           // Note: engine events are already persisted through StoreRepository
           // (appendEvent writes to store.events), so onLog is intentionally a
@@ -308,6 +316,7 @@ export const useStore = create<SurviveState>()(
               prospectDemos: state.prospectDemos,
               marketPriceResearch: state.marketPriceResearch,
               missions: state.missions,
+              economicEfficiency: state.economicEfficiency ?? null,
               backend: {
                 connected: true,
                 syncing: false,
@@ -476,7 +485,7 @@ export const useStore = create<SurviveState>()(
             }
             return;
           }
-          if (!search?.connected) {
+          if (!tavily?.connected && !brave?.connected) {
             get().logEvent('WARNING', 'Failed to research prospect: no live search provider connected.');
             return;
           }
@@ -486,7 +495,18 @@ export const useStore = create<SurviveState>()(
             get().logEvent('WARNING', `Failed to research prospect: no prospect found with id ${prospectId}.`);
             return;
           }
-          const intel = await researchProspect(search, llm, prospect);
+          const now = Date.now();
+          const balance = balanceFrom(await repo.listTransactions());
+          const economyState = await loadEconomyState(repo);
+          const ctx = {
+            state: economyState,
+            providers: { tavily, brave },
+            survivalStatus: computeSurvivalStatus(balance),
+            now,
+            cycleStartedAt: now,
+          };
+          const intel = await researchProspect(ctx, llm, prospect, now, { statusChanged: true });
+          await saveEconomyState(repo, ctx.state);
           await repo.upsertProspectIntelligence(intel);
           set({ prospectIntelligence: await repo.listProspectIntelligence() } as any);
         },

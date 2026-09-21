@@ -84,6 +84,57 @@ export interface BackendState {
   prospectDemos: Omit<ProspectDemo, 'html'>[];
   marketPriceResearch: MarketPriceResearch[];
   missions: Mission[];
+  // Economic Survival Overhaul (Phases 6/14/15) — search-cost economics,
+  // the revenue funnel and search ROI, computed server-side from the same
+  // data above. Optional so an older/un-upgraded worker deployment (before
+  // this field existed) still round-trips without a hard type error.
+  economicEfficiency?: EconomicEfficiencySnapshot;
+}
+
+export interface EconomicEfficiencySnapshot {
+  searchEconomy: {
+    searchesToday: number;
+    searchesThisMonth: number;
+    cacheHitsToday: number;
+    cacheMissesToday: number;
+    cacheHitRateToday: number;
+    byPurposeToday: Record<string, number>;
+    byProviderToday: Record<string, number>;
+    budgetRemainingToday: Record<string, number>;
+    budgetRemainingThisMonth: Record<string, number>;
+  };
+  revenueFunnel: {
+    stages: { stage: string; count: number; conversionFromPrevious: number | null }[];
+    totalProspects: number;
+    droppedCount: number;
+    overallConversionRate: number | null;
+    paidCount: number;
+    paidRevenueTotal: number;
+  };
+  conversionByCategory: { category: string; discovered: number; won: number; lost: number; conversionRate: number | null }[];
+  conversionByAcquisitionChannel: { channel: string; dealCount: number; totalRevenue: number; totalProfit: number; avgDealValue: number }[];
+  dealMetrics: { avgDealSize: number | null; avgTimeToPaymentDays: number | null; dealCount: number };
+  searchROI: {
+    searchesPerProspect: number | null;
+    searchesPerQualifiedProspect: number | null;
+    searchesPerProposal: number | null;
+    searchesPerWin: number | null;
+    prospectsPer100Searches: number;
+    qualifiedPer100Searches: number;
+    proposalsPer100Searches: number;
+    revenuePer100Searches: number;
+    searchROI: number;
+    basis: 'REAL_REVENUE' | 'EXPECTED_VALUE' | 'NO_DATA';
+  };
+  humanActionQueue: {
+    topAction: RecommendedAction | null;
+    queue: RecommendedAction[];
+    offersAwaitingSend: number;
+    followUpsDue: number;
+    prospectsNeedingStatusUpdate: number;
+    wonWithoutRecordedPayment: number;
+  };
+  survivalStatus: 'ALIVE' | 'AT_RISK' | 'CRITICAL' | 'DEAD';
 }
 
 export class BackendError extends Error {

@@ -20,7 +20,7 @@ import type { BusinessModel, ContactChannel, Opportunity, Prospect, ResearchSour
 import { uid } from '../lib/format';
 import { scoreProspect, priorityFromScore } from '../lib/prospectScoring';
 import type { CategoryRealWorldStats } from '../lib/realRevenue';
-import type { SearchProvider } from './providers/types';
+import { runSearch, type SearchEconomyContext } from './searchEconomy';
 
 /** Rotated across cycles (by day) rather than all searched every cycle, to
  *  keep the query budget bounded alongside opportunity discovery's own
@@ -113,27 +113,40 @@ function rotatedSeeds(now: number): typeof CATEGORY_SEEDS {
 }
 
 export async function discoverProspects(
-  search: SearchProvider,
+  ctx: SearchEconomyContext,
   opportunity: Opportunity,
   businessModel: BusinessModel | undefined,
   existingBusinessNames: string[],
   categoryStats?: CategoryRealWorldStats,
   now: number = Date.now(),
-): Promise<{ prospects: Prospect[]; queriesRun: number; sourcesCount: number }> {
+): Promise<{ prospects: Prospect[]; queriesRun: number; sourcesCount: number; cacheHits: number; budgetExceeded: number }> {
   const region = opportunity.geographicRelevance[0] ?? 'Zimbabwe';
   const seeds = rotatedSeeds(now);
   const found: Prospect[] = [];
   let queriesRun = 0;
   let sourcesCount = 0;
+  let cacheHits = 0;
+  let budgetExceeded = 0;
 
   for (const seed of seeds) {
     if (found.length >= MAX_NEW_PROSPECTS_PER_CYCLE) break;
-    let results: Awaited<ReturnType<SearchProvider['search']>>;
-    try {
-      results = await search.search(`${seed.terms} small business in ${region} contact`, MAX_RESULTS_PER_QUERY);
-    } catch {
-      results = [];
+    // entityId scopes the cache/budget per (opportunity, seed) pair — the
+    // same local-business seed for the same opportunity is not re-searched
+    // within its TTL, but different opportunities/seeds are tracked
+    // independently.
+    const entityId = `${opportunity.id}::${seed.label}`;
+    const searchOutcome = await runSearch(ctx, {
+      purpose: 'PROSPECT_DISCOVERY',
+      query: `${seed.terms} small business in ${region} contact`,
+      entityId,
+      max: MAX_RESULTS_PER_QUERY,
+    });
+    if (searchOutcome.budgetExceeded) {
+      budgetExceeded += 1;
+      continue;
     }
+    if (searchOutcome.cacheHit) cacheHits += 1;
+    const results = searchOutcome.results;
     queriesRun += 1;
     if (results.length === 0) continue;
 
@@ -179,7 +192,7 @@ export async function discoverProspects(
           title: r.title.slice(0, 140),
           url: r.url,
           kind: 'web',
-          note: `Found via live search (${seed.label}) — ${search.label}${r.publishedAt ? ` · ${r.publishedAt}` : ''}`,
+          note: `Found via live search (${seed.label}) — ${searchOutcome.providerUsed}${r.publishedAt ? ` · ${r.publishedAt}` : ''}`,
         },
       ];
 
@@ -227,5 +240,5 @@ export async function discoverProspects(
     }
   }
 
-  return { prospects: found, queriesRun, sourcesCount };
+  return { prospects: found, queriesRun, sourcesCount, cacheHits, budgetExceeded };
 }

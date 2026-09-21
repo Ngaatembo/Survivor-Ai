@@ -22,8 +22,18 @@ import { computeProfit, generateLearningEvent, foldRealRevenueIntoMemory, comput
 import { researchProspect } from '../../src/services/prospectIntelligence';
 import { generateProspectDemo } from '../../src/lib/demoGenerator';
 import { createLLMProvider } from '../../src/services/providers/llm';
-import { createSearchProvider } from '../../src/services/providers/search';
+import { createSearchProviders } from '../../src/services/providers/search';
 import { balanceFrom } from '../../src/services/wallet';
+import { loadEconomyState, saveEconomyState, getEconomySummary, computeSearchROI } from '../../src/services/searchEconomy';
+import {
+  computeRevenueFunnel,
+  conversionByCategory,
+  conversionByAcquisitionChannel,
+  computeDealMetrics,
+  openPipelineExpectedValue,
+  offersAwaitingSend,
+} from '../../src/lib/revenueFunnel';
+import { computeSurvivalStatus } from '../../src/engine/seed';
 import type { Env } from './env';
 
 const json = (data: unknown, init?: ResponseInit) =>
@@ -41,6 +51,9 @@ const json = (data: unknown, init?: ResponseInit) =>
 function buildEngine(env: Env): {
   engine: AgentEngine;
   repo: EngineRepository;
+  tavily: import('../../src/services/providers/types').SearchProvider | null;
+  brave: import('../../src/services/providers/types').SearchProvider | null;
+  llm: import('../../src/services/providers/types').LLMProvider | null;
   connections: Record<string, boolean>;
 } {
   const backend = env.DB_BACKEND ?? 'd1';
@@ -67,20 +80,23 @@ function buildEngine(env: Env): {
     anthropic: env.ANTHROPIC_API_KEY,
     openai: env.OPENAI_API_KEY,
   });
-  const search = createSearchProvider({
+  const { tavily, brave } = createSearchProviders({
     tavily: env.TAVILY_API_KEY,
     brave: env.BRAVE_API_KEY,
   });
 
-  const engine = new AgentEngine(repo, { llm, search }, {});
+  const engine = new AgentEngine(repo, { llm, tavily, brave }, {});
 
   return {
     engine,
     repo,
+    tavily,
+    brave,
+    llm,
     connections: {
       [backend]: dbConnected,
       llm: Boolean(llm?.connected),
-      search: Boolean(search?.connected),
+      search: Boolean(tavily?.connected || brave?.connected),
     },
   };
 }
@@ -238,10 +254,53 @@ export default {
           repo.listMarketPriceResearch(),
           repo.listMissions(),
         ]);
+
+        // Economic Survival Overhaul (Phases 6/14/15) — search-cost
+        // economics, revenue funnel and search ROI, computed fresh from the
+        // same data above rather than a separately-drifting cache.
+        const balance = balanceFrom(transactions);
+        const survivalStatus = computeSurvivalStatus(balance);
+        const economyState = await loadEconomyState(repo);
+        const searchEconomy = getEconomySummary(economyState, survivalStatus);
+        const funnel = computeRevenueFunnel(prospects, realRevenue);
+        const dealMetrics = computeDealMetrics(realRevenue);
+        const searchROI = computeSearchROI({
+          totalFreshSearches: searchEconomy.searchesToday, // today's window — see docs for why "today" is the ROI denominator
+          prospectsGenerated: prospects.length,
+          qualifiedProspects: prospects.filter((p) => p.status !== 'DISCOVERED').length,
+          repliesRecorded: prospects.filter((p) => ['REPLIED', 'INTERESTED', 'PROPOSAL_SENT', 'NEGOTIATING', 'WON'].includes(p.status)).length,
+          proposalsSent: offers.filter((o) => o.status !== 'DRAFT').length,
+          wins: prospects.filter((p) => p.status === 'WON').length,
+          realRevenueTotal: dealMetrics.avgDealSize !== null ? realRevenue.reduce((s, r) => s + r.amountReceived, 0) : 0,
+          expectedValueOfOpenPipeline: openPipelineExpectedValue(prospects),
+        });
+        const humanActionQueue = {
+          topAction: actions[0] ?? null,
+          queue: actions,
+          offersAwaitingSend: offersAwaitingSend(offers),
+          followUpsDue: prospects.filter((p) => p.nextFollowUpAt && p.nextFollowUpAt <= Date.now()).length,
+          prospectsNeedingStatusUpdate: prospects.filter(
+            (p) => p.status === 'CONTACTED' && p.lastContactAt && Date.now() - p.lastContactAt > 3 * 24 * 60 * 60 * 1000,
+          ).length,
+          wonWithoutRecordedPayment: prospects.filter(
+            (p) => p.status === 'WON' && !realRevenue.some((r) => r.prospectId === p.id),
+          ).length,
+        };
+
         return json({
           ok: true,
           fetchedAt: new Date().toISOString(),
           agent,
+          economicEfficiency: {
+            searchEconomy,
+            revenueFunnel: funnel,
+            conversionByCategory: conversionByCategory(prospects, opportunities),
+            conversionByAcquisitionChannel: conversionByAcquisitionChannel(realRevenue),
+            dealMetrics,
+            searchROI,
+            humanActionQueue,
+            survivalStatus,
+          },
           opportunities,
           experiments,
           transactions,
@@ -350,17 +409,29 @@ export default {
         return json({ ok: false, error: 'prospectId is required' }, { status: 400 });
       }
       try {
-        const { repo } = buildEngine(env);
-        const search = createSearchProvider({ tavily: env.TAVILY_API_KEY, brave: env.BRAVE_API_KEY });
-        if (!search?.connected) {
+        const { repo, tavily, brave, llm } = buildEngine(env);
+        if (!tavily?.connected && !brave?.connected) {
           return json({ ok: false, error: 'no live search provider connected — nothing real to research' }, { status: 503 });
         }
-        const llm = createLLMProvider({ anthropic: env.ANTHROPIC_API_KEY, openai: env.OPENAI_API_KEY });
         const prospects = await repo.listProspects();
         const prospect = prospects.find((p) => p.id === prospectId);
         if (!prospect) return json({ ok: false, error: `no prospect found with id ${prospectId}` }, { status: 404 });
 
-        const intel = await researchProspect(search, llm, prospect);
+        // A human explicitly asked for this — treat it like a status change
+        // (justified refresh) so it isn't silently deferred by the
+        // LOW_VALUE_DEFERRED gate that protects the automatic cycle.
+        const now = Date.now();
+        const balance = balanceFrom(await repo.listTransactions());
+        const state = await loadEconomyState(repo);
+        const ctx = {
+          state,
+          providers: { tavily, brave },
+          survivalStatus: computeSurvivalStatus(balance),
+          now,
+          cycleStartedAt: now,
+        };
+        const intel = await researchProspect(ctx, llm, prospect, now, { statusChanged: true });
+        await saveEconomyState(repo, ctx.state);
         await repo.upsertProspectIntelligence(intel);
         await repo.appendProspectInteraction({
           id: `pint_${crypto.randomUUID()}`,

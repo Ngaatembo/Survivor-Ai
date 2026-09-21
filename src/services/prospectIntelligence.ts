@@ -16,14 +16,17 @@
 
 import type { Prospect, ProspectIntelligence, ResearchSource } from '../types';
 import { uid } from '../lib/format';
-import type { LLMProvider, SearchProvider } from './providers/types';
+import type { LLMProvider } from './providers/types';
+import { runSearch, type SearchEconomyContext } from './searchEconomy';
 
 const MAX_SNIPPETS = 8;
 
 async function gatherSnippets(
-  search: SearchProvider,
+  ctx: SearchEconomyContext,
   prospect: Prospect,
-): Promise<{ snippets: string[]; sources: ResearchSource[] }> {
+  statusChanged: boolean,
+  offerPending: boolean,
+): Promise<{ snippets: string[]; sources: ResearchSource[]; cacheHits: number; budgetExceeded: number }> {
   const queries = [
     `"${prospect.businessName}" ${prospect.location}`,
     `"${prospect.businessName}" reviews OR services`,
@@ -32,15 +35,26 @@ async function gatherSnippets(
 
   const sources: ResearchSource[] = [];
   const snippets: string[] = [];
+  let cacheHits = 0;
+  let budgetExceeded = 0;
 
   for (const q of queries) {
     if (snippets.length >= MAX_SNIPPETS) break;
-    let results: Awaited<ReturnType<SearchProvider['search']>>;
-    try {
-      results = await search.search(q, 4);
-    } catch {
-      results = [];
+    const searchOutcome = await runSearch(ctx, {
+      purpose: 'PROSPECT_INTELLIGENCE',
+      query: q,
+      entityId: prospect.id,
+      priority: prospect.priority === 'HIGH' || prospect.priority === 'MEDIUM' ? prospect.priority : 'LOW',
+      statusChanged,
+      offerPending,
+      max: 4,
+    });
+    if (searchOutcome.budgetExceeded) {
+      budgetExceeded += 1;
+      continue;
     }
+    if (searchOutcome.cacheHit) cacheHits += 1;
+    const results = searchOutcome.results;
     for (const r of results) {
       if (snippets.length >= MAX_SNIPPETS) break;
       // Same reasoning as prospectDiscovery.ts: a Facebook GROUP is a
@@ -60,7 +74,7 @@ async function gatherSnippets(
     }
   }
 
-  return { snippets, sources };
+  return { snippets, sources, cacheHits, budgetExceeded };
 }
 
 /** Fallback used when no LLM is connected, or the LLM call fails/returns
@@ -99,12 +113,13 @@ function digestFromSnippets(prospect: Prospect, snippets: string[]): Omit<
  *  returns usable JSON; otherwise (or on any failure) falls back to the
  *  plain snippet digest above. */
 export async function researchProspect(
-  search: SearchProvider,
+  ctx: SearchEconomyContext,
   llm: LLMProvider | null,
   prospect: Prospect,
   now: number = Date.now(),
+  opts: { statusChanged?: boolean; offerPending?: boolean } = {},
 ): Promise<ProspectIntelligence> {
-  const { snippets, sources } = await gatherSnippets(search, prospect);
+  const { snippets, sources } = await gatherSnippets(ctx, prospect, opts.statusChanged ?? false, opts.offerPending ?? false);
 
   let body: Omit<ProspectIntelligence, 'id' | 'prospectId' | 'sources' | 'generatedAt' | 'updatedAt'> | null = null;
 
