@@ -26,7 +26,7 @@ import { uid } from '../lib/format';
 import { simulateExperiment, experimentBudget } from '../lib/simulation';
 import { balanceFrom } from '../services/wallet';
 import { record as ledgerRecord } from '../services/wallet';
-import { discoverFromKnowledgeBase, advanceStage, scoreAll, rankOpportunities } from '../services/research';
+import { advanceStage, scoreAll, rankOpportunities } from '../services/research';
 import { decide, generateReport, strategyFromMemory, type Decision } from '../services/ai';
 import { recordResult, lessonFromExperiment } from '../services/memory';
 import { discoverLive } from '../services/liveResearch';
@@ -284,24 +284,16 @@ export class AgentEngine {
       }
     }
 
-    // Knowledge-base discovery always progresses too, so the loop never stalls
-    // when live providers are absent or error (providers fail soft).
-    {
-      const current = await this.repo.listOpportunities();
-      const { discovered } = discoverFromKnowledgeBase(current, 4);
-      if (discovered.length > 0) {
-        const ids = discovered.map((d) => d.id);
-        const updated = advanceStage(current, ids, 'DISCOVERED');
-        await this.repo.upsertOpportunities(updated);
-        const priorIds = (cycle.discoveredIds ?? []).filter((id) => !ids.includes(id));
-        await this.repo.completeCycle(cycle.id, { discoveredIds: [...priorIds, ...ids] });
-        await hooks.log(
-          'DISCOVERY',
-          `${hasLiveSearch ? 'Also discovered' : 'Discovered'} ${discovered.length} from knowledge base: ${discovered.map((d) => d.name).join('; ')}.`,
-        );
-      } else if (!hasLiveSearch) {
-        await hooks.log('DISCOVERY', 'SAMPLE knowledge base fully explored. Connect search + LLM for live discovery.');
-      }
+    // Production is live-only: never repopulate the database from the legacy
+    // SAMPLE knowledge base. If live providers are unavailable or fail, keep
+    // the current database state and report that no new live opportunities
+    // were discovered. The SAMPLE knowledge base remains available only to
+    // development/test code outside the production Worker.
+    if (!hasLiveSearch) {
+      await hooks.log(
+        'DISCOVERY',
+        'Live search unavailable — no new opportunities added. Production live-only mode does not use SAMPLE fallback data.',
+      );
     }
     if (!(await tick('DISCOVER'))) return aborted(cycle, await this.repo.listTransactions());
 
