@@ -1,6 +1,6 @@
 import { verifyProspect } from '../src/services/prospectVerification';
 import { emptyState } from '../src/services/searchBudget';
-import type { Prospect, SearchProvider, SearchResult } from '../src/types';
+import type { Prospect } from '../src/types';
 import type { SearchEconomyContext } from '../src/services/searchEconomy';
 import type { SearchProvider as Provider, SearchResult as Result } from '../src/services/providers/types';
 
