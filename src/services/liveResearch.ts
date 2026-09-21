@@ -176,12 +176,12 @@ export async function discoverLive(
 
 function candidateFromQuery(category: Category): string {
   const map: Record<Category, string> = {
-    'Digital Business': 'AI-enabled digital service (live-sourced)',
-    Content: 'Content monetization model (live-sourced)',
-    'E-Commerce': 'Low-budget e-commerce model (live-sourced)',
-    Services: 'Online freelance service (live-sourced)',
+    'Digital Business': 'AI automation & website service (live-sourced)',
+    Content: 'Business content service (live-sourced)',
+    'E-Commerce': 'E-commerce setup service (live-sourced)',
+    Services: 'Business freelance service (live-sourced)',
     Finance: 'Financial / trading strategy (live-sourced)',
-    'Local / Real-World': 'Local low-capital business (live-sourced)',
+    'Local / Real-World': 'Local business digital service (live-sourced)',
   };
   return map[category];
 }
