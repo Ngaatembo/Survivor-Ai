@@ -47,6 +47,7 @@ import { buildMissionLadder, evaluateMissions } from '../lib/missions';
 import { createProjectFromWonOffer } from '../lib/projectTracker';
 import { computeCategoryRealWorldStats, statsForCategory } from '../lib/realRevenue';
 import { computeRecommendedActions } from '../lib/recommendedActions';
+import { rankRevenueProspects } from '../lib/revenueConversion';
 
 export const STEP_ORDER: CycleStepKey[] = [
   'RESEARCH',
@@ -659,16 +660,11 @@ export class AgentEngine {
           // among the rest, still prioritize by expected value first so a
           // budget-limited cycle spends its few searches on the prospects
           // most likely to matter, not just whichever were discovered first.
-          const needsResearch = allProspects
-            .filter(
-              (p) =>
-                p.priority !== 'DO_NOT_CONTACT' &&
-                p.status !== 'WON' &&
-                p.status !== 'LOST' &&
-                p.status !== 'NOT_INTERESTED' &&
-                !existingIntelligence.some((i) => i.prospectId === p.id),
-            )
-            .sort((a, b) => b.score.expectedValue - a.score.expectedValue)
+          const revenueCandidates = rankRevenueProspects(allProspects, 5);
+
+          const needsResearch = revenueCandidates
+            .map((candidate) => candidate.prospect)
+            .filter((p) => !existingIntelligence.some((i) => i.prospectId === p.id))
             .slice(0, 3);
           for (const p of needsResearch) {
             const statusChanged = p.status === 'INTERESTED' || p.status === 'REPLIED';
@@ -696,16 +692,9 @@ export class AgentEngine {
         // per cycle; messages are prepared for human approval only — nothing
         // here sends anything.
         const existingOutreach = await this.repo.listOutreachMessages();
-        const needsOutreach = allProspects
-          .filter(
-            (p) =>
-              p.priority !== 'DO_NOT_CONTACT' &&
-              p.status !== 'WON' &&
-              p.status !== 'LOST' &&
-              p.status !== 'NOT_INTERESTED' &&
-              !existingOutreach.some((m) => m.prospectId === p.id),
-          )
-          .sort((a, b) => b.score.expectedValue - a.score.expectedValue)
+        const needsOutreach = revenueCandidates
+          .map((candidate) => candidate.prospect)
+          .filter((p) => !existingOutreach.some((m) => m.prospectId === p.id))
           .slice(0, 5);
         for (const p of needsOutreach) {
           const model = businessModels.find((m) => m.opportunityId === p.opportunityId);
@@ -735,7 +724,8 @@ export class AgentEngine {
         // Revenue-acquisition improvement: a strong qualified prospect should
         // have a sales package prepared before first contact. This remains
         // draft-only and is capped at five prospects per cycle.
-        const needsOffer = allProspects
+        const needsOffer = revenueCandidates
+          .map((candidate) => candidate.prospect)
           .filter(
             (p) =>
               !existingOffers.some((o) => o.prospectId === p.id) &&
@@ -744,10 +734,9 @@ export class AgentEngine {
                 (p.status === 'QUALIFIED' && (p.priority === 'HIGH' || p.priority === 'MEDIUM') && p.score.total >= 60)
               ),
           )
-          .sort((a, b) => b.score.expectedValue - a.score.expectedValue)
           .slice(0, 5);
 
-        if (hasLiveSearch) {
+                if (hasLiveSearch) {
           const existingPricing = await this.repo.listMarketPriceResearch();
           const oppsNeedingPricing = new Map<string, Opportunity>();
           for (const p of needsOffer) {
