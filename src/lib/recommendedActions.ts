@@ -156,13 +156,15 @@ export function computeRecommendedActions(
     const actionWeight = realWorldActionWeight(categoryOf.get(p.opportunityId), categoryStats);
 
     if (p.status === 'DISCOVERED' || p.status === 'QUALIFIED') {
+      const conversionRank = revenueRank.get(p.id);
+      const conversionBoost = conversionRank ? 1 + (6 - conversionRank) * 0.08 : 1;
       inputs.push({
         kind: 'CONTACT_PROSPECT',
         prospect: p,
-        title: `Contact ${p.businessName}`,
-        description: `${p.priority} priority — ${p.evidenceNotes} Estimated deal $${p.score.expectedDealValue.toFixed(0)}, ~${Math.round(p.score.probabilityOfClose * 100)}% probability of close.`,
-        expectedValue: Math.round(p.score.expectedValue * actionWeight * 100) / 100,
-        urgency: p.priority === 'HIGH' ? 5 : p.priority === 'MEDIUM' ? 3 : 1,
+        title: `${conversionRank ? 'Priority contact' : 'Contact'} ${p.businessName}`,
+        description: `${p.priority} priority — ${p.evidenceNotes} Estimated deal $${p.score.expectedDealValue.toFixed(0)}, ~${Math.round(p.score.probabilityOfClose * 100)}% probability of close.${conversionRank ? ` Revenue conversion rank #${conversionRank}: current sales-ready cohort.` : ''}`,
+        expectedValue: Math.round(p.score.expectedValue * actionWeight * conversionBoost * 100) / 100,
+        urgency: conversionRank ? 5 : p.priority === 'HIGH' ? 5 : p.priority === 'MEDIUM' ? 3 : 1,
         effort: 1,
       });
     } else if (p.nextFollowUpAt && p.nextFollowUpAt <= now) {
