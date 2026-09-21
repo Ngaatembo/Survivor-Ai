@@ -44,6 +44,48 @@ import type {
 import { env } from '../config/env';
 import type { MoneyMetrics } from '../lib/moneyMetrics';
 
+export interface TreasuryPolicy {
+  currency: string;
+  protectedReserve: number;
+  autonomousDailyLimit: number;
+  autonomousPerTransactionLimit: number;
+  approvalPerTransactionLimit: number;
+  allowedVendors: string[];
+  blockedCategories: string[];
+  realMoneyExecutionEnabled: boolean;
+  emergencyFrozen: boolean;
+}
+export interface TreasurySnapshot {
+  balance: number;
+  ownerCapital: number;
+  revenue: number;
+  expenses: number;
+  refunds: number;
+  profit: number;
+  protectedReserve: number;
+  availableToSpend: number;
+  autonomousSpentToday: number;
+  autonomousRemainingToday: number;
+  policy: TreasuryPolicy;
+}
+export interface TreasurySpendRequest {
+  id: string;
+  vendor: string;
+  amount: number;
+  purpose: string;
+  category: string;
+  opportunityId?: string;
+  expectedRevenue?: number;
+  maxLoss?: number;
+  evidence?: string;
+  decision: 'AUTO' | 'APPROVAL' | 'BLOCKED';
+  status: 'PENDING' | 'APPROVED' | 'REJECTED' | 'RECORDED';
+  createdAt: number;
+  reviewedAt?: number;
+  note?: string;
+}
+export interface TreasuryResponse { ok: true; treasury: TreasurySnapshot; spendRequests: TreasurySpendRequest[]; }
+
 export interface BackendHealth {
   ok: boolean;
   service: string;
@@ -309,4 +351,24 @@ export function regenerateProspectDemo(
  *  to the actual business ("here's what your website could look like"). */
 export function demoUrl(prospectId: string): string {
   return `${env.apiBaseUrl}/demo/${prospectId}`;
+}
+
+
+export function fetchTreasury(): Promise<TreasuryResponse> {
+  return getJson<TreasuryResponse>('/treasury');
+}
+
+export function createTreasurySpendRequest(input: {
+  vendor: string; amount: number; purpose: string; category: string;
+  opportunityId?: string; expectedRevenue?: number; maxLoss?: number; evidence?: string;
+}): Promise<{ ok: true; request: TreasurySpendRequest; treasury: TreasurySnapshot }> {
+  return postJson('/treasury/spend-request', input);
+}
+
+export function updateTreasuryPolicy(input: Partial<TreasuryPolicy>): Promise<{ ok: true; policy: TreasuryPolicy }> {
+  return postJson('/treasury/policy', input);
+}
+
+export function recordConfirmedTreasuryExpense(requestId: string): Promise<{ ok: true }> {
+  return postJson('/treasury/record-confirmed-expense', { requestId });
 }
