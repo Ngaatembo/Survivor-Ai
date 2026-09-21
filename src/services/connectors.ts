@@ -18,7 +18,7 @@ const BASE: Omit<ConnectorStatus, 'connected'>[] = [
     id: 'search',
     name: 'Web Search API',
     purpose: 'Live opportunity discovery and source verification',
-    currentFallback: 'Seeded SAMPLE knowledge base (clearly labelled)',
+    currentFallback: 'No live results — production never falls back to SAMPLE data',
   },
   {
     id: 'claude',
