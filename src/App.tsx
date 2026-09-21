@@ -146,7 +146,7 @@ export function App() {
               {backend.connected ? ' — connected' : backend.error ? ' — unreachable' : ' — connecting…'}
             </div>
           ) : (
-            <div>Data: SAMPLE seed + localStorage (DEMO)</div>
+            <div>Data: LIVE backend required — no sample data</div>
           )}
         </div>
       </aside>
