@@ -405,6 +405,7 @@ function BusinessPulse() {
   const qualified = prospects.filter((p) => p.status === 'QUALIFIED').length;
   const sent = offers.filter((o) => o.status !== 'DRAFT').length;
   const paid = ee?.revenueFunnel.paidRevenueTotal;
+  const responseRate = ee?.moneyMetrics?.responseRate;
 
   return (
     <section className="block">
@@ -425,7 +426,7 @@ function BusinessPulse() {
           <Pulse label="Contacted" value={ee?.moneyMetrics?.contacted ?? '—'} />
           <Pulse
             label="Response rate"
-            value={ee?.moneyMetrics?.responseRate === null || ee?.moneyMetrics?.responseRate === undefined ? '—' : `${Math.round(ee.moneyMetrics.responseRate * 100)}%`}
+            value={responseRate === null || responseRate === undefined ? '—' : `${Math.round(responseRate * 100)}%`}
             sub="recorded responses / contacted"
           />
           <Pulse label="Customer revenue" value={paid === undefined ? '—' : usdWhole(paid)} sub="recorded payments only" />
