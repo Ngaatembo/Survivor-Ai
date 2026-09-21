@@ -41,6 +41,7 @@ import type {
   ProspectDemo,
   ProspectInteraction,
   ProspectIntelligence,
+  ProspectVerification,
   MarketPriceResearch,
   Mission,
   RealRevenueEntry,
@@ -1200,6 +1201,7 @@ export class D1Repository implements EngineRepository {
       social_links: this.j(p.socialLinks),
       contact_channel: p.contactChannel,
       contact_value: p.contactValue ?? null,
+      verification: this.j(p.verification ?? {}),
       evidence_notes: p.evidenceNotes,
       priority: p.priority,
       score: this.j(p.score),
@@ -1231,6 +1233,7 @@ export class D1Repository implements EngineRepository {
       socialLinks: this.a<string>(r.social_links),
       contactChannel: r.contact_channel ?? 'UNKNOWN',
       contactValue: r.contact_value ?? undefined,
+      verification: r.verification ? this.o<ProspectVerification>(r.verification) : undefined,
       sources: sourceRows.map((s: any) => ({
         id: s.id,
         title: s.title,
