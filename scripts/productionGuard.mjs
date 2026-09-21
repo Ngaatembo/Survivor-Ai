@@ -15,7 +15,7 @@ const checks = [
   },
   {
     name: 'production live research never falls back to SAMPLE',
-    ok: read('src/services/liveResearch.ts').includes('never promotes legacy SAMPLE records into production research'),
+    ok: read('src/services/liveResearch.ts').includes('production Worker never repopulates from the legacy SAMPLE knowledge base'),
   },
   {
     name: 'real-money execution remains disabled',
