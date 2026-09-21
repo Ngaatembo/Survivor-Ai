@@ -1,4 +1,4 @@
-# SURVIVE AI — Autonomous Economic Research Laboratory (v0.1 prototype)
+# SURVIVE AI — Autonomous Economic Research & Revenue Engine
 
 > **The question this prototype answers:** if an AI has **$50 of simulated capital** and no
 > predefined business model, can it research legitimate income opportunities, evaluate them
@@ -31,12 +31,12 @@ Controls in the top bar: **START RESEARCH** (continuous autonomous looping), **P
 ```
 src/
 ├── types.ts                 # Domain models — mirror Supabase tables 1:1
-├── data/sampleData.ts       # SAMPLE seed knowledge base (clearly labelled, 30+ models)
+├── data/sampleData.ts       # DEVELOPMENT-ONLY SAMPLE fixtures (never production fallback)
 ├── lib/
 │   ├── scoring.ts           # Deterministic 0–100, 9 weighted factors, auditable breakdown
 │   ├── simulation.ts        # Experiment simulation engine (probability/risk/memory-adjusted)
 │   └── format.ts
-├── services/                # ← clean abstractions; APIs plug in here later
+├── services/                # live search, LLM, commercial pipeline, economy controls
 │   ├── connectors.ts        # Registry: Claude, OpenAI, Search, Browser, Payments… all NOT CONNECTED
 │   ├── research.ts          # discover() / verify() / score() / rank() — KB now, live APIs later
 │   ├── ai.ts                # decide() + generateReport() — rule engine now, LLM later
@@ -48,12 +48,8 @@ src/
 supabase/schema.sql          # Target Postgres schema: 11 normalized tables, enums, RLS
 ```
 
-### Connecting real APIs later
-Each external capability sits behind a service interface and a `connectors.ts` entry marked
-**NOT CONNECTED**. Attaching an API = implementing the same interface + flipping the flag —
-no UI or decision-logic changes. Real-money functionality is designed behind explicit
-authorization, spending limits, approval gates and audit logs (see `real_money_approvals`
-notes in the schema), and stays off by default.
+### Production vs development data
+The production Worker never uses the legacy SAMPLE opportunity set as a fallback. If live search is unavailable, the cycle records an empty live-discovery result and continues only with already-persisted live state. Development fixtures remain available to smoke tests.
 
 ### SAMPLE vs LIVE
 Seed records are tagged `dataSource: 'SAMPLE'` and badged everywhere. Live research results
@@ -62,7 +58,7 @@ data as live fact; every figure carries an evidence tier (VERIFIED / LIKELY / UN
 UNVERIFIED).
 
 ## Safety controls
-- 100% simulated ledger; no payment/trading connector exists.
+- Simulated experiment ledger is isolated from the real-revenue ledger; EcoCash sandbox events never become real revenue.
 - Finance models are classified RESEARCH ONLY.
 - Experiments capped at ≤18% of simulated balance per cycle.
 - Balance < $5 → **AT RISK**; balance = $0 → **DEAD** (read-only, experiments locked, resettable).
