@@ -233,9 +233,20 @@ export function computeRecommendedActions(
     return 1 - (effort - 1) * 0.18; // CRITICAL/DEAD: effort 5 -> 0.28x
   }
 
+  // Keep a real-world sales action visible when the queue is dominated by
+  // simulated opportunity experiments. This does not force it to #1; it
+  // guarantees that a qualified/contactable prospect is not completely
+  // buried outside the human action queue.
   inputs.sort((a, b) => b.expectedValue * survivalWeight(b.effort) - a.expectedValue * survivalWeight(a.effort) || b.urgency - a.urgency);
+  const topTen = inputs.slice(0, 10);
+  const hasProspectAction = topTen.some((a) => Boolean(a.prospect));
+  if (!hasProspectAction) {
+    const firstProspectAction = inputs.find((a) => Boolean(a.prospect));
+    if (firstProspectAction) topTen[topTen.length - 1] = firstProspectAction;
+    topTen.sort((a, b) => b.expectedValue * survivalWeight(b.effort) - a.expectedValue * survivalWeight(a.effort) || b.urgency - a.urgency);
+  }
 
-  return inputs.slice(0, 10).map((input, i) => ({
+  return topTen.map((input, i) => ({
     id: uid('act'),
     kind: input.kind,
     opportunityId: input.opportunity?.id,

@@ -731,8 +731,19 @@ export class AgentEngine {
         const ENGAGED_STATUSES = new Set(['INTERESTED', 'PROPOSAL_SENT', 'NEGOTIATING', 'WON']);
         const existingOffers = await this.repo.listOffers();
         const latestIntelligence = await this.repo.listProspectIntelligence();
+
+        // Revenue-acquisition improvement: a strong qualified prospect should
+        // have a sales package prepared before first contact. This remains
+        // draft-only and is capped at five prospects per cycle.
         const needsOffer = allProspects
-          .filter((p) => ENGAGED_STATUSES.has(p.status) && !existingOffers.some((o) => o.prospectId === p.id))
+          .filter(
+            (p) =>
+              !existingOffers.some((o) => o.prospectId === p.id) &&
+              (
+                ENGAGED_STATUSES.has(p.status) ||
+                (p.status === 'QUALIFIED' && (p.priority === 'HIGH' || p.priority === 'MEDIUM') && p.score.total >= 60)
+              ),
+          )
           .sort((a, b) => b.score.expectedValue - a.score.expectedValue)
           .slice(0, 5);
 

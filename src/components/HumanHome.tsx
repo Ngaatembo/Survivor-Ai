@@ -11,6 +11,7 @@ import { useStore, useWalletTotals, backendConfigured } from '../store';
 import { demoUrl } from '../services/backendApi';
 import { usd, usdWhole, timeAgo } from '../lib/format';
 import type { RecommendedAction } from '../types';
+import { salesReadiness } from '../lib/salesReadiness';
 import type { View } from '../App';
 import { DataStateBadge, type DataState } from './ui2';
 
@@ -266,6 +267,78 @@ function ActionCards({ go }: { go: (v: View) => void }) {
   );
 }
 
+function SalesReady({ go }: { go: (v: View) => void }) {
+  const prospects = useStore((s) => s.prospects);
+  const intelligence = useStore((s) => s.prospectIntelligence);
+  const offers = useStore((s) => s.offers);
+  const demos = useStore((s) => s.prospectDemos);
+  const outreach = useStore((s) => s.outreachMessages);
+  const live = useLiveState();
+
+  const ready = prospects
+    .map((prospect) => ({
+      prospect,
+      readiness: salesReadiness(
+        prospect,
+        intelligence.find((x) => x.prospectId === prospect.id),
+        offers.find((x) => x.prospectId === prospect.id),
+        demos.find((x) => x.prospectId === prospect.id),
+        outreach.find((x) => x.prospectId === prospect.id),
+      ),
+    }))
+    .filter((x) => x.readiness.state === 'READY_FOR_REVIEW')
+    .sort((a, b) => b.prospect.score.expectedValue - a.prospect.score.expectedValue)
+    .slice(0, 5);
+
+  return (
+    <section className="block">
+      <div className="card-head">
+        <div>
+          <h2>Sales opportunities ready for review</h2>
+          <span className="faint small">Prepared by Survivor — you decide whether to contact anyone.</span>
+        </div>
+        <DataStateBadge state={live} />
+      </div>
+      {ready.length === 0 ? (
+        <p className="muted">
+          No fully prepared sales packages yet. Survivor will surface strong qualified prospects here once
+          research, offer, demo and outreach are ready.
+        </p>
+      ) : (
+        <div className="action-list">
+          {ready.map(({ prospect, readiness }) => (
+            <div className="action-card" key={prospect.id}>
+              <div className="action-top">
+                <span className="rank">✓</span>
+                <div>
+                  <div className="action-title">{prospect.businessName}</div>
+                  <div className="muted small">{prospect.category} · {prospect.location}</div>
+                </div>
+                <div className="action-ev">{usd(prospect.score.expectedValue)}</div>
+              </div>
+              <div className="prep">
+                <span className="ok">✓ Research</span>
+                <span className="ok">✓ Offer</span>
+                <span className="ok">✓ Demo</span>
+                <span className="ok">✓ Outreach</span>
+              </div>
+              <div className="muted small">
+                {readiness.label}. Estimated deal value ${prospect.score.expectedDealValue.toFixed(0)}.
+              </div>
+              <div className="act-row">
+                <button className="btn big primary" onClick={() => go('prospects')}>Review prospect</button>
+                {demos.some((d) => d.prospectId === prospect.id) && backendConfigured && (
+                  <a className="btn big" href={demoUrl(prospect.id)} target="_blank" rel="noopener noreferrer">View demo</a>
+                )}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </section>
+  );
+}
+
 function SinceAway() {
   const cycles = useStore((s) => s.cycles);
   const prospects = useStore((s) => s.prospects);
@@ -332,6 +405,7 @@ function BusinessPulse() {
   const qualified = prospects.filter((p) => p.status === 'QUALIFIED').length;
   const sent = offers.filter((o) => o.status !== 'DRAFT').length;
   const paid = ee?.revenueFunnel.paidRevenueTotal;
+  const responseRate = ee?.moneyMetrics?.responseRate;
 
   return (
     <section className="block">
@@ -349,6 +423,12 @@ function BusinessPulse() {
           <Pulse label="Prospects" value={prospects.length} />
           <Pulse label="Qualified" value={qualified} />
           <Pulse label="Offers" value={offers.length} sub={`${sent} sent`} />
+          <Pulse label="Contacted" value={ee?.moneyMetrics?.contacted ?? '—'} />
+          <Pulse
+            label="Response rate"
+            value={responseRate === null || responseRate === undefined ? '—' : `${Math.round(responseRate * 100)}%`}
+            sub="recorded responses / contacted"
+          />
           <Pulse label="Customer revenue" value={paid === undefined ? '—' : usdWhole(paid)} sub="recorded payments only" />
         </div>
       </div>
@@ -410,6 +490,7 @@ export function HumanHome({ go }: { go: (v: View) => void }) {
       <Header />
       <NextMoneyAction go={go} />
       <ActionCards go={go} />
+      <SalesReady go={go} />
       <SinceAway />
       <BusinessPulse />
     </div>
