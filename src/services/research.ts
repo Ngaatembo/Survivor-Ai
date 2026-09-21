@@ -1,14 +1,14 @@
 /* ============================================================================
  * SURVIVE AI — Research service
  * ----------------------------------------------------------------------------
- * v1: discovery runs against the seeded SAMPLE knowledge base. The interface
- * is identical to what a live Search/Browser backend will implement later:
+ * Legacy development-only research helpers. Production discovery is handled
+ * by liveResearch.ts and the Worker never falls back to SAMPLE records.
  *
- *   discover(query) -> RawOpportunity[]
- *   verify(opp)     -> EvidenceTier + sources
+ * These functions remain for deterministic smoke tests and local development:
+ *   discoverFromKnowledgeBase() -> development fixtures
+ *   advanceStage()/scoreAll()/rankOpportunities() -> pure research transforms
  *
- * When connectors.search flips to connected, discoverLive() replaces
- * discoverFromKnowledgeBase() with no changes to callers.
+ * Production cycles explicitly use discoverLive().
  * ========================================================================== */
 
 import type { Opportunity, ResearchStage } from '../types';
