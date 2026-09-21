@@ -407,10 +407,29 @@ export class AgentEngine {
 
       transactions = await this.repo.listTransactions();
       memory = await this.repo.listMemory();
+
+      // Revenue simulations must use a real selling price, not the experiment
+      // budget. A $5 validation spend can produce a $150/$250/$350/$450 sale.
+      // Use cached market-price research when available; otherwise research the
+      // selected opportunity live before simulating it. This keeps the simulated
+      // revenue tied to an actual market rate instead of the old $4–$65 heuristic.
+      let marketPrice = (await this.repo.listMarketPriceResearch()).find(
+        (mp) => mp.opportunityId === selected.id,
+      );
+      if (!marketPrice && hasLiveSearch) {
+        marketPrice = await researchMarketPrice(searchCtx, liveLlm, selected, Date.now(), { offerPending: true });
+        await this.repo.upsertMarketPriceResearch(marketPrice);
+        await hooks.log(
+          'RESEARCH',
+          `Market pricing researched for "${selected.name}": ${marketPrice.priceMin}-${marketPrice.priceMax} ${marketPrice.currency} (${marketPrice.confidence} confidence).`,
+        );
+      }
+
       const sim = simulateExperiment({
         opportunity: selected,
         budget,
         memory: memory.find((m) => m.kind === 'opportunity' && m.refId === selected.id),
+        marketPrice,
       });
 
       experiment = {
