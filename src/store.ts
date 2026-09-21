@@ -788,24 +788,12 @@ export const useStore = create<SurviveState>()(
     },
     {
       name: 'survive-ai-v2',
-      // In live-backend mode, business state is NEVER the browser's to keep:
-      // it is refetched from the backend on every load and every poll, and
-      // persisting a second copy to localStorage is exactly the "independent
-      // browser state" bug this integration fixes. Only the standalone demo
-      // (no backend configured) persists its simulated state locally.
-      partialize: (s: any) =>
-        featureFlags.backend
-          ? {}
-          : {
-              agent: s.agent,
-              opportunities: s.opportunities,
-              reports: s.reports,
-              experiments: s.experiments,
-              memory: s.memory,
-              transactions: s.transactions,
-              events: s.events,
-              strategies: s.strategies,
-              cycles: s.cycles,
+      // Production is live-backend only. Never persist business state in the
+      // browser: this prevents old sample/demo records from reappearing after
+      // the system has switched to real research data.
+      partialize: () => ({
+
+
             },
       onRehydrateStorage: () => (state: any) => {
         if (featureFlags.backend) {
