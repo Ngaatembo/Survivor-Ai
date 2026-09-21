@@ -24,6 +24,7 @@ export type SearchPurpose =
   | 'PROSPECT_DISCOVERY'
   | 'PROSPECT_INTELLIGENCE'
   | 'MARKET_PRICING'
+  | 'CONTACT_VERIFICATION'
   | 'OTHER';
 
 export const SEARCH_PURPOSES: SearchPurpose[] = [
@@ -31,6 +32,7 @@ export const SEARCH_PURPOSES: SearchPurpose[] = [
   'PROSPECT_DISCOVERY',
   'PROSPECT_INTELLIGENCE',
   'MARKET_PRICING',
+  'CONTACT_VERIFICATION',
   'OTHER',
 ];
 
@@ -113,6 +115,16 @@ export const SEARCH_POLICY: Record<SearchPurpose, SearchPurposePolicy> = {
     primaryProvider: 'brave',
     fallbackProvider: 'tavily',
     resultsPerQuery: 4,
+  },
+  CONTACT_VERIFICATION: {
+    ttlMs: 7 * DAY_MS,
+    maxPerCycle: 5,
+    maxPerDay: 15,
+    maxPerMonth: 150,
+    maxPerEntity: 2,
+    primaryProvider: 'tavily',
+    fallbackProvider: 'brave',
+    resultsPerQuery: 5,
   },
   OTHER: {
     ttlMs: 10 * DAY_MS,
