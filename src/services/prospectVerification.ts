@@ -124,7 +124,7 @@ export async function verifyProspect(
       query,
       entityId: prospect.id,
       max: 5,
-      priority: prospect.priority,
+      priority: prospect.priority === 'DO_NOT_CONTACT' ? 'LOW' : prospect.priority,
     });
     for (const r of outcome.results) {
       const key = `${r.url}|${r.title}`;
