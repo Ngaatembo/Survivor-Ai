@@ -48,6 +48,7 @@ import { createProjectFromWonOffer } from '../lib/projectTracker';
 import { computeCategoryRealWorldStats, statsForCategory } from '../lib/realRevenue';
 import { computeRecommendedActions } from '../lib/recommendedActions';
 import { rankRevenueProspects } from '../lib/revenueConversion';
+import { verifyProspect } from '../services/prospectVerification';
 
 export const STEP_ORDER: CycleStepKey[] = [
   'RESEARCH',
@@ -652,7 +653,41 @@ export class AgentEngine {
         // the real LLM when connected. Capped per cycle to bound API cost;
         // never runs without live search, since there's nothing real to
         // research otherwise.
-        const allProspects = await this.repo.listProspects();
+        let allProspects = await this.repo.listProspects();
+
+        // Prospect identity/contact verification: discovery is allowed to find
+        // candidates cheaply, but Survivor must corroborate the business name
+        // and contact before using them for revenue work. This is capped by
+        // the CONTACT_VERIFICATION search budget and fails closed on conflicts.
+        if (hasLiveSearch) {
+          const verificationTargets = allProspects
+            .filter((p) => !p.verification || p.verification.status === 'UNVERIFIED' || p.verification.status === 'CONFLICT')
+            .filter((p) => p.status === 'DISCOVERED' || p.status === 'QUALIFIED' || p.status === 'REPLIED' || p.status === 'INTERESTED' || p.status === 'PROPOSAL_SENT' || p.status === 'NEGOTIATING')
+            .sort((a, b) => b.score.expectedValue - a.score.expectedValue || b.score.total - a.score.total)
+            .slice(0, 2);
+
+          for (const target of verificationTargets) {
+            const verified = await verifyProspect(searchCtx, target, now);
+            await this.repo.upsertProspects([verified]);
+            const v = verified.verification;
+            await this.repo.appendProspectInteraction({
+              id: uid('pint'),
+              prospectId: verified.id,
+              kind: 'NOTE',
+              summary: `Identity/contact verification: ${v?.status ?? 'UNVERIFIED'} (${v?.confidence ?? 0}% confidence), ${v?.independentSources ?? 0} independent source(s), ${v?.contactSources ?? 0} contact source(s).`,
+              createdAt: now,
+            });
+          }
+
+          if (verificationTargets.length > 0) {
+            await hooks.log(
+              'VERIFY',
+              `Verified ${verificationTargets.length} prospect(s) against independent public sources before revenue actions.`,
+            );
+          }
+        }
+
+        allProspects = await this.repo.listProspects();
         const existingIntelligence = await this.repo.listProspectIntelligence();
         const revenueCandidates = rankRevenueProspects(allProspects, 5);
         const ENGAGED_STATUSES = new Set(['INTERESTED', 'PROPOSAL_SENT', 'NEGOTIATING', 'WON']);
