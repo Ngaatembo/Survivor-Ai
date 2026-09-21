@@ -150,6 +150,21 @@ function ActionButtons({ a, go, compact }: { a: RecommendedAction; go: (v: View)
   );
 }
 
+function Why({ text }: { text: string }) {
+  const [open, setOpen] = useState(false);
+  const long = text.length > 170;
+  return (
+    <>
+      <p className={`money-why${long && !open ? ' clamp3' : ''}`}>{text}</p>
+      {long && (
+        <button className="link-btn" onClick={() => setOpen(!open)}>
+          {open ? 'Show less' : 'Read more'}
+        </button>
+      )}
+    </>
+  );
+}
+
 function NextMoneyAction({ go }: { go: (v: View) => void }) {
   const q = useStore((s) => s.economicEfficiency?.humanActionQueue);
   const a = q?.topAction ?? null;
@@ -198,7 +213,7 @@ function NextMoneyAction({ go }: { go: (v: View) => void }) {
           <small>expected value</small>
         </div>
       </div>
-      <p className="money-why">{a.description}</p>
+      <Why text={a.description} />
       <div className="money-meta">
         <span>
           <small>Urgency</small> {urgencyLabel(a.urgency)}
@@ -363,7 +378,7 @@ function Header() {
   const cutoff = Date.now() - DAY;
   const recent = cycles.filter((c) => (c.completedAt ?? 0) > cutoff);
   const discovered = recent.reduce((n, c) => n + c.discoveredIds.length, 0);
-  const attention = q ? q.offersAwaitingSend + q.followUpsDue + q.prospectsNeedingStatusUpdate + q.wonWithoutRecordedPayment : null;
+  const attention = q ? q.queue.length : null;
 
   let status: string;
   if (!backendConfigured) status = '◇ Demo mode — sample data kept in this browser';
@@ -383,7 +398,7 @@ function Header() {
       <p className="home-summary">
         In the last 24 hours Survivor completed {plural(recent.length, 'cycle')} and discovered{' '}
         {plural(discovered, 'opportunity record')}.
-        {attention !== null && ` ${attention === 0 ? 'Nothing is waiting on you.' : `${plural(attention, 'prospect item')} need you.`}`}
+        {attention !== null && ` ${attention === 0 ? 'Nothing is waiting on you.' : `${plural(attention, 'recommended action')} waiting for you.`}`}
       </p>
     </header>
   );
