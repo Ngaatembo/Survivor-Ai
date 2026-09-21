@@ -15,6 +15,20 @@ import { discoverProspects } from '../src/services/prospectDiscovery';
 import { InMemoryRepository } from '../src/engine/inMemoryRepository';
 import type { SearchProvider, SearchResult } from '../src/services/providers/types';
 import type { LeadScoreBreakdown, Prospect } from '../src/types';
+import { emptyState } from '../src/services/searchBudget';
+import type { SearchEconomyContext } from '../src/services/searchEconomy';
+
+/** Fresh search-economy context per call, so each pass's mock search
+ *  results are used independently rather than served from a shared cache. */
+function mkCtx(search: SearchProvider): SearchEconomyContext {
+  return {
+    state: emptyState(),
+    providers: { tavily: search, brave: null },
+    survivalStatus: 'ALIVE',
+    now: Date.now(),
+    cycleStartedAt: Date.now(),
+  };
+}
 
 let failures = 0;
 function assert(cond: boolean, label: string) {
@@ -253,7 +267,7 @@ console.log('--- End-to-end discovery: fake search results -> real prospects -> 
     search: async () => canned,
   };
 
-  const { prospects, queriesRun } = await discoverProspects(stubSearch, opp, model, []);
+  const { prospects, queriesRun } = await discoverProspects(mkCtx(stubSearch), opp, model, []);
   assert(queriesRun > 0, `ran at least one query (got ${queriesRun})`);
   assert(prospects.length > 0, `surfaced at least one real prospect (got ${prospects.length})`);
   assert(
@@ -298,7 +312,7 @@ console.log('--- End-to-end discovery: fake search results -> real prospects -> 
 
   // Discovering again with the same names must not duplicate them.
   const existingNames = stored.map((p) => p.businessName);
-  const { prospects: secondPass } = await discoverProspects(stubSearch, opp, model, existingNames);
+  const { prospects: secondPass } = await discoverProspects(mkCtx(stubSearch), opp, model, existingNames);
   assert(secondPass.length === 0, `re-discovery against known names yields no duplicates (got ${secondPass.length})`);
 }
 

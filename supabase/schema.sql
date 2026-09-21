@@ -448,6 +448,17 @@ create table missions (
 );
 create index idx_missions_agent on missions(agent_id, sequence);
 
+-- kv_store — Economic Survival Overhaul: small JSON-blob key/value
+-- persistence for the search-budget/cache ledger (services/searchEconomy.ts).
+-- Legacy-fallback counterpart to D1's kv_store (migrations/0011_search_economy.sql).
+create table kv_store (
+  agent_id    text not null references agents(id) on delete cascade,
+  key         text not null,
+  value       text not null default '{}',
+  updated_at  timestamptz not null default now(),
+  primary key (agent_id, key)
+);
+
 -- research_sources -----------------------------------------------------------
 
 create table research_sources (
@@ -620,6 +631,7 @@ alter table transactions enable row level security;
 alter table agent_events enable row level security;
 alter table strategies enable row level security;
 alter table agent_cycles enable row level security;
+alter table kv_store enable row level security;
 
 -- Example policy (repeat per table); swap auth.uid() scoping as needed:
 -- create policy "owner access" on agents

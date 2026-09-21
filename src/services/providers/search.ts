@@ -85,6 +85,33 @@ class BraveProvider implements SearchProvider {
   }
 }
 
+/**
+ * Build BOTH providers (when their keys are configured) rather than
+ * silently picking one. Which provider is actually used for a given search
+ * is a policy decision made by services/searchBudget.ts's selectProvider()
+ * — purpose, cost, and remaining budget, never "Tavily wins because a key
+ * happens to exist" (that was the pre-overhaul behavior of the single
+ * `createSearchProvider()` below, kept only for narrow backward
+ * compatibility with call sites that haven't been migrated to the
+ * search-economy layer yet).
+ */
+export function createSearchProviders(keys: {
+  tavily?: string;
+  brave?: string;
+}): { tavily: SearchProvider | null; brave: SearchProvider | null } {
+  return {
+    tavily: keys.tavily ? new TavilyProvider(keys.tavily) : null,
+    brave: keys.brave ? new BraveProvider(keys.brave) : null,
+  };
+}
+
+/**
+ * @deprecated Legacy single-provider accessor — always preferred Tavily
+ * whenever a key existed, with no cost/purpose awareness. Kept only for any
+ * remaining call site that hasn't moved to `createSearchProviders()` +
+ * `services/searchBudget.ts`'s purpose-driven `selectProvider()`. New code
+ * should not call this.
+ */
 export function createSearchProvider(keys: {
   tavily?: string;
   brave?: string;

@@ -1573,6 +1573,29 @@ export class SupabaseRepository implements EngineRepository {
       lessonsLearned: (r.lessons_learned ?? []) as string[],
     };
   }
+
+  /* --------------------------------- kv_store -------------------------------- */
+  // Legacy-fallback counterpart to D1Repository's kv_store table — see
+  // migrations/0011_search_economy.sql and supabase/schema.sql for the
+  // `kv_store` table this reads/writes when DB_BACKEND=supabase.
+
+  async getKV(key: string): Promise<string | null> {
+    const { data, error } = await this.db
+      .from('kv_store')
+      .select('value')
+      .eq('agent_id', this.agentId)
+      .eq('key', key)
+      .maybeSingle();
+    if (error) throw new Error(error.message);
+    return (data as any)?.value ?? null;
+  }
+
+  async setKV(key: string, value: string): Promise<void> {
+    const { error } = await this.db
+      .from('kv_store')
+      .upsert({ agent_id: this.agentId, key, value, updated_at: new Date().toISOString() }, { onConflict: 'agent_id,key' });
+    if (error) throw new Error(error.message);
+  }
 }
 
 /* ---------------------------- first-run seeding --------------------------- */

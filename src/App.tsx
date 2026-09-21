@@ -7,6 +7,7 @@ import { OpportunityExplorer } from './components/OpportunityExplorer';
 import { Prospects } from './components/Prospects';
 import { Projects } from './components/Projects';
 import { Analytics } from './components/Analytics';
+import { EconomicEfficiency } from './components/EconomicEfficiency';
 import { DecisionCenter } from './components/DecisionCenter';
 import { Experiments } from './components/Experiments';
 import { MemoryView } from './components/MemoryView';
@@ -23,6 +24,7 @@ export type View =
   | 'prospects'
   | 'projects'
   | 'analytics'
+  | 'economics'
   | 'decision'
   | 'experiments'
   | 'memory'
@@ -38,6 +40,7 @@ const NAV: { id: View; label: string; icon: string; section: string }[] = [
   { id: 'prospects', label: 'Prospects / CRM', icon: '☎', section: 'DISCOVERY' },
   { id: 'projects', label: 'Delivery Projects', icon: '🛠', section: 'DISCOVERY' },
   { id: 'analytics', label: 'Analytics', icon: '📊', section: 'DISCOVERY' },
+  { id: 'economics', label: 'Economic Efficiency', icon: '⚖', section: 'DISCOVERY' },
   { id: 'decision', label: 'Decision Center', icon: '➤', section: 'DISCOVERY' },
   { id: 'reports', label: 'Research Reports', icon: '▦', section: 'DISCOVERY' },
   { id: 'experiments', label: 'Experiments', icon: '▶', section: 'OPERATIONS' },
@@ -54,6 +57,7 @@ const TITLES: Record<View, string> = {
   prospects: 'Prospects / CRM',
   projects: 'Delivery Projects',
   analytics: 'Simulation vs. Reality Analytics',
+  economics: 'Economic Efficiency — Search Cost, Revenue Funnel, Next Money Action',
   decision: 'AI Decision Center',
   experiments: 'Experiment System',
   memory: 'Agent Memory',
@@ -217,6 +221,7 @@ export function App() {
           {view === 'prospects' && <Prospects />}
           {view === 'projects' && <Projects />}
           {view === 'analytics' && <Analytics />}
+          {view === 'economics' && <EconomicEfficiency />}
           {view === 'decision' && <DecisionCenter />}
           {view === 'experiments' && <Experiments />}
           {view === 'memory' && <MemoryView />}

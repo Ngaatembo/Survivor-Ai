@@ -193,6 +193,14 @@ export interface EngineRepository {
   // milestones. Bulk-replaced each cycle as missions complete/activate.
   listMissions(): Promise<Mission[]>;
   upsertMissions(missions: Mission[]): Promise<void>;
+
+  // generic small key/value store (Economic Survival Overhaul) — used to
+  // persist the search-economy ledger (services/searchEconomy.ts) as one
+  // small JSON blob per key, rather than a bespoke table per concern. Keep
+  // values small (well under typical row-size limits); this is meant for
+  // compact rollup state, not bulk data.
+  getKV(key: string): Promise<string | null>;
+  setKV(key: string, value: string): Promise<void>;
 }
 
 /** Engine callbacks so the host can render progress / stay in sync. */

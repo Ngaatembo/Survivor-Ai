@@ -13,7 +13,8 @@
 import type { Category, DataSource, Opportunity } from '../types';
 import { uid } from '../lib/format';
 import { scoreOpportunity } from '../lib/scoring';
-import type { LLMProvider, SearchProvider } from './providers/types';
+import type { LLMProvider } from './providers/types';
+import { runSearch, type SearchEconomyContext } from './searchEconomy';
 
 /** Queries used to sweep each category in a live discovery pass. */
 export const DISCOVERY_QUERIES: { category: Category; query: string }[] = [
@@ -42,24 +43,40 @@ function clampNum(n: number, lo: number, hi: number): number {
 /**
  * Run one live discovery pass. Returns new LIVE opportunities. `dedupeAgainst`
  * is the set of names already in the DB (fuzzy name-match). Returns
- * { opportunities, queriesRun, providerUsed } so the caller can log honestly.
+ * { opportunities, queriesRun, sourcesCount, cacheHits, budgetExceeded } so
+ * the caller can log honestly.
+ *
+ * Every query goes through the search-economy layer (services/searchEconomy.ts)
+ * under purpose OPPORTUNITY_DISCOVERY, entityId = the category — so each
+ * category is only actually re-searched once its 7-day cache TTL expires or
+ * the budget resets, instead of on every 30-minute cycle (the single
+ * largest source of avoidable search volume before this overhaul; see
+ * docs/SURVIVAL_ECONOMICS_AUDIT.md).
  */
 export async function discoverLive(
-  search: SearchProvider,
+  ctx: SearchEconomyContext,
   llm: LLMProvider | null,
   dedupeAgainst: string[],
-): Promise<{ opportunities: Opportunity[]; queriesRun: number; sourcesCount: number }> {
+): Promise<{ opportunities: Opportunity[]; queriesRun: number; sourcesCount: number; cacheHits: number; budgetExceeded: number }> {
   const found: Opportunity[] = [];
   let queriesRun = 0;
   let sourcesCount = 0;
+  let cacheHits = 0;
+  let budgetExceeded = 0;
 
   for (const { category, query } of DISCOVERY_QUERIES) {
-    let results: Awaited<ReturnType<SearchProvider['search']>>;
-    try {
-      results = await search.search(query, 5);
-    } catch {
-      results = [];
+    const searchOutcome = await runSearch(ctx, {
+      purpose: 'OPPORTUNITY_DISCOVERY',
+      query,
+      entityId: category,
+      max: 5,
+    });
+    if (searchOutcome.budgetExceeded) {
+      budgetExceeded += 1;
+      continue;
     }
+    if (searchOutcome.cacheHit) cacheHits += 1;
+    const results = searchOutcome.results;
     queriesRun += 1;
     if (results.length === 0) continue;
 
@@ -82,7 +99,7 @@ export async function discoverLive(
       title: r.title.slice(0, 140),
       url: r.url,
       kind: 'web' as const,
-      note: `Live search result ${i + 1} via ${search.label}${r.publishedAt ? ` · ${r.publishedAt}` : ''}`,
+      note: `Live search result ${i + 1} via ${searchOutcome.providerUsed}${r.publishedAt ? ` · ${r.publishedAt}` : ''}`,
     }));
     sourcesCount += sources.length;
 
@@ -146,7 +163,7 @@ export async function discoverLive(
     found.push(opp);
   }
 
-  return { opportunities: found, queriesRun, sourcesCount };
+  return { opportunities: found, queriesRun, sourcesCount, cacheHits, budgetExceeded };
 }
 
 function candidateFromQuery(category: Category): string {

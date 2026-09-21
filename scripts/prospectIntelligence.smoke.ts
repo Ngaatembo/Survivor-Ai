@@ -18,6 +18,20 @@ import { SAMPLE_OPPORTUNITIES } from '../src/data/sampleData';
 import { InMemoryRepository } from '../src/engine/inMemoryRepository';
 import type { LLMProvider, ProspectIntelligenceAnalysis, SearchProvider, SearchResult } from '../src/services/providers/types';
 import type { LeadScoreBreakdown, Opportunity, Prospect } from '../src/types';
+import { emptyState } from '../src/services/searchBudget';
+import type { SearchEconomyContext } from '../src/services/searchEconomy';
+
+/** Fresh search-economy context per call, so each test case's mock search
+ *  results are used independently rather than served from a shared cache. */
+function mkCtx(search: SearchProvider): SearchEconomyContext {
+  return {
+    state: emptyState(),
+    providers: { tavily: search, brave: null },
+    survivalStatus: 'ALIVE',
+    now: Date.now(),
+    cycleStartedAt: Date.now(),
+  };
+}
 
 let failures = 0;
 function assert(cond: boolean, label: string) {
@@ -98,7 +112,7 @@ console.log('--- researchProspect: no search results at all -> honest low-confid
     const opp = baseOpp();
     const prospect = baseProspect(opp);
     const emptySearch = new MockSearchProvider([]);
-    const intel = await researchProspect(emptySearch, null, prospect);
+    const intel = await researchProspect(mkCtx(emptySearch), null, prospect);
     assert(intel.confidence === 'LOW', 'no results -> LOW confidence, never fabricated');
     assert(intel.generator === 'snippet-digest', 'no LLM connected -> snippet-digest generator');
     assert(intel.sources.length === 0, 'no sources when nothing was found');
@@ -109,7 +123,7 @@ console.log('--- researchProspect: no search results at all -> honest low-confid
       { title: 'Test Bakery Facebook', url: 'https://facebook.com/testbakery', snippet: 'Fresh bread daily, custom cakes for events.', source: 'facebook.com' },
       { title: 'Test Bakery reviews', url: 'https://example.com/reviews', snippet: 'Great cakes but slow delivery times.', source: 'example.com' },
     ]);
-    const digestIntel = await researchProspect(snippetSearch, null, prospect);
+    const digestIntel = await researchProspect(mkCtx(snippetSearch), null, prospect);
     assert(digestIntel.generator === 'snippet-digest', 'no LLM -> digest, never claims synthesis');
     assert(digestIntel.sources.length > 0, 'sources are captured even without an LLM');
     assert(digestIntel.sources.every((s) => s.url), 'every source carries a real URL');
@@ -125,7 +139,7 @@ console.log('--- researchProspect: no search results at all -> honest low-confid
       recommendedAngle: 'Lead with an online ordering page to address the slow-delivery complaint directly.',
       confidence: 'HIGH',
     });
-    const llmIntel = await researchProspect(snippetSearch, goodLlm, prospect);
+    const llmIntel = await researchProspect(mkCtx(snippetSearch), goodLlm, prospect);
     assert(llmIntel.generator === 'llm', 'LLM connected and returned valid JSON -> generator is llm');
     assert(llmIntel.confidence === 'HIGH', 'confidence passed through from the model');
     assert(llmIntel.apparentServices.includes('Fresh bread'), 'apparent services come from the real analysis');
@@ -133,7 +147,7 @@ console.log('--- researchProspect: no search results at all -> honest low-confid
 
     console.log('--- researchProspect: LLM connected but fails/returns unusable JSON -> falls back to digest ---');
     const failingLlm = new MockLLMProvider(null);
-    const fallbackIntel = await researchProspect(snippetSearch, failingLlm, prospect);
+    const fallbackIntel = await researchProspect(mkCtx(snippetSearch), failingLlm, prospect);
     assert(fallbackIntel.generator === 'snippet-digest', 'a null/unusable LLM response falls back to the honest digest, never a fabricated report');
 
     console.log('--- generateOffer / generateOutreachMessages: only trust HIGH/MEDIUM LLM-synthesized intelligence ---');

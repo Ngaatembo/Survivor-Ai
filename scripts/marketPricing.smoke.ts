@@ -16,6 +16,20 @@ import { SAMPLE_OPPORTUNITIES } from '../src/data/sampleData';
 import { InMemoryRepository } from '../src/engine/inMemoryRepository';
 import type { LLMProvider, MarketPriceAnalysis, SearchProvider, SearchResult } from '../src/services/providers/types';
 import type { LeadScoreBreakdown, Opportunity, Prospect } from '../src/types';
+import { emptyState } from '../src/services/searchBudget';
+import type { SearchEconomyContext } from '../src/services/searchEconomy';
+
+/** Fresh search-economy context per call, so each test case's mock search
+ *  results are used independently rather than served from a shared cache. */
+function mkCtx(search: SearchProvider): SearchEconomyContext {
+  return {
+    state: emptyState(),
+    providers: { tavily: search, brave: null },
+    survivalStatus: 'ALIVE',
+    now: Date.now(),
+    cycleStartedAt: Date.now(),
+  };
+}
 
 let failures = 0;
 function assert(cond: boolean, label: string) {
@@ -93,7 +107,7 @@ console.log('--- researchMarketPrice: no search results -> honest LOW-confidence
   (async () => {
     const opp = baseOpp();
     const emptySearch = new MockSearchProvider([]);
-    const research = await researchMarketPrice(emptySearch, null, opp);
+    const research = await researchMarketPrice(mkCtx(emptySearch), null, opp);
     assert(research.confidence === 'LOW', 'no results -> LOW confidence');
     assert(research.generator === 'snippet-digest', 'no LLM connected -> snippet-digest generator');
     assert(research.priceMax === 0, 'no evidence -> $0 range, never a fabricated number');
@@ -103,7 +117,7 @@ console.log('--- researchMarketPrice: no search results -> honest LOW-confidence
     const snippetSearch = new MockSearchProvider([
       { title: 'Freelance website designer Harare', url: 'https://example.com/1', snippet: 'Rates from $150 for a basic small business website, $300+ for e-commerce.', source: 'stub' },
     ]);
-    const digestResearch = await researchMarketPrice(snippetSearch, null, opp);
+    const digestResearch = await researchMarketPrice(mkCtx(snippetSearch), null, opp);
     assert(digestResearch.generator === 'snippet-digest', 'no LLM -> digest, never claims synthesis');
     assert(digestResearch.priceMax === 0, 'digest never invents a price range even when snippets mention real numbers');
     assert(digestResearch.sources.length > 0, 'sources are still captured for manual review');
@@ -116,14 +130,14 @@ console.log('--- researchMarketPrice: no search results -> honest LOW-confidence
       rationale: 'Multiple freelancers in Harare quote $120-$250 for a basic small business website.',
       confidence: 'HIGH',
     });
-    const llmResearch = await researchMarketPrice(snippetSearch, goodLlm, opp);
+    const llmResearch = await researchMarketPrice(mkCtx(snippetSearch), goodLlm, opp);
     assert(llmResearch.generator === 'llm', 'LLM connected and returned valid JSON -> generator is llm');
     assert(llmResearch.confidence === 'HIGH', 'confidence passed through from the model');
     assert(llmResearch.priceMin === 120 && llmResearch.priceMax === 250, 'real researched price range is used exactly');
 
     console.log('--- researchMarketPrice: LLM fails/returns unusable JSON -> falls back to honest digest ---');
     const failingLlm = new MockLLMProvider(null);
-    const fallbackResearch = await researchMarketPrice(snippetSearch, failingLlm, opp);
+    const fallbackResearch = await researchMarketPrice(mkCtx(snippetSearch), failingLlm, opp);
     assert(fallbackResearch.generator === 'snippet-digest', 'unusable LLM response falls back to the honest digest');
 
     console.log('--- generateOffer: a confident researched price OVERRIDES the old formula guess ---');

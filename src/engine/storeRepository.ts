@@ -78,6 +78,7 @@ export function createStoreRepository(get: Get, set: Set, reseed: () => StateSha
   let prospectDemos: ProspectDemo[] = [];
   let marketPriceResearch: MarketPriceResearch[] = [];
   let missions: Mission[] = [];
+  const kv = new Map<string, string>();
   return {
     async getAgent() {
       return get().agent;
@@ -224,6 +225,7 @@ export function createStoreRepository(get: Get, set: Set, reseed: () => StateSha
       prospectDemos = [];
       marketPriceResearch = [];
       missions = [];
+      kv.clear();
       set(reseed() as any);
     },
 
@@ -348,6 +350,13 @@ export function createStoreRepository(get: Get, set: Set, reseed: () => StateSha
     },
     async upsertMissions(next) {
       missions = next;
+    },
+
+    async getKV(key: string) {
+      return kv.get(key) ?? null;
+    },
+    async setKV(key: string, value: string) {
+      kv.set(key, value);
     },
   };
 }

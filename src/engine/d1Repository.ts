@@ -1950,6 +1950,32 @@ export class D1Repository implements EngineRepository {
     await this.db.batch([del, ...inserts]);
   }
 
+  /* --------------------------------- kv_store -------------------------------- */
+  // Economic Survival Overhaul: small JSON-blob key/value persistence, used
+  // by services/searchEconomy.ts to carry the search-budget/cache ledger
+  // across cron invocations (a Worker instance is not guaranteed to stay
+  // warm between 30-minute cron ticks, so in-memory-only state would reset
+  // every cycle and defeat the whole point of caching/budgeting).
+
+  async getKV(key: string): Promise<string | null> {
+    const row = await this.db
+      .prepare('SELECT value FROM kv_store WHERE agent_id = ? AND key = ?')
+      .bind(this.agentId, key)
+      .first<{ value: string }>();
+    return row?.value ?? null;
+  }
+
+  async setKV(key: string, value: string): Promise<void> {
+    await this.db
+      .prepare(
+        `INSERT INTO kv_store (agent_id, key, value, updated_at)
+         VALUES (?, ?, ?, ?)
+         ON CONFLICT(agent_id, key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at`,
+      )
+      .bind(this.agentId, key, value, this.iso(Date.now()))
+      .run();
+  }
+
   private mapMission(r: any): Mission {
     return {
       id: r.id,

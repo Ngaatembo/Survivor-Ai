@@ -384,4 +384,12 @@ export class InMemoryRepository implements EngineRepository {
   async upsertMissions(missions: Mission[]) {
     this.state.missions = missions;
   }
+
+  private kv = new Map<string, string>();
+  async getKV(key: string) {
+    return this.kv.get(key) ?? null;
+  }
+  async setKV(key: string, value: string) {
+    this.kv.set(key, value);
+  }
 }

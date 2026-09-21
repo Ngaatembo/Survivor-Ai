@@ -34,6 +34,7 @@ import { discoverProspects } from '../services/prospectDiscovery';
 import type { EngineHooks, EngineRepository } from './repository';
 import { createSeedSnapshot, computeSurvivalStatus } from './seed';
 import type { LLMProvider, SearchProvider } from '../services/providers/types';
+import { loadEconomyState, saveEconomyState, type SearchEconomyContext } from '../services/searchEconomy';
 import { evaluateOpportunity, VALIDATION_SCORE_THRESHOLD } from '../lib/decisionEngine';
 import { generateBusinessModel } from '../lib/businessModel';
 import { generateOutreachMessages } from '../lib/outreachGenerator';
@@ -72,7 +73,12 @@ const STEP_LABELS: Record<CycleStepKey, string> = {
 };
 
 export interface EngineProviders {
+  /** @deprecated single-provider slot, kept for backward compatibility with
+   *  any caller that hasn't moved to `tavily`/`brave`. When both `search`
+   *  and `tavily`/`brave` are omitted, no live search runs. */
   search?: SearchProvider | null;
+  tavily?: SearchProvider | null;
+  brave?: SearchProvider | null;
   llm?: LLMProvider | null;
 }
 
@@ -219,15 +225,35 @@ export class AgentEngine {
     await hooks.setActivity?.('Researching legitimate income models across categories…', 'RESEARCH');
     if (!(await tick('RESEARCH'))) return aborted(cycle, transactions);
 
-    /* 2 — DISCOVER */
-    const liveSearch = opts.useLive !== false ? this.providers.search ?? null : null;
+    /* Search-economy context (Economic Survival Overhaul, Phases 2–5/9–11):
+     * one shared, budget/cache-aware ledger for every search this cycle
+     * makes, across discovery, prospecting, intelligence and pricing. Loaded
+     * once from the repository's KV store and persisted once at the end of
+     * the cycle so budgets/cache survive across cron invocations (a Worker
+     * instance is not guaranteed to stay warm between 30-minute ticks). */
     const liveLlm = opts.useLive !== false ? this.providers.llm ?? null : null;
+    const tavilyProvider = opts.useLive !== false ? this.providers.tavily ?? this.providers.search ?? null : null;
+    const braveProvider = opts.useLive !== false ? this.providers.brave ?? null : null;
+    const hasLiveSearch = Boolean(tavilyProvider?.connected || braveProvider?.connected);
+    const survivalStatusAtStart = computeSurvivalStatus(balanceFrom(await this.repo.listTransactions()));
+    const economyState = await loadEconomyState(this.repo);
+    const searchCtx: SearchEconomyContext = {
+      state: economyState,
+      providers: { tavily: tavilyProvider, brave: braveProvider },
+      survivalStatus: agent.status === 'DEAD' ? 'DEAD' : survivalStatusAtStart,
+      now: Date.now(),
+      cycleStartedAt: cycle.startedAt,
+      onLog: (message) => {
+        void hooks.log('WARNING', message);
+      },
+    };
 
-    if (liveSearch?.connected) {
+    /* 2 — DISCOVER */
+    if (hasLiveSearch) {
       await hooks.setActivity?.('Live web search — discovering real opportunities…', 'DISCOVER');
       const existingNames = opportunities.map((o) => o.name);
-      const { opportunities: liveOpps, queriesRun, sourcesCount } = await discoverLive(
-        liveSearch,
+      const { opportunities: liveOpps, queriesRun, sourcesCount, cacheHits, budgetExceeded } = await discoverLive(
+        searchCtx,
         liveLlm,
         existingNames,
       );
@@ -238,10 +264,10 @@ export class AgentEngine {
         await this.repo.completeCycle(cycle.id, { discoveredIds: ids });
         await hooks.log(
           'DISCOVERY',
-          `LIVE discovery: ${queriesRun} searches, ${sourcesCount} sources cited, ${liveOpps.length} new opportunities tagged LIVE${liveLlm?.connected ? ` and analyzed by ${liveLlm.label}` : ' (analysis pending LLM connector)'}.`,
+          `LIVE discovery: ${queriesRun} fresh search(es), ${cacheHits} served from cache, ${budgetExceeded} skipped (budget), ${sourcesCount} sources cited, ${liveOpps.length} new opportunities tagged LIVE${liveLlm?.connected ? ` and analyzed by ${liveLlm.label}` : ' (analysis pending LLM connector)'}.`,
         );
       } else {
-        await hooks.log('DISCOVERY', 'Live search returned no new models (or provider error) — continuing from knowledge base.');
+        await hooks.log('DISCOVERY', `Live search: ${cacheHits} cached / ${budgetExceeded} budget-limited, no new models this cycle — continuing from knowledge base.`);
       }
     }
 
@@ -258,9 +284,9 @@ export class AgentEngine {
         await this.repo.completeCycle(cycle.id, { discoveredIds: [...priorIds, ...ids] });
         await hooks.log(
           'DISCOVERY',
-          `${liveSearch?.connected ? 'Also discovered' : 'Discovered'} ${discovered.length} from knowledge base: ${discovered.map((d) => d.name).join('; ')}.`,
+          `${hasLiveSearch ? 'Also discovered' : 'Discovered'} ${discovered.length} from knowledge base: ${discovered.map((d) => d.name).join('; ')}.`,
         );
-      } else if (!liveSearch?.connected) {
+      } else if (!hasLiveSearch) {
         await hooks.log('DISCOVERY', 'SAMPLE knowledge base fully explored. Connect search + LLM for live discovery.');
       }
     }
@@ -578,7 +604,7 @@ export class AgentEngine {
           .sort((a, b) => (b.score?.total ?? 0) - (a.score?.total ?? 0))
           .slice(0, 2);
 
-        if (liveSearch?.connected && pursuable.length > 0) {
+        if (hasLiveSearch && pursuable.length > 0) {
           const existingProspects = await this.repo.listProspects();
           const allOppsForStats = await this.repo.listOpportunities();
           const realRevenueForStats = await this.repo.listRealRevenue();
@@ -596,7 +622,7 @@ export class AgentEngine {
               computeCategoryRealWorldStats(allOppsForStats, existingProspects, realRevenueForStats),
               opp.category,
             );
-            const { prospects, sourcesCount } = await discoverProspects(liveSearch, opp, model, existingNames, categoryStats);
+            const { prospects, sourcesCount } = await discoverProspects(searchCtx, opp, model, existingNames, categoryStats);
             if (prospects.length === 0) continue;
             await this.repo.upsertProspects(prospects);
             for (const p of prospects) {
@@ -627,7 +653,12 @@ export class AgentEngine {
         // research otherwise.
         const allProspects = await this.repo.listProspects();
         const existingIntelligence = await this.repo.listProspectIntelligence();
-        if (liveSearch?.connected) {
+        if (hasLiveSearch) {
+          // Phase 4/12: prospects that already have an intelligence report
+          // are excluded above (no repeat research within its cache TTL);
+          // among the rest, still prioritize by expected value first so a
+          // budget-limited cycle spends its few searches on the prospects
+          // most likely to matter, not just whichever were discovered first.
           const needsResearch = allProspects
             .filter(
               (p) =>
@@ -640,7 +671,9 @@ export class AgentEngine {
             .sort((a, b) => b.score.expectedValue - a.score.expectedValue)
             .slice(0, 3);
           for (const p of needsResearch) {
-            const intel = await researchProspect(liveSearch, liveLlm, p);
+            const statusChanged = p.status === 'INTERESTED' || p.status === 'REPLIED';
+            const offerPending = p.status === 'PROPOSAL_SENT' || p.status === 'NEGOTIATING';
+            const intel = await researchProspect(searchCtx, liveLlm, p, now, { statusChanged, offerPending });
             await this.repo.upsertProspectIntelligence(intel);
             await this.repo.appendProspectInteraction({
               id: uid('pint'),
@@ -703,7 +736,7 @@ export class AgentEngine {
           .sort((a, b) => b.score.expectedValue - a.score.expectedValue)
           .slice(0, 5);
 
-        if (liveSearch?.connected) {
+        if (hasLiveSearch) {
           const existingPricing = await this.repo.listMarketPriceResearch();
           const oppsNeedingPricing = new Map<string, Opportunity>();
           for (const p of needsOffer) {
@@ -712,7 +745,7 @@ export class AgentEngine {
             if (opp) oppsNeedingPricing.set(opp.id, opp);
           }
           for (const opp of oppsNeedingPricing.values()) {
-            const priceResearch = await researchMarketPrice(liveSearch, liveLlm, opp);
+            const priceResearch = await researchMarketPrice(searchCtx, liveLlm, opp, Date.now(), { offerPending: true });
             await this.repo.upsertMarketPriceResearch(priceResearch);
           }
           if (oppsNeedingPricing.size > 0) {
@@ -798,6 +831,11 @@ export class AgentEngine {
         // loop — log and continue; the next cycle will re-evaluate anyway.
         await hooks.log('WARNING', `Commercial-core evaluation failed this cycle: ${(e as Error).message}`);
       }
+
+      // Persist the search-economy ledger (budget usage + cache) once,
+      // whatever happened above — losing this write only means the next
+      // cycle re-derives slightly stale counts, never a crash.
+      await saveEconomyState(this.repo, searchCtx.state);
 
       await this.repo.completeCycle(cycle.id, {
         completedAt: Date.now(),
