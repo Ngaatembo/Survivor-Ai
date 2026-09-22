@@ -51,11 +51,18 @@ export function ProspectDrawer({ prospect, onClose }: { prospect: Prospect; onCl
   const demo = useStore((s) => s.prospectDemos.find((d) => d.prospectId === prospect.id));
   const regenerateProspectDemo = useStore((s) => s.regenerateProspectDemo);
   const viewProspectDemo = useStore((s) => s.viewProspectDemo);
+  const generateOfferNow = useStore((s) => s.generateOfferNow);
+  const generateOutreachNow = useStore((s) => s.generateOutreachNow);
+  const requestProspectActionApproval = useStore((s) => s.requestProspectActionApproval);
+  const actionApprovals = useStore((s) => s.actionApprovals ?? []);
   const [buildingDemo, setBuildingDemo] = useState(false);
   const [updating, setUpdating] = useState(false);
   const [researching, setResearching] = useState(false);
   const [fullResearching, setFullResearching] = useState(false);
   const [verifying, setVerifying] = useState(false);
+  const [generatingOffer, setGeneratingOffer] = useState(false);
+  const [generatingOutreach, setGeneratingOutreach] = useState(false);
+  const [requestingApproval, setRequestingApproval] = useState(false);
   const [actionError, setActionError] = useState('');
 
   const setStatus = async (status: ProspectStatus) => {
@@ -71,39 +78,56 @@ export function ProspectDrawer({ prospect, onClose }: { prospect: Prospect; onCl
   };
 
   const runVerification = async () => {
-    setVerifying(true);
-    try {
-      await verifyProspectNow(prospect.id);
-    } finally {
-      setVerifying(false);
-    }
+    setVerifying(true); setActionError('');
+    try { await verifyProspectNow(prospect.id); }
+    catch (e) { setActionError((e as Error).message || 'Could not verify prospect.'); }
+    finally { setVerifying(false); }
   };
 
   const runResearch = async () => {
-    setResearching(true);
-    try {
-      await researchProspectNow(prospect.id);
-    } finally {
-      setResearching(false);
-    }
+    setResearching(true); setActionError('');
+    try { await researchProspectNow(prospect.id); }
+    catch (e) { setActionError((e as Error).message || 'Could not research prospect.'); }
+    finally { setResearching(false); }
   };
 
   const runFullResearch = async () => {
-    setFullResearching(true);
-    try {
-      await unifiedProspectResearchNow(prospect.id);
-    } finally {
-      setFullResearching(false);
-    }
+    setFullResearching(true); setActionError('');
+    try { await unifiedProspectResearchNow(prospect.id); }
+    catch (e) { setActionError((e as Error).message || 'Could not complete full research.'); }
+    finally { setFullResearching(false); }
   };
 
   const runBuildDemo = async () => {
-    setBuildingDemo(true);
-    try {
-      await regenerateProspectDemo(prospect.id);
-    } finally {
-      setBuildingDemo(false);
-    }
+    setBuildingDemo(true); setActionError('');
+    try { await regenerateProspectDemo(prospect.id); }
+    catch (e) { setActionError((e as Error).message || 'Could not build demo.'); }
+    finally { setBuildingDemo(false); }
+  };
+
+  const verifiedReady = prospect.verification?.status === 'VERIFIED' || prospect.verification?.status === 'PROVISIONAL';
+  const offerApproval = offer ? actionApprovals.find((a) => a.actionId === `offer:${offer.id}`) : undefined;
+  const outreachApproval = outreach ? actionApprovals.find((a) => a.actionId === `outreach:${prospect.id}`) : undefined;
+
+  const runGenerateOffer = async () => {
+    setGeneratingOffer(true); setActionError('');
+    try { await generateOfferNow(prospect.id); }
+    catch (e) { setActionError((e as Error).message || 'Could not generate offer.'); }
+    finally { setGeneratingOffer(false); }
+  };
+
+  const runGenerateOutreach = async () => {
+    setGeneratingOutreach(true); setActionError('');
+    try { await generateOutreachNow(prospect.id); }
+    catch (e) { setActionError((e as Error).message || 'Could not generate outreach.'); }
+    finally { setGeneratingOutreach(false); }
+  };
+
+  const requestApproval = async (kind: 'SEND_OFFER' | 'CONTACT_PROSPECT', actionId: string, title: string) => {
+    setRequestingApproval(true); setActionError('');
+    try { await requestProspectActionApproval({ actionId, actionKind: kind, title, prospectId: prospect.id, opportunityId: prospect.opportunityId }); }
+    catch (e) { setActionError((e as Error).message || 'Could not request approval.'); }
+    finally { setRequestingApproval(false); }
   };
 
   return (
@@ -149,6 +173,19 @@ export function ProspectDrawer({ prospect, onClose }: { prospect: Prospect; onCl
             {(NEXT_STATUS_OPTIONS[prospect.status] ?? []).length === 0 && (
               <span className="faint small">No further status changes suggested from here.</span>
             )}
+          </div>
+        </div>
+
+        <div className="drawer-section">
+          <h3>Sales preparation</h3>
+          <p className="faint small" style={{ marginBottom: 8 }}>
+            Generate the offer and outreach only after identity/contact verification. Drafts never send themselves.
+          </p>
+          <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+            {!offer && <button className="btn small primary" disabled={!verifiedReady || generatingOffer} onClick={runGenerateOffer}>{generatingOffer ? 'Generating offer…' : 'Generate offer'}</button>}
+            {offer && !outreach && <button className="btn small primary" disabled={!verifiedReady || generatingOutreach} onClick={runGenerateOutreach}>{generatingOutreach ? 'Generating outreach…' : 'Generate outreach'}</button>}
+            {offer && <button className="btn small" disabled={requestingApproval || offerApproval?.status === 'APPROVED' || offerApproval?.status === 'EXECUTED'} onClick={() => requestApproval('SEND_OFFER', `offer:${offer.id}`, `Review and send offer to ${prospect.businessName}`)}>{offerApproval?.status === 'APPROVED' || offerApproval?.status === 'EXECUTED' ? 'Offer approved' : 'Request offer approval'}</button>}
+            {outreach && <button className="btn small" disabled={requestingApproval || outreachApproval?.status === 'APPROVED' || outreachApproval?.status === 'EXECUTED'} onClick={() => requestApproval('CONTACT_PROSPECT', `outreach:${prospect.id}`, `Review and contact ${prospect.businessName}`)}>{outreachApproval?.status === 'APPROVED' || outreachApproval?.status === 'EXECUTED' ? 'Outreach approved' : 'Request outreach approval'}</button>}
           </div>
         </div>
 

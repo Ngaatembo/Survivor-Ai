@@ -24,6 +24,9 @@ import { researchProspect } from '../../src/services/prospectIntelligence';
 import { verifyProspect } from '../../src/services/prospectVerification';
 import { discoverProspects } from '../../src/services/prospectDiscovery';
 import { generateProspectDemo } from '../../src/lib/demoGenerator';
+import { generateDesignBrief } from '../../src/lib/designBriefGenerator';
+import { generateOffer } from '../../src/lib/offerGenerator';
+import { generateOutreachMessages } from '../../src/lib/outreachGenerator';
 import { createLLMProvider } from '../../src/services/providers/llm';
 import { createSearchProviders } from '../../src/services/providers/search';
 import { balanceFrom } from '../../src/services/wallet';
@@ -123,6 +126,22 @@ const json = (data: unknown, init?: ResponseInit) =>
       ...(init?.headers ?? {}),
     },
   });
+
+async function hasHumanApproval(
+  repo: EngineRepository,
+  opts: { actionId?: string; actionKind: string; prospectId?: string },
+): Promise<boolean> {
+  const raw = await repo.getKV('human_action_approvals');
+  let approvals: any[] = [];
+  try { approvals = raw ? JSON.parse(raw) : []; } catch { approvals = []; }
+  if (!Array.isArray(approvals)) return false;
+  return approvals.some((a) =>
+    (a?.status === 'APPROVED' || a?.status === 'EXECUTED') &&
+    a?.actionKind === opts.actionKind &&
+    (opts.actionId ? a?.actionId === opts.actionId : true) &&
+    (opts.prospectId ? a?.prospectId === opts.prospectId : true),
+  );
+}
 
 function buildEngine(env: Env): {
   engine: AgentEngine;
@@ -1412,7 +1431,7 @@ export default {
         if (!opportunity) return json({ ok: false, error: 'selected opportunity not found' }, { status: 404 });
         if (opportunity.id === directAcquisitionOpportunity.id) {
           await repo.upsertOpportunities([directAcquisitionOpportunity]);
-          await repo.upsertBusinessModels([directAcquisitionModel]);
+          await repo.upsertBusinessModel(directAcquisitionModel);
         }
         const models = await repo.listBusinessModels();
         const model = models.find((m) => m.opportunityId === opportunity.id);
@@ -1437,6 +1456,69 @@ export default {
         return json({ ok: true, opportunityId: opportunity.id, opportunityName: opportunity.name, directAcquisitionMode: opportunity.id === 'nwt-dev-local-business-acquisition', region: region || opportunity.geographicRelevance[0] || 'Zimbabwe', searchQuery: searchQuery || null, discovered: discovered.prospects.length, verified: accepted.length, rejectedUnverifiedOrConflicting: discovered.prospects.length - accepted.length, queriesRun: discovered.queriesRun, sourcesCount: discovered.sourcesCount, cacheHits: discovered.cacheHits, budgetExceeded: discovered.budgetExceeded, prospects: accepted });
       } catch (e) { return json({ ok: false, error: (e as Error).message }, { status: 500 }); }
     }
+    if (url.pathname === '/offers/generate' && req.method === 'POST') {
+      let body: any;
+      try { body = await req.json(); } catch { return json({ ok: false, error: 'invalid JSON body' }, { status: 400 }); }
+      const prospectId = typeof body?.prospectId === 'string' ? body.prospectId : '';
+      if (!prospectId) return json({ ok: false, error: 'prospectId is required' }, { status: 400 });
+      try {
+        const { repo } = buildEngine(env);
+        const [prospects, offers, models, intelligence, pricing] = await Promise.all([
+          repo.listProspects(), repo.listOffers(), repo.listBusinessModels(), repo.listProspectIntelligence(), repo.listMarketPriceResearch(),
+        ]);
+        const prospect = prospects.find((p) => p.id === prospectId);
+        if (!prospect) return json({ ok: false, error: `no prospect found with id ${prospectId}` }, { status: 404 });
+        if (!['VERIFIED', 'PROVISIONAL'].includes(prospect.verification?.status ?? '')) {
+          return json({ ok: false, error: 'offer generation requires VERIFIED or PROVISIONAL prospect verification' }, { status: 409 });
+        }
+        if (offers.some((o) => o.prospectId === prospectId)) {
+          return json({ ok: false, error: 'an offer already exists for this prospect' }, { status: 409 });
+        }
+        const model = models.find((m) => m.opportunityId === prospect.opportunityId);
+        const intel = intelligence.find((i) => i.prospectId === prospectId);
+        const marketPrice = pricing.find((p) => p.opportunityId === prospect.opportunityId);
+        const offer = generateOffer(prospect, model, intel, marketPrice);
+        await repo.upsertOffer(offer);
+        const brief = generateDesignBrief(offer, prospect);
+        await repo.upsertDesignBrief(brief);
+        await repo.appendProspectInteraction({
+          id: `pint_${crypto.randomUUID()}`, prospectId, kind: 'OFFER_DRAFTED',
+          summary: 'Offer and design brief generated on demand for human review.', createdAt: Date.now(),
+        });
+        return json({ ok: true, offer, designBrief: brief, approvalAction: { actionId: `offer:${offer.id}`, actionKind: 'SEND_OFFER', title: `Review and send offer to ${prospect.businessName}`, prospectId } });
+      } catch (e) { return json({ ok: false, error: (e as Error).message }, { status: 500 }); }
+    }
+
+    if (url.pathname === '/outreach/generate' && req.method === 'POST') {
+      let body: any;
+      try { body = await req.json(); } catch { return json({ ok: false, error: 'invalid JSON body' }, { status: 400 }); }
+      const prospectId = typeof body?.prospectId === 'string' ? body.prospectId : '';
+      if (!prospectId) return json({ ok: false, error: 'prospectId is required' }, { status: 400 });
+      try {
+        const { repo } = buildEngine(env);
+        const [prospects, outreach, models, intelligence] = await Promise.all([
+          repo.listProspects(), repo.listOutreachMessages(), repo.listBusinessModels(), repo.listProspectIntelligence(),
+        ]);
+        const prospect = prospects.find((p) => p.id === prospectId);
+        if (!prospect) return json({ ok: false, error: `no prospect found with id ${prospectId}` }, { status: 404 });
+        if (!['VERIFIED', 'PROVISIONAL'].includes(prospect.verification?.status ?? '')) {
+          return json({ ok: false, error: 'outreach generation requires VERIFIED or PROVISIONAL prospect verification' }, { status: 409 });
+        }
+        if (outreach.some((o) => o.prospectId === prospectId)) {
+          return json({ ok: false, error: 'outreach already exists for this prospect' }, { status: 409 });
+        }
+        const model = models.find((m) => m.opportunityId === prospect.opportunityId);
+        const intel = intelligence.find((i) => i.prospectId === prospectId);
+        const messages = generateOutreachMessages(prospect, model, intel);
+        await repo.upsertOutreachMessages(messages);
+        await repo.appendProspectInteraction({
+          id: `pint_${crypto.randomUUID()}`, prospectId, kind: 'OUTREACH_GENERATED',
+          summary: 'Outreach message set generated on demand for human review; nothing was sent.', createdAt: Date.now(),
+        });
+        return json({ ok: true, outreach: messages, approvalAction: { actionId: `outreach:${prospectId}`, actionKind: 'CONTACT_PROSPECT', title: `Review and contact ${prospect.businessName}`, prospectId } });
+      } catch (e) { return json({ ok: false, error: (e as Error).message }, { status: 500 }); }
+    }
+
     if (url.pathname === '/prospects/status' && req.method === 'POST') {
       // The CRM write path (Phase 3, carried forward from the original
       // build spec): a human records a real-world outcome for a prospect.
@@ -1487,9 +1569,15 @@ export default {
         const offers = await repo.listOffers();
         const offer = offers.find((o) => o.prospectId === prospectId);
         const offerSent = offer?.status === 'SENT' || offer?.status === 'ACCEPTED';
+        if (status === 'PROPOSAL_SENT' && offer && !await hasHumanApproval(repo, { actionId: `offer:${offer.id}`, actionKind: 'SEND_OFFER', prospectId })) {
+          return json({ ok: false, error: 'Human approval is required before recording a sent proposal.' }, { status: 403 });
+        }
 
         // Server-side evidence gates prevent the CRM from claiming progress that
         // the stored evidence cannot support. Human confirmation is still required.
+        if ((status === 'CONTACTED' || status === 'FOLLOW_UP') && !await hasHumanApproval(repo, { actionId: `outreach:${prospectId}`, actionKind: 'CONTACT_PROSPECT', prospectId })) {
+          return json({ ok: false, error: 'Human approval is required before recording CONTACTED or FOLLOW_UP for this prospect.' }, { status: 403 });
+        }
         if (status === 'CONTACTED' && (!verificationReady || !hasVerifiedContact)) {
           return json({
             ok: false,
@@ -1774,6 +1862,14 @@ export default {
       }
       try {
         const { repo } = buildEngine(env);
+        if (status === 'SENT') {
+          const offers = await repo.listOffers();
+          const offer = offers.find((o) => o.id === offerId);
+          if (!offer) return json({ ok: false, error: `no offer found with id ${offerId}` }, { status: 404 });
+          if (!await hasHumanApproval(repo, { actionId: `offer:${offerId}`, actionKind: 'SEND_OFFER', prospectId: offer.prospectId })) {
+            return json({ ok: false, error: 'Human approval is required before an offer can be marked SENT.' }, { status: 403 });
+          }
+        }
         await repo.updateOfferStatus(offerId, status as OfferStatus);
         return json({ ok: true, offerId, status });
       } catch (e) {
