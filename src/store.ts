@@ -504,9 +504,11 @@ export const useStore = create<SurviveState>()(
           if (!featureFlags.backend) return;
           try {
             await apiResearchIncomeChannels();
+            set({ actionError: null, actionSuccess: 'Income-channel research completed.' } as any);
             await get().syncFromBackend();
           } catch (e) {
             const message = e instanceof BackendError ? e.message : (e as Error).message;
+            set({ actionError: `Income research failed: ${message}`, actionSuccess: null } as any);
             get().logEvent('WARNING', `Income research failed: ${message}`);
           }
         },
@@ -857,6 +859,7 @@ export const useStore = create<SurviveState>()(
             shouldContinue: () => (auto ? get().loop.running : true),
           });
         } catch (e) {
+          set({ actionError: `Cycle failed: ${(e as Error).message}`, actionSuccess: null } as any);
           get().logEvent('WARNING', `Cycle error: ${(e as Error).message}`);
         } finally {
           const balance = balanceFrom(get().transactions);
