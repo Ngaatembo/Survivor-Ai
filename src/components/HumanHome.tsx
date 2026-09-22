@@ -8,7 +8,7 @@
  * ========================================================================== */
 import { useState } from 'react';
 import { useStore, useWalletTotals, backendConfigured } from '../store';
-import { demoUrl } from '../services/backendApi';
+import { demoUrl, requestActionApproval, reviewActionApproval } from '../services/backendApi';
 import { usd, usdWhole, timeAgo } from '../lib/format';
 import type { RecommendedAction } from '../types';
 import { salesReadiness } from '../lib/salesReadiness';
@@ -341,6 +341,34 @@ function SalesReady({ go }: { go: (v: View) => void }) {
   );
 }
 
+function ApprovalQueue() {
+  const approvals = useStore((s) => s.actionApprovals ?? []);
+  const pending = approvals.filter((a) => a.status === 'PENDING');
+  const [busy, setBusy] = useState<string | null>(null);
+  if (!pending.length) return null;
+  const review = async (id: string, decision: 'APPROVED' | 'REJECTED') => {
+    setBusy(id);
+    try { await reviewActionApproval(id, decision); } finally { setBusy(null); }
+  };
+  return (
+    <section className="block">
+      <div className="card-head"><div><h2>Human approval queue</h2><span className="faint small">Approval records intent only. Survivor still never sends messages or moves real money.</span></div></div>
+      <div className="action-list">
+        {pending.slice(0, 8).map((a) => (
+          <div className="action-card" key={a.id}>
+            <div className="action-title">{a.title}</div>
+            <div className="muted small">{a.actionKind}</div>
+            <div className="act-row" style={{ marginTop: 8 }}>
+              <button className="btn primary big" disabled={busy === a.id} onClick={() => review(a.id, 'APPROVED')}>{busy === a.id ? 'Saving…' : 'Approve'}</button>
+              <button className="btn big" disabled={busy === a.id} onClick={() => review(a.id, 'REJECTED')}>Reject</button>
+            </div>
+          </div>
+        ))}
+      </div>
+    </section>
+  );
+}
+
 function SurvivalScoreCard() {
   const s = useStore((x) => x.survivalScore);
   const live = useLiveState();
@@ -561,6 +589,7 @@ export function HumanHome({ go }: { go: (v: View) => void }) {
     <div className="human-home">
       <Header />
       <SurvivalScoreCard />
+      <ApprovalQueue />
       <NextMoneyAction go={go} />
       <ActionCards go={go} />
       <SalesReady go={go} />
