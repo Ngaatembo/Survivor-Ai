@@ -587,6 +587,15 @@ export interface ProspectIntelligence {
   updatedAt: number;
 }
 
+export interface UnifiedProspectResearch {
+  prospect: Prospect;
+  intelligence: ProspectIntelligence;
+  marketPrice: MarketPriceResearch;
+  sources: ResearchSource[];
+  overallConfidence: 'HIGH' | 'MEDIUM' | 'LOW';
+  generatedAt: number;
+}
+
 /* ---------------------------------- missions --------------------------------- */
 
 /**
