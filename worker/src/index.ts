@@ -1265,6 +1265,23 @@ export default {
       }
     }
 
+    if (url.pathname === '/actions/approvals/execute' && req.method === 'POST') {
+      try {
+        const body: any = await req.json();
+        if (typeof body?.approvalId !== 'string') return json({ ok: false, error: 'approvalId is required' }, { status: 400 });
+        const { repo } = buildEngine(env);
+        const raw = await repo.getKV('human_action_approvals');
+        const approvals: any[] = raw ? JSON.parse(raw) : [];
+        const approval = approvals.find((a) => a.id === body.approvalId);
+        if (!approval) return json({ ok: false, error: 'approval not found' }, { status: 404 });
+        if (approval.status !== 'APPROVED') return json({ ok: false, error: 'only approved actions can be marked executed' }, { status: 409 });
+        approval.status = 'EXECUTED';
+        approval.executedAt = Date.now();
+        await repo.setKV('human_action_approvals', JSON.stringify(approvals));
+        return json({ ok: true, approval });
+      } catch (e) { return json({ ok: false, error: (e as Error).message }, { status: 500 }); }
+    }
+
     if (url.pathname === '/content/state' && req.method === 'GET') {
       try {
         const { repo } = buildEngine(env);
