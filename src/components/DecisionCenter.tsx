@@ -1,5 +1,5 @@
 import { useMemo } from 'react';
-import { useStore } from '../store';
+import { useStore, backendConfigured } from '../store';
 import { Panel, Badge, DataSourceBadge, EvidenceBadge, ScoreRing, RecommendationBadge } from './ui';
 import { capRange, dayRange, usd } from '../lib/format';
 import { experimentBudget } from '../lib/simulation';
@@ -69,9 +69,13 @@ export function DecisionCenter() {
           <div className="empty">
             No executable recommendation yet — run a research cycle to discover and score opportunities.
             <div style={{ marginTop: 12 }}>
+            {backendConfigured ? (
+              <span className="faint small">Live mode: wait for the backend research cycle to update this view.</span>
+            ) : (
               <button className="btn primary" onClick={runNextCycle} disabled={busy}>
                 ▶ Run research cycle
               </button>
+            )}
             </div>
           </div>
         </Panel>
@@ -143,17 +147,24 @@ export function DecisionCenter() {
               </div>
 
               <div style={{ display: 'flex', gap: 9, marginTop: 16, alignItems: 'center', flexWrap: 'wrap' }}>
-                <button
-                  className="btn primary"
-                  disabled={dead || busy || livePick.executionBlocked}
-                  onClick={() => runManualExperiment(livePick.id)}
-                >
-                  ▶ Simulate experiment — {usd(plannedBudget)} simulated
-                </button>
-                <button className="btn" onClick={() => generateReportFor(livePick.id)}>
-                  Generate full report
-                </button>
-                <span className="faint small mono">SIMULATION ONLY — no real money moves.</span>
+                {!backendConfigured && (
+                  <>
+                    <button
+                      className="btn primary"
+                      disabled={dead || busy || livePick.executionBlocked}
+                      onClick={() => runManualExperiment(livePick.id)}
+                    >
+                      ▶ Simulate experiment — {usd(plannedBudget)} simulated
+                    </button>
+                    <button className="btn" onClick={() => generateReportFor(livePick.id)}>
+                      Generate full report
+                    </button>
+                    <span className="faint small mono">SIMULATION ONLY — no real money moves.</span>
+                  </>
+                )}
+                {backendConfigured && (
+                  <span className="faint small mono">LIVE BACKEND — execution and report generation run server-side.</span>
+                )}
               </div>
             </Panel>
           </div>
