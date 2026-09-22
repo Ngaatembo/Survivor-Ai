@@ -204,6 +204,8 @@ interface SurviveState {
    *  same researchProspect() function directly against the local
    *  search/LLM providers. Requires live search to be connected. */
   researchProspectNow: (prospectId: string) => Promise<void>;
+  /** Human-triggered identity/contact consolidation using independent public sources. */
+  verifyProspectNow: (prospectId: string) => Promise<void>;
   researchIncomeChannels: () => Promise<void>;
   /** Phase 3 (deepened) — manually regenerate a prospect's real, working
    *  demo page right now. Requires an existing offer for this prospect. */
