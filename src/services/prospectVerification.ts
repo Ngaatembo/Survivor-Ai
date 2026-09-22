@@ -271,8 +271,8 @@ export async function verifyProspect(
 
   const status: ProspectVerification['status'] =
     contactConflict ? 'CONFLICT' :
-    (identityScore >= 0.72 && sourceKeys.size >= 2 && verifiedContact) ? 'VERIFIED' :
-    (identityScore >= 0.55 && (sourceKeys.size >= 1 || existingNormalized)) ? 'PROVISIONAL' :
+    (identityScore >= 0.72 && sourceKeys.size >= 2 && (verifiedContact || verifiedEmail)) ? 'VERIFIED' :
+    (identityScore >= 0.55 && (sourceKeys.size >= 1 || existingNormalized) && (verifiedContact || verifiedEmail || verifiedWebsite || verifiedLocation || existingNormalized)) ? 'PROVISIONAL' :
     'UNVERIFIED';
 
   const verifiedValue = status === 'VERIFIED' || status === 'PROVISIONAL'
