@@ -434,6 +434,7 @@ export interface IncomeStrategyResponse {
     kind: string; name: string; category: string; lifecycle: string; marketId: string;
     customer: string; problemToSolve: string; delivery: string; requiredHumanAction: string;
     risk: string; testCost: string; nextExperiment: string; searchResultCount: number;
+    decision: { lifecycle: string; realRevenue: number; realSales: number; reasons: string[]; nextExperiment: string };
   }>;
   evidence: Array<{ channel: string; title: string; description: string; sourceUrls: string[] }>;
   forex: {
