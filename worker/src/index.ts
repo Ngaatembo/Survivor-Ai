@@ -675,7 +675,7 @@ export default {
             (p) => p.status === 'WON' && !realRevenue.some((r) => r.prospectId === p.id),
           ).length,
         };
-        const moneyMetrics = computeMoneyMetrics(prospects, offers, realRevenue);
+        const incomeRaw = await repo.getKV('income_intelligence');\n        let incomeIntelligence: unknown[] = [];\n        try { incomeIntelligence = incomeRaw ? JSON.parse(incomeRaw) : []; } catch { incomeIntelligence = []; }\n\n        const moneyMetrics = computeMoneyMetrics(prospects, offers, realRevenue);
 
         return json({
           ok: true,
