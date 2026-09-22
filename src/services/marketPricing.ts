@@ -17,6 +17,31 @@ import type { LLMProvider } from './providers/types';
 import { runSearch, type SearchEconomyContext } from './searchEconomy';
 
 const MAX_SNIPPETS = 8;
+const PRICE_RE = /(?:US\\$|USD\\s*|\\$|ZAR\\s*|R\\s*|ZWL\\s*|ZW\\$)\\s*([0-9]{1,6}(?:[.,][0-9]{1,2})?)/gi;
+
+type ObservedPrice = { value: number; currency: string; snippet: string };
+
+function extractObservedPrices(snippets: string[]): ObservedPrice[] {
+  const out: ObservedPrice[] = [];
+  for (const snippet of snippets) {
+    for (const match of snippet.matchAll(PRICE_RE)) {
+      const raw = match[1].replace(/,/g, '');
+      const value = Number(raw);
+      if (!Number.isFinite(value) || value <= 0 || value > 1_000_000) continue;
+      const before = snippet.slice(Math.max(0, (match.index ?? 0) - 8), match.index ?? 0);
+      const currency = /US\\$|USD/i.test(before) ? 'USD'
+        : /ZAR|\\bR\\s*$/i.test(before) ? 'ZAR'
+        : /ZWL|ZW\\$/i.test(before) ? 'ZWL'
+        : 'USD';
+      // Ignore obvious years and tiny numbers that are unlikely to be a service price.
+      if ((value >= 1900 && value <= 2100) || value < 2) continue;
+      out.push({ value, currency, snippet });
+    }
+  }
+  return out;
+}
+
+
 
 async function gatherPricingSnippets(
   ctx: SearchEconomyContext,
@@ -112,6 +137,13 @@ export async function researchMarketPrice(
   const service = opp.howMoneyMade || opp.name;
   const region = opp.geographicRelevance[0] ?? 'Zimbabwe';
   const { snippets, sources } = await gatherPricingSnippets(ctx, service, region, opp.id, opts.offerPending ?? true);
+  const observed = extractObservedPrices(snippets);
+  const observedByCurrency = new Map<string, number[]>();
+  for (const item of observed) {
+    const values = observedByCurrency.get(item.currency) ?? [];
+    values.push(item.value);
+    observedByCurrency.set(item.currency, values);
+  }
 
   let body:
     | Omit<MarketPriceResearch, 'id' | 'opportunityId' | 'sources' | 'generatedAt' | 'updatedAt'>
@@ -121,23 +153,46 @@ export async function researchMarketPrice(
     try {
       const analysis = await llm.analyzeMarketPrice({ service, region, snippets });
       if (analysis && typeof analysis.priceMin === 'number' && typeof analysis.priceMax === 'number' && analysis.priceMax > 0) {
-        body = {
-          service,
-          region,
-          priceMin: analysis.priceMin,
-          priceMax: analysis.priceMax,
-          currency: analysis.currency ?? 'USD',
-          rationale: analysis.rationale ?? 'Synthesized from real search results.',
-          confidence: analysis.confidence ?? 'MEDIUM',
-          generator: 'llm',
-        };
+        const currency = analysis.currency ?? 'USD';
+        const observedValues = observedByCurrency.get(currency) ?? [];
+        const observedMin = observedValues.length ? Math.min(...observedValues) : 0;
+        const observedMax = observedValues.length ? Math.max(...observedValues) : 0;
+        const withinObservedEvidence =
+          observedValues.length > 0 &&
+          analysis.priceMin >= observedMin &&
+          analysis.priceMax <= observedMax;
+        if (withinObservedEvidence) {
+          body = {
+            service,
+            region,
+            priceMin: analysis.priceMin,
+            priceMax: analysis.priceMax,
+            currency,
+            rationale: (analysis.rationale ?? 'Synthesized from real search results.') +
+              ' Evidence gate: quoted range is bounded by observed prices in the retrieved sources (' +
+              observedValues.join(', ') + ' ' + currency + ').',
+            confidence: analysis.confidence ?? 'MEDIUM',
+            generator: 'llm',
+          };
+        }
       }
     } catch {
       body = null; // fall through to digest
     }
   }
 
-  if (!body) body = digestFromSnippets(service, region, snippets);
+  if (!body) {
+    body = digestFromSnippets(service, region, snippets);
+    if (observed.length > 0) {
+      const byCurrency = [...observedByCurrency.entries()]
+        .map(([currency, values]) => currency + ': ' + Math.min(...values) + '-' + Math.max(...values))
+        .join('; ');
+      body = {
+        ...body,
+        rationale: body.rationale + ' Observed price evidence: ' + byCurrency + '.',
+      };
+    }
+  }
 
   return {
     id: uid('price'),
