@@ -1331,6 +1331,43 @@ export default {
       }
     }
 
+    if (url.pathname === '/prospects/discover' && req.method === 'POST') {
+      // Immediate operator-triggered real business discovery.
+      let body: any;
+      try { body = await req.json(); } catch { return json({ ok: false, error: 'invalid JSON body' }, { status: 400 }); }
+      const requestedOpportunityId = typeof body?.opportunityId === 'string' ? body.opportunityId : undefined;
+      const region = typeof body?.region === 'string' && body.region.trim() ? body.region.trim() : undefined;
+      const searchQuery = typeof body?.searchQuery === 'string' && body.searchQuery.trim() ? body.searchQuery.trim() : undefined;
+      try {
+        const { repo, tavily, brave } = buildEngine(env);
+        if (!tavily?.connected && !brave?.connected) return json({ ok: false, error: 'no live search provider connected — connect Tavily or Brave before discovering real businesses' }, { status: 503 });
+        const opportunities = (await repo.listOpportunities()).filter((o) => o.researchStage !== 'UNDISCOVERED');
+        if (!opportunities.length) return json({ ok: false, error: 'no researched opportunity is available yet; run research first' }, { status: 409 });
+        const opportunity = (requestedOpportunityId ? opportunities.find((o) => o.id === requestedOpportunityId) : undefined) || opportunities.sort((x,y) => (y.score?.total ?? 0) - (x.score?.total ?? 0))[0];
+        if (!opportunity) return json({ ok: false, error: 'selected opportunity not found' }, { status: 404 });
+        const models = await repo.listBusinessModels();
+        const model = models.find((m) => m.opportunityId === opportunity.id);
+        const existing = await repo.listProspects();
+        const existingNames = existing.filter((p) => p.opportunityId === opportunity.id).map((p) => p.businessName);
+        const balance = balanceFrom(await repo.listTransactions());
+        const state = await loadEconomyState(repo);
+        const now = Date.now();
+        const ctx = { state, providers: { tavily, brave }, survivalStatus: computeSurvivalStatus(balance), now, cycleStartedAt: now };
+        const discovered = await discoverProspects(ctx, opportunity, model, existingNames, undefined, now, { region, searchQuery });
+        const accepted: typeof discovered.prospects = [];
+        for (const raw of discovered.prospects) {
+          const verified = await verifyProspect(ctx, raw, now);
+          if (verified.verification?.status === 'UNVERIFIED' || verified.verification?.status === 'CONFLICT') continue;
+          accepted.push(verified);
+        }
+        if (accepted.length) {
+          await repo.upsertProspects(accepted);
+          for (const p of accepted) await repo.appendProspectInteraction({ id: 'pint_' + crypto.randomUUID(), prospectId: p.id, kind: 'DISCOVERED', summary: 'Operator-triggered live discovery + identity verification: ' + (p.verification?.status ?? 'UNVERIFIED') + ' (' + (p.verification?.confidence ?? 0) + '% confidence).', createdAt: now });
+        }
+        await saveEconomyState(repo, ctx.state);
+        return json({ ok: true, opportunityId: opportunity.id, opportunityName: opportunity.name, region: region || opportunity.geographicRelevance[0] || 'Zimbabwe', searchQuery: searchQuery || null, discovered: discovered.prospects.length, verified: accepted.length, rejectedUnverifiedOrConflicting: discovered.prospects.length - accepted.length, queriesRun: discovered.queriesRun, sourcesCount: discovered.sourcesCount, cacheHits: discovered.cacheHits, prospects: accepted });
+      } catch (e) { return json({ ok: false, error: (e as Error).message }, { status: 500 }); }
+    }
     if (url.pathname === '/prospects/status' && req.method === 'POST') {
       // The CRM write path (Phase 3, carried forward from the original
       // build spec): a human records a real-world outcome for a prospect.
