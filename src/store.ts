@@ -204,6 +204,7 @@ interface SurviveState {
    *  same researchProspect() function directly against the local
    *  search/LLM providers. Requires live search to be connected. */
   researchProspectNow: (prospectId: string) => Promise<void>;
+  unifiedProspectResearchNow: (prospectId: string) => Promise<void>;
   /** Human-triggered identity/contact consolidation using independent public sources. */
   verifyProspectNow: (prospectId: string) => Promise<void>;
   researchIncomeChannels: () => Promise<void>;
@@ -573,6 +574,20 @@ export const useStore = create<SurviveState>()(
             prospects: await repo.listProspects(),
             prospectIntelligence: await repo.listProspectIntelligence(),
           } as any);
+        },
+
+        unifiedProspectResearchNow: async (prospectId: string) => {
+          if (!featureFlags.backend) {
+            get().logEvent('WARNING', 'Unified research requires the live backend.');
+            return;
+          }
+          try {
+            await apiUnifiedProspectResearchNow(prospectId);
+            await get().syncFromBackend();
+          } catch (e) {
+            const message = e instanceof BackendError ? e.message : (e as Error).message;
+            get().logEvent('WARNING', `Failed unified research: ${message}`);
+          }
         },
 
         regenerateProspectDemo: async (prospectId: string) => {
