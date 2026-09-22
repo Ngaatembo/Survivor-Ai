@@ -1,6 +1,15 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useStore } from '../store';
-import { fetchFinivexStatus } from '../services/backendApi';
+import {
+  fetchFinivexStatus,
+  fetchPaymentRequests,
+  createPaymentRequest,
+  approvePaymentRequest,
+  cancelPaymentRequest,
+  createApprovedFinivexLink,
+  markPaymentRequestPaid,
+  type PaymentRequest,
+} from '../services/backendApi';
 import { Panel, Badge } from './ui';
 
 const CHANNELS = [
@@ -24,7 +33,24 @@ export function IncomeHub() {
   const researchIncomeChannels = useStore((s) => s.researchIncomeChannels);
   const backendSyncing = useStore((s) => s.backend.syncing);
   const [finivex, setFinivex] = useState<{ configured: boolean; canCreatePaymentLinks: boolean; note: string } | null>(null);
-  useEffect(() => { if (backendConnected) void fetchFinivexStatus().then((r) => setFinivex(r.payment)).catch(() => setFinivex(null)); }, [backendConnected]);
+  const [paymentRequests, setPaymentRequests] = useState<PaymentRequest[]>([]);
+  const [paymentBusy, setPaymentBusy] = useState(false);
+  const [paymentError, setPaymentError] = useState('');
+  const [paymentForm, setPaymentForm] = useState({ clientName: '', amount: '', description: '', paymentMethod: 'OTHER' as PaymentRequest['payment_method'] });
+
+  const refreshPayments = async () => {
+    if (!backendConnected) return;
+    try {
+      const [status, requests] = await Promise.all([fetchFinivexStatus(), fetchPaymentRequests()]);
+      setFinivex(status.payment);
+      setPaymentRequests(requests.requests);
+      setPaymentError('');
+    } catch (e) {
+      setPaymentError((e as Error).message);
+    }
+  };
+
+  useEffect(() => { void refreshPayments(); }, [backendConnected]);
 
   const money = useMemo(() => ({
     received: realRevenue.reduce((sum, r) => sum + r.amountReceived, 0),
@@ -78,6 +104,54 @@ export function IncomeHub() {
       </div>
       <div className={finivex?.configured ? 'info-banner' : 'warn-banner'} style={{ marginTop: 12, marginBottom: 0 }}>{finivex?.note ?? 'Backend status unavailable. Configure the Finivex merchant credentials as Worker secrets after merchant approval.'}</div>
       <div className="faint small" style={{ marginTop: 8 }}>No payment is initiated from this panel. Payment-link creation is kept behind the human approval path.</div>
+    </Panel>
+
+    <Panel title="CLIENT PAYMENT CONTROL" right={<span className="faint small mono">HUMAN CONTROLLED</span>}>
+      {paymentError && <div className="banner banner-error" style={{ marginBottom: 10 }}>{paymentError}</div>}
+      <div className="small muted" style={{ lineHeight: 1.7, marginBottom: 12 }}>
+        Create a payment request for a real client invoice. Survivor does not require Finivex: choose the payment method the client actually agreed to.
+        Finivex is only used when you explicitly approve that request and create its hosted payment link.
+      </div>
+      <div className="grid cols-4" style={{ marginBottom: 12 }}>
+        <input placeholder="Client / business" value={paymentForm.clientName} onChange={e => setPaymentForm(v => ({ ...v, clientName: e.target.value }))} />
+        <input placeholder="Amount" type="number" min="0.01" step="0.01" value={paymentForm.amount} onChange={e => setPaymentForm(v => ({ ...v, amount: e.target.value }))} />
+        <input placeholder="What are they paying for?" value={paymentForm.description} onChange={e => setPaymentForm(v => ({ ...v, description: e.target.value }))} />
+        <select value={paymentForm.paymentMethod} onChange={e => setPaymentForm(v => ({ ...v, paymentMethod: e.target.value as PaymentRequest['payment_method'] }))}>
+          <option value="OTHER">Other</option>
+          <option value="FINIVEX">Finivex</option>
+          <option value="ECOCASH">EcoCash</option>
+          <option value="BANK">Bank</option>
+          <option value="CASH">Cash</option>
+        </select>
+      </div>
+      <button className="btn primary" disabled={paymentBusy || !paymentForm.clientName || !paymentForm.amount || !paymentForm.description} onClick={async () => {
+        setPaymentBusy(true);
+        try {
+          await createPaymentRequest({ clientName: paymentForm.clientName, amount: Number(paymentForm.amount), currency: 'USD', description: paymentForm.description, paymentMethod: paymentForm.paymentMethod });
+          setPaymentForm(v => ({ ...v, amount: '', description: '' }));
+          await refreshPayments();
+        } catch (e) { setPaymentError((e as Error).message); }
+        finally { setPaymentBusy(false); }
+      }}>Create payment request</button>
+
+      <div className="feed" style={{ marginTop: 14, maxHeight: 360, overflowY: 'auto' }}>
+        {paymentRequests.length === 0 ? <div className="empty">No client payment requests yet.</div> :
+          paymentRequests.map((r) => <div key={r.id} className="event" style={{ display: 'block', marginBottom: 8 }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8 }}>
+              <strong>{r.client_name} · {r.amount.toFixed(2)} {r.currency}</strong>
+              <Badge tone={r.status === 'PAID' ? 'green' : r.status === 'FAILED' ? 'red' : 'amber'}>{r.status}</Badge>
+            </div>
+            <div className="muted small" style={{ marginTop: 4 }}>{r.description} · {r.payment_method}</div>
+            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginTop: 7 }}>
+              {r.status === 'PENDING' && <button className="btn small" disabled={paymentBusy} onClick={async () => { setPaymentBusy(true); try { await approvePaymentRequest(r.id); await refreshPayments(); } catch (e) { setPaymentError((e as Error).message); } finally { setPaymentBusy(false); } }}>Approve</button>}
+              {r.status === 'PENDING' && <button className="btn small danger" disabled={paymentBusy} onClick={async () => { setPaymentBusy(true); try { await cancelPaymentRequest(r.id); await refreshPayments(); } catch (e) { setPaymentError((e as Error).message); } finally { setPaymentBusy(false); } }}>Cancel</button>}
+              {r.status === 'APPROVED' && r.payment_method === 'FINIVEX' && <button className="btn small primary" disabled={paymentBusy || !finivex?.configured} onClick={async () => { setPaymentBusy(true); try { const result = await createApprovedFinivexLink({ requestId: r.id }); if (result.paymentLink) window.open(result.paymentLink, '_blank', 'noopener,noreferrer'); await refreshPayments(); } catch (e) { setPaymentError((e as Error).message); } finally { setPaymentBusy(false); } }}>{finivex?.configured ? 'Create Finivex link' : 'Finivex not configured'}</button>}
+              {r.status === 'APPROVED' && r.payment_method !== 'FINIVEX' && <button className="btn small primary" disabled={paymentBusy} onClick={async () => { setPaymentBusy(true); try { await markPaymentRequestPaid(r.id); await refreshPayments(); } catch (e) { setPaymentError((e as Error).message); } finally { setPaymentBusy(false); } }}>Confirm client paid</button>}
+              {r.status === 'LINK_CREATED' && r.payment_link && <><button className="btn small" onClick={() => window.open(r.payment_link!, '_blank', 'noopener,noreferrer')}>Open payment link</button><button className="btn small" onClick={() => navigator.clipboard?.writeText(r.payment_link!)}>Copy link</button></>}
+            </div>
+          </div>)}
+      </div>
+      <div className="faint small" style={{ marginTop: 8 }}>For Finivex, Survivor marks the request paid only after the server verifies the provider status. A client payment never gives Survivor control of the funds.</div>
     </Panel>
 
     <Panel title="INCOME CHANNELS" right={<span className="faint small mono">{backendConnected ? 'LIVE DATA' : 'BACKEND REQUIRED'}</span>}>
