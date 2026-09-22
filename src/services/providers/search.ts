@@ -27,7 +27,8 @@ class TavilyProvider implements SearchProvider {
           api_key: this.apiKey,
           query,
           max_results: max,
-          search_depth: 'basic',
+          search_depth: 'advanced',
+          include_raw_content: true,
         }),
       });
       if (!res.ok) throw new Error(`tavily ${res.status}`);
@@ -35,7 +36,7 @@ class TavilyProvider implements SearchProvider {
       return (data?.results ?? []).map((r: Record<string, unknown>) => ({
         title: String(r.title ?? 'Untitled'),
         url: String(r.url ?? ''),
-        snippet: String(r.content ?? ''),
+        snippet: String(r.content ?? r.raw_content ?? '').slice(0, 12000),
         publishedAt: r.published_date ? String(r.published_date) : undefined,
         source: 'web',
       }));
@@ -74,7 +75,7 @@ class BraveProvider implements SearchProvider {
       return (data?.web?.results ?? []).map((r: Record<string, unknown>) => ({
         title: String(r.title ?? 'Untitled'),
         url: String(r.url ?? ''),
-        snippet: String(r.description ?? ''),
+        snippet: [String(r.description ?? ''), ...(Array.isArray(r.extra_snippets) ? r.extra_snippets.map((x: unknown) => String(x)) : [])].join(' ').slice(0, 12000),
         publishedAt: r.age ? String(r.age) : undefined,
         source: 'web',
       }));
