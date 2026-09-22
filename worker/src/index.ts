@@ -986,6 +986,7 @@ export default {
         // same data above rather than a separately-drifting cache.
         const balance = balanceFrom(transactions);
         const survivalStatus = computeSurvivalStatus(balance);
+        const survivalScore = computeSurvivalScore(balance, agent.startingCapital, prospects, transactions);
         const economyState = await loadEconomyState(repo);
         const searchEconomy = getEconomySummary(economyState, survivalStatus);
         const funnel = computeRevenueFunnel(prospects, realRevenue);
@@ -1022,6 +1023,7 @@ export default {
           ok: true,
           fetchedAt: new Date().toISOString(),
           agent,
+          survivalScore,
           economicEfficiency: {
             searchEconomy,
             revenueFunnel: funnel,
