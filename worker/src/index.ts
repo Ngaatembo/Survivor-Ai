@@ -65,11 +65,11 @@ function windsorConfig(env: Env) {
     apiKey: env.WINDSOR_API_KEY,
     baseUrl: env.WINDSOR_BASE_URL,
     accounts: {
-      searchconsole: env.WINDSOR_SEARCHCONSOLE_ACCOUNT_ID,
-      googleanalytics4: env.WINDSOR_GA4_ACCOUNT_ID,
-      facebook_organic: env.WINDSOR_FACEBOOK_ACCOUNT_ID,
-      instagram: env.WINDSOR_INSTAGRAM_ACCOUNT_ID,
-      tiktok_organic: env.WINDSOR_TIKTOK_ACCOUNT_ID,
+      searchconsole: env.WINDSOR_SEARCHCONSOLE_ACCOUNT_ID ?? 'https://nwt-dev-website.ngaatendwew.workers.dev/',
+      googleanalytics4: env.WINDSOR_GA4_ACCOUNT_ID ?? '554933512',
+      facebook_organic: env.WINDSOR_FACEBOOK_ACCOUNT_ID ?? '1252129927993703',
+      instagram: env.WINDSOR_INSTAGRAM_ACCOUNT_ID ?? '17841472745490723',
+      tiktok_organic: env.WINDSOR_TIKTOK_ACCOUNT_ID ?? '_000aVorMZyL807-8WN-eULnSn11kQPtr8yb',
     },
   };
 }
