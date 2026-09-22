@@ -418,6 +418,63 @@ export function researchIncomeChannels(): Promise<{ ok: true; opportunities: Inc
 }
 
 
+export interface PaymentRequest {
+  id: string;
+  client_name: string;
+  amount: number;
+  currency: 'USD' | 'ZWG';
+  description: string;
+  payment_method: 'FINIVEX' | 'ECOCASH' | 'BANK' | 'CASH' | 'OTHER';
+  prospect_id?: string | null;
+  project_id?: string | null;
+  opportunity_id?: string | null;
+  status: 'PENDING' | 'APPROVED' | 'LINK_CREATED' | 'PAID' | 'CANCELLED' | 'FAILED';
+  finivex_reference?: string | null;
+  payment_link?: string | null;
+  created_at: string;
+  approved_at?: string | null;
+  paid_at?: string | null;
+  updated_at: string;
+}
+
+export function fetchPaymentRequests(): Promise<{ ok: true; requests: PaymentRequest[] }> {
+  return getJson('/payments/requests');
+}
+
+export function createPaymentRequest(input: {
+  clientName: string;
+  amount: number;
+  currency: 'USD' | 'ZWG';
+  description: string;
+  paymentMethod: PaymentRequest['payment_method'];
+  prospectId?: string;
+  projectId?: string;
+  opportunityId?: string;
+}): Promise<{ ok: true; request: PaymentRequest }> {
+  return postJson('/payments/requests', input);
+}
+
+export function approvePaymentRequest(requestId: string): Promise<{ ok: true; request: PaymentRequest }> {
+  return postJson('/payments/requests/approve', { requestId });
+}
+
+export function cancelPaymentRequest(requestId: string): Promise<{ ok: true }> {
+  return postJson('/payments/requests/cancel', { requestId });
+}
+
+export function createApprovedFinivexLink(input: {
+  requestId: string;
+  customerEmail?: string;
+  customerPhone?: string;
+  expiresInMinutes?: number;
+}): Promise<{ ok: true; requestId: string; paymentLink: string; reference?: string | null; provider?: unknown }> {
+  return postJson('/payments/finivex/create-approved-link', input);
+}
+
+export function markPaymentRequestPaid(requestId: string): Promise<{ ok: true }> {
+  return postJson('/payments/requests/mark-paid', { requestId });
+}
+
 export interface FinivexPaymentLinkResponse {
   ok: boolean;
   transactionId: string;
