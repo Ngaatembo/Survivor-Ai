@@ -41,5 +41,5 @@ export interface Env {
   WINDSOR_INSTAGRAM_ACCOUNT_ID?: string;
   WINDSOR_TIKTOK_ACCOUNT_ID?: string;
   WINDSOR_YOUTUBE_ACCOUNT_ID?: string;
-  WINDSOR_LINKEDIN_ACCOUNT_ID?: string;
+  WINDSOR_LINKEDIN_ACCOUNT_ID?: string;\n\n  // Cloudflare Workers Static Assets binding for the production dashboard.\n  ASSETS: Fetcher;
 }
