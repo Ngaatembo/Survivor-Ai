@@ -54,9 +54,9 @@ function sameContact(a: Prospect, b: Prospect): boolean {
 
 /** A conservative identity decision. */
 export function sameBusiness(a: Prospect, b: Prospect): boolean {
-  if (sameContact(a, b)) return true;
-
   const nameScore = similarity(a.businessName, b.businessName);
+  if (sameContact(a, b) && nameScore >= 0.75) return true;
+
   if (nameScore >= 0.9 && sameLocation(a, b)) return true;
 
   // A very strong name match can still resolve when one record has no useful
