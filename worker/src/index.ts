@@ -1053,12 +1053,57 @@ export default {
       }
       try {
         const { repo } = buildEngine(env);
+        const prospects = await repo.listProspects();
+        const prospect = prospects.find((p) => p.id === prospectId);
+        if (!prospect) return json({ ok: false, error: `no prospect found with id ${prospectId}` }, { status: 404 });
+
+        const current = prospect.status;
+        const verificationReady =
+          prospect.verification?.status === 'VERIFIED' ||
+          prospect.verification?.status === 'PROVISIONAL';
+        const hasVerifiedContact = Boolean(
+          prospect.verification?.verifiedContactValue || prospect.verification?.verifiedEmail,
+        );
+        const offers = await repo.listOffers();
+        const offer = offers.find((o) => o.prospectId === prospectId);
+        const offerSent = offer?.status === 'SENT' || offer?.status === 'ACCEPTED';
+
+        // Server-side evidence gates prevent the CRM from claiming progress that
+        // the stored evidence cannot support. Human confirmation is still required.
+        if (status === 'CONTACTED' && (!verificationReady || !hasVerifiedContact)) {
+          return json({
+            ok: false,
+            error: 'Cannot mark contacted: the prospect needs VERIFIED/PROVISIONAL identity evidence and a verified public contact first.',
+          }, { status: 409 });
+        }
+        if (status === 'REPLIED' && !['CONTACTED', 'REPLIED', 'FOLLOW_UP'].includes(current)) {
+          return json({ ok: false, error: `Cannot mark replied from ${current}: record a real CONTACTED state first.` }, { status: 409 });
+        }
+        if (status === 'INTERESTED' && !['REPLIED', 'INTERESTED', 'FOLLOW_UP'].includes(current)) {
+          return json({ ok: false, error: `Cannot mark interested from ${current}: record a real REPLIED state first.` }, { status: 409 });
+        }
+        if (status === 'PROPOSAL_SENT' && !offerSent) {
+          return json({ ok: false, error: 'Cannot mark proposal sent: the linked offer must first be recorded as SENT.' }, { status: 409 });
+        }
+        if (status === 'NEGOTIATING' && !['INTERESTED', 'PROPOSAL_SENT', 'NEGOTIATING'].includes(current)) {
+          return json({ ok: false, error: `Cannot mark negotiating from ${current}: record interest or a sent proposal first.` }, { status: 409 });
+        }
+        if (status === 'FOLLOW_UP' && !['CONTACTED', 'REPLIED', 'INTERESTED', 'PROPOSAL_SENT', 'NEGOTIATING', 'FOLLOW_UP'].includes(current)) {
+          return json({ ok: false, error: `Cannot mark follow-up from ${current}: contact the prospect first.` }, { status: 409 });
+        }
+        if (status === 'QUALIFIED' && !['DISCOVERED', 'QUALIFIED'].includes(current)) {
+          return json({ ok: false, error: `Cannot mark qualified from ${current}: qualification must follow discovery.` }, { status: 409 });
+        }
+        if (status === 'WON' && current === 'DISCOVERED') {
+          return json({ ok: false, error: 'Cannot mark a never-contacted prospect as won.' }, { status: 409 });
+        }
+
         await repo.updateProspectStatus(prospectId, status as ProspectStatus, typeof reasonLost === 'string' ? reasonLost : undefined);
         await repo.appendProspectInteraction({
           id: `pint_${crypto.randomUUID()}`,
           prospectId,
           kind: 'STATUS_CHANGE',
-          summary: `Status updated to ${status} by operator.${reasonLost ? ` Reason: ${reasonLost}` : ''}`,
+          summary: `Status updated from ${current} to ${status} by operator.${reasonLost ? ` Reason: ${reasonLost}` : ''}`,
           createdAt: Date.now(),
         });
         return json({ ok: true, prospectId, status });
