@@ -1343,9 +1343,44 @@ export default {
         const { repo, tavily, brave } = buildEngine(env);
         if (!tavily?.connected && !brave?.connected) return json({ ok: false, error: 'no live search provider connected — connect Tavily or Brave before discovering real businesses' }, { status: 503 });
         const opportunities = (await repo.listOpportunities()).filter((o) => o.researchStage !== 'UNDISCOVERED');
-        if (!opportunities.length) return json({ ok: false, error: 'no researched opportunity is available yet; run research first' }, { status: 409 });
-        const opportunity = (requestedOpportunityId ? opportunities.find((o) => o.id === requestedOpportunityId) : undefined) || opportunities.sort((x,y) => (y.score?.total ?? 0) - (x.score?.total ?? 0))[0];
-        if (!opportunity) return json({ ok: false, error: 'selected opportunity not found' }, { status: 404 });
+        const directAcquisitionOpportunity = {
+          id: 'nwt-dev-local-business-acquisition',
+          name: 'NWT Dev — Local Business Website & Digital Services',
+          category: 'Services',
+          tags: ['NWT Dev', 'websites', 'local-business', 'client-acquisition'],
+          dataSource: 'LIVE',
+          researchStage: 'VERIFIED',
+          description: 'Direct operator acquisition campaign for finding real Zimbabwean businesses that may need websites or digital services.',
+          howMoneyMade: 'Sell scoped website and digital-service projects to businesses after human review and outreach.',
+          capitalRequiredMin: 0,
+          capitalRequiredMax: 50,
+          timeToRevenueDaysMin: 1,
+          timeToRevenueDaysMax: 30,
+          skills: ['web development', 'sales', 'client communication'],
+          difficulty: 2,
+          competition: 3,
+          scalability: 3,
+          risk: 1,
+          riskLevel: 'Low',
+          geographicRelevance: ['Zimbabwe'],
+          evidenceTier: 'VERIFIED',
+          evidenceNotes: 'Operator-defined acquisition campaign based on NWT Dev services; individual businesses and contacts must still be verified from public sources.',
+          successProbability: 0,
+          revenuePotentialMonthlyMin: 0,
+          revenuePotentialMonthlyMax: 0,
+          upsideNote: 'Actual revenue depends on real client conversions.',
+          downsideNote: 'Search results may be incomplete or ambiguous.',
+          operatingCostsNote: 'Search/API costs only; no automatic outreach or payment execution.',
+          examples: [],
+          sources: [],
+          dateResearched: null,
+          executionBlocked: false,
+          lifecycleState: 'VALIDATING',
+        } as any;
+        const selectedExisting = requestedOpportunityId ? opportunities.find((o) => o.id === requestedOpportunityId) : undefined;
+        const opportunity = selectedExisting || (opportunities.length
+          ? opportunities.sort((x,y) => (y.score?.total ?? 0) - (x.score?.total ?? 0))[0]
+          : directAcquisitionOpportunity);
         const models = await repo.listBusinessModels();
         const model = models.find((m) => m.opportunityId === opportunity.id);
         const existing = await repo.listProspects();
@@ -1366,7 +1401,7 @@ export default {
           for (const p of accepted) await repo.appendProspectInteraction({ id: 'pint_' + crypto.randomUUID(), prospectId: p.id, kind: 'DISCOVERED', summary: 'Operator-triggered live discovery + identity verification: ' + (p.verification?.status ?? 'UNVERIFIED') + ' (' + (p.verification?.confidence ?? 0) + '% confidence).', createdAt: now });
         }
         await saveEconomyState(repo, ctx.state);
-        return json({ ok: true, opportunityId: opportunity.id, opportunityName: opportunity.name, region: region || opportunity.geographicRelevance[0] || 'Zimbabwe', searchQuery: searchQuery || null, discovered: discovered.prospects.length, verified: accepted.length, rejectedUnverifiedOrConflicting: discovered.prospects.length - accepted.length, queriesRun: discovered.queriesRun, sourcesCount: discovered.sourcesCount, cacheHits: discovered.cacheHits, prospects: accepted });
+        return json({ ok: true, opportunityId: opportunity.id, opportunityName: opportunity.name, directAcquisitionMode: opportunity.id === 'nwt-dev-local-business-acquisition', region: region || opportunity.geographicRelevance[0] || 'Zimbabwe', searchQuery: searchQuery || null, discovered: discovered.prospects.length, verified: accepted.length, rejectedUnverifiedOrConflicting: discovered.prospects.length - accepted.length, queriesRun: discovered.queriesRun, sourcesCount: discovered.sourcesCount, cacheHits: discovered.cacheHits, budgetExceeded: discovered.budgetExceeded, prospects: accepted });
       } catch (e) { return json({ ok: false, error: (e as Error).message }, { status: 500 }); }
     }
     if (url.pathname === '/prospects/status' && req.method === 'POST') {
