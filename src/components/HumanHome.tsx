@@ -69,9 +69,11 @@ function ActionButtons({ a, go, compact }: { a: RecommendedAction; go: (v: View)
   const updateProspectStatus = useStore((s) => s.updateProspectStatus);
   const updateOfferStatus = useStore((s) => s.updateOfferStatus);
   const prep = usePrepared()(a.prospectId);
+  const syncFromBackend = useStore((s) => s.syncFromBackend);
   const [confirm, setConfirm] = useState<null | 'contacted' | 'sent'>(null);
   const [copied, setCopied] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [approvalBusy, setApprovalBusy] = useState(false);
 
   const prospect = a.prospectId ? prospects.find((p) => p.id === a.prospectId) : undefined;
   const canMarkContacted = !compact && !!prospect && (prospect.status === 'DISCOVERED' || prospect.status === 'QUALIFIED');
@@ -132,6 +134,7 @@ function ActionButtons({ a, go, compact }: { a: RecommendedAction; go: (v: View)
           View demo
         </a>
       )}
+      <button className="btn big" disabled={approvalBusy} onClick={async () => { setApprovalBusy(true); try { await requestActionApproval(a); await syncFromBackend(); } finally { setApprovalBusy(false); } }}>{approvalBusy ? 'Requesting…' : 'Request approval'}</button>
       {prep?.outreach && (
         <button className="btn big" onClick={copyMessage}>
           {copied ? 'Copied' : 'Copy message'}
@@ -348,7 +351,7 @@ function ApprovalQueue() {
   if (!pending.length) return null;
   const review = async (id: string, decision: 'APPROVED' | 'REJECTED') => {
     setBusy(id);
-    try { await reviewActionApproval(id, decision); } finally { setBusy(null); }
+    try { await reviewActionApproval(id, decision); await useStore.getState().syncFromBackend(); } finally { setBusy(null); }
   };
   return (
     <section className="block">
