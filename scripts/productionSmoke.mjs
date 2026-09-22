@@ -1,3 +1,4 @@
+// Production dashboard is served by the backend Worker; browser API calls use same-origin routing.
 const base = process.env.SURVIVOR_PRODUCTION_URL || 'https://survivor-ai-backend.ngaatendwew.workers.dev';
 
 async function check(path, validate, attempts = 20) {
