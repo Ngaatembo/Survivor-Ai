@@ -9,7 +9,9 @@ import {
   createApprovedFinivexLink,
   markPaymentRequestPaid,
   researchIncomeChannels as apiResearchIncomeChannels,
+  fetchWindsorIncomeSummary,
   type PaymentRequest,
+  type WindsorIncomeSummary,
 } from '../services/backendApi';
 import { Panel, Badge } from './ui';
 
@@ -39,6 +41,8 @@ export function IncomeHub() {
   const [paymentError, setPaymentError] = useState('');
   const [paymentForm, setPaymentForm] = useState({ clientName: '', amount: '', description: '', paymentMethod: 'OTHER' as PaymentRequest['payment_method'] });
   const [channelBusy, setChannelBusy] = useState<string | null>(null);
+  const [windsor, setWindsor] = useState<WindsorIncomeSummary | null>(null);
+  const [windsorBusy, setWindsorBusy] = useState(false);
   const [channelResults, setChannelResults] = useState<Record<string, typeof incomeIntelligence>>({});
   const runChannelResearch = async (channel: string) => {
     if (!backendConnected || channelBusy) return;
@@ -65,7 +69,23 @@ export function IncomeHub() {
     }
   };
 
-  useEffect(() => { void refreshPayments(); }, [backendConnected]);
+  const refreshWindsor = async () => {
+    if (!backendConnected) return;
+    setWindsorBusy(true);
+    try {
+      const result = await fetchWindsorIncomeSummary();
+      setWindsor(result);
+    } catch (e) {
+      setPaymentError((e as Error).message);
+    } finally {
+      setWindsorBusy(false);
+    }
+  };
+
+  useEffect(() => {
+    void refreshPayments();
+    void refreshWindsor();
+  }, [backendConnected]);
 
   const money = useMemo(() => ({
     received: realRevenue.reduce((sum, r) => sum + r.amountReceived, 0),
@@ -110,6 +130,37 @@ export function IncomeHub() {
         )}</div>}
     </Panel>
 
+
+    <Panel title="CONNECTED LIVE DATA" right={<div style={{ display: 'flex', gap: 8, alignItems: 'center' }}><Badge tone={windsor?.configured ? 'green' : 'amber'}>{windsor?.configured ? 'WINDSOR CONNECTED' : 'API KEY NEEDED'}</Badge><button className="btn small" disabled={windsorBusy || !backendConnected} onClick={() => void refreshWindsor()}>{windsorBusy ? 'Syncing…' : 'Sync now'}</button></div>}>
+      <div className="small muted" style={{ lineHeight: 1.7 }}>
+        Survivor reads connected Google and social performance through Windsor.ai. It does not publish, message, spend money or change connected accounts.
+      </div>
+      {!windsor?.configured ? <div className="warn-banner" style={{ marginTop: 10, marginBottom: 0 }}>
+        Add the Worker secret <span className="mono">WINDSOR_API_KEY</span> to enable live data retrieval. The key stays server-side and is never sent to the browser.
+      </div> : <>
+        <div className="grid cols-4" style={{ marginTop: 12 }}>
+          {[
+            ['Google Search', windsor.data.searchConsole.length],
+            ['Google Analytics', windsor.data.analytics.length],
+            ['Facebook', windsor.data.facebook.length],
+            ['Instagram', windsor.data.instagram.length],
+          ].map(([name, count]) => <div key={String(name)} className="event"><strong>{name}</strong><div className="stat-value" style={{ fontSize: 20 }}>{String(count)}</div><div className="faint small">rows / last 30d</div></div>)}
+        </div>
+        <div className="grid cols-2" style={{ marginTop: 10 }}>
+          <div className="event" style={{ display: 'block' }}>
+            <strong>Search opportunity signals</strong>
+            {windsor.data.searchConsole.slice(0, 5).map((r, i) => <div key={i} className="faint small" style={{ marginTop: 6 }}>{String(r.query ?? 'Search query')} · {String(r.clicks ?? 0)} clicks · {String(r.impressions ?? 0)} impressions · pos {String(r.position ?? '—')}</div>)}
+            {windsor.data.searchConsole.length === 0 && <div className="faint small" style={{ marginTop: 6 }}>No Search Console rows returned yet.</div>}
+          </div>
+          <div className="event" style={{ display: 'block' }}>
+            <strong>Traffic / social signals</strong>
+            <div className="faint small" style={{ marginTop: 6 }}>GA4 rows: {windsor.data.analytics.length} · Instagram: {windsor.data.instagram.length} · TikTok: {windsor.data.tiktok.length}</div>
+            {Object.entries(windsor.errors).map(([k, v]) => <div key={k} className="faint small" style={{ marginTop: 5 }}>{k}: {v}</div>)}
+          </div>
+        </div>
+        <div className="faint small" style={{ marginTop: 8 }}>Last sync: {windsor.generatedAt ? new Date(windsor.generatedAt).toLocaleString() : '—'} · Source window: {windsor.datePreset}</div>
+      </>}
+    </Panel>
 
     <Panel title="FINIVEX PAYMENTS" right={<Badge tone={finivex?.configured ? 'green' : 'amber'}>{finivex?.configured ? 'CONNECTED' : 'NOT CONFIGURED'}</Badge>}>
       <div className="small muted" style={{ lineHeight: 1.8 }}>
@@ -202,10 +253,17 @@ export function IncomeHub() {
     </div>
 
     <Panel title="CONNECTED ACCOUNT ROADMAP" style={{ marginTop: 14 }}>
-      <div className="grid cols-3">{['Facebook / Instagram','TikTok','YouTube','LinkedIn','Freelance platforms','Analytics / storefronts'].map((name) =>
-        <div key={name} className="event" style={{ display: 'block' }}><div style={{ fontWeight: 600 }}>{name}</div><div className="faint small" style={{ marginTop: 4 }}>Read-only analytics → opportunity detection → human approval before publishing or submitting.</div><Badge tone="gray">NOT CONNECTED</Badge></div>
+      <div className="grid cols-3">{[
+        ['Facebook / Instagram', Boolean(windsor?.data.facebook.length || windsor?.data.instagram.length)],
+        ['TikTok', Boolean(windsor?.data.tiktok.length)],
+        ['YouTube', false],
+        ['LinkedIn', false],
+        ['Freelance platforms', false],
+        ['Analytics / Search', Boolean(windsor?.data.analytics.length || windsor?.data.searchConsole.length)],
+      ].map(([name, connected]) =>
+        <div key={String(name)} className="event" style={{ display: 'block' }}><div style={{ fontWeight: 600 }}>{String(name)}</div><div className="faint small" style={{ marginTop: 4 }}>Live data → opportunity detection → human approval before publishing or submitting.</div><Badge tone={connected ? 'green' : 'gray'}>{connected ? 'LIVE DATA' : 'NOT CONNECTED'}</Badge></div>
       )}</div>
-      <div className="faint small" style={{ marginTop: 10 }}>Connection work will be added one provider at a time. Survivor will never claim an account is connected until the integration actually returns data.</div>
+      <div className="faint small" style={{ marginTop: 10 }}>Survivor only marks a provider live when its backend successfully receives data. Write actions remain outside the automatic research path.</div>
     </Panel>
 
     <Panel title="REVENUE BY RECORDED ACQUISITION CHANNEL" style={{ marginTop: 14 }}>
