@@ -1,5 +1,6 @@
-import { useMemo } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useStore } from '../store';
+import { fetchFinivexStatus } from '../services/backendApi';
 import { Panel, Badge } from './ui';
 
 const CHANNELS = [
@@ -22,6 +23,8 @@ export function IncomeHub() {
   const incomeIntelligence = useStore((s) => s.incomeIntelligence);
   const researchIncomeChannels = useStore((s) => s.researchIncomeChannels);
   const backendSyncing = useStore((s) => s.backend.syncing);
+  const [finivex, setFinivex] = useState<{ configured: boolean; canCreatePaymentLinks: boolean; note: string } | null>(null);
+  useEffect(() => { if (backendConnected) void fetchFinivexStatus().then((r) => setFinivex(r.payment)).catch(() => setFinivex(null)); }, [backendConnected]);
 
   const money = useMemo(() => ({
     received: realRevenue.reduce((sum, r) => sum + r.amountReceived, 0),
@@ -64,6 +67,17 @@ export function IncomeHub() {
             {o.sourceUrls[0] && <a className="faint small" href={o.sourceUrls[0]} target="_blank" rel="noreferrer">Open source ↗</a>}
           </div>
         )}</div>}
+    </Panel>
+
+
+    <Panel title="FINIVEX PAYMENTS" right={<Badge tone={finivex?.configured ? 'green' : 'amber'}>{finivex?.configured ? 'CONNECTED' : 'NOT CONFIGURED'}</Badge>}>
+      <div className="small muted" style={{ lineHeight: 1.8 }}>
+        <strong>Role:</strong> NWT Dev's payment collection rail. Survivor does not hold your wallet or move your money.<br/>
+        <strong>Flow:</strong> create approved payment link → customer pays on Finivex → Survivor verifies status → real revenue is recorded.<br/>
+        <strong>Methods:</strong> EcoCash, OneMoney, InnBucks, O'mari, Visa, Mastercard, ZIPIT and Zimswitch, subject to your merchant account's active methods.
+      </div>
+      <div className={finivex?.configured ? 'info-banner' : 'warn-banner'} style={{ marginTop: 12, marginBottom: 0 }}>{finivex?.note ?? 'Backend status unavailable. Configure the Finivex merchant credentials as Worker secrets after merchant approval.'}</div>
+      <div className="faint small" style={{ marginTop: 8 }}>No payment is initiated from this panel. Payment-link creation is kept behind the human approval path.</div>
     </Panel>
 
     <Panel title="INCOME CHANNELS" right={<span className="faint small mono">{backendConnected ? 'LIVE DATA' : 'BACKEND REQUIRED'}</span>}>
