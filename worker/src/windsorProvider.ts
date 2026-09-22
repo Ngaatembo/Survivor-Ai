@@ -68,7 +68,8 @@ export async function getWindsorIncomeSummary(config: WindsorConfig) {
 
   const jobs: Array<[WindsorConnector, string[], string]> = [
     ['searchconsole', ['date', 'site', 'query', 'page', 'clicks', 'impressions', 'ctr', 'position'], 'searchConsole'],
-    ['googleanalytics4', ['date', 'account_name', 'sessions', 'active_users', 'engaged_sessions', 'conversions', 'total_revenue'], 'analytics'],
+    // Windsor's GA4 connector uses the field ID totalrevenue (not total_revenue).
+    ['googleanalytics4', ['date', 'account_name', 'sessions', 'active_users', 'engaged_sessions', 'conversions', 'totalrevenue'], 'analytics'],
     ['facebook_organic', ['date', 'account_name', 'page_fans', 'page_daily_follows', 'page_daily_unfollows', 'page_actions_post_reactions_total'], 'facebook'],
     ['instagram', ['date', 'account_name', 'follower_count_1d', 'accounts_engaged', 'comments', 'likes', 'shares', 'saves'], 'instagram'],
     ['tiktok_organic', ['date', 'account_name', 'followers_count', 'engaged_audience', 'likes', 'comments', 'shares', 'video_views'], 'tiktok'],
