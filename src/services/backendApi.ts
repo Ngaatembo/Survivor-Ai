@@ -116,6 +116,19 @@ export interface BackendHealth {
   };
 }
 
+export interface ActionApproval {
+  id: string;
+  actionId: string;
+  actionKind: RecommendedAction['kind'];
+  title: string;
+  prospectId?: string;
+  opportunityId?: string;
+  status: 'PENDING' | 'APPROVED' | 'REJECTED' | 'EXECUTED';
+  note?: string;
+  createdAt: number;
+  reviewedAt?: number;
+}
+
 export interface SurvivalScore {
   score: number;
   status: 'ALIVE' | 'AT_RISK' | 'CRITICAL' | 'DEAD';
@@ -161,6 +174,7 @@ export interface BackendState {
   economicEfficiency?: EconomicEfficiencySnapshot;
   incomeIntelligence?: IncomeChannelOpportunity[];
   survivalScore?: SurvivalScore;
+  actionApprovals?: ActionApproval[];
 }
 
 export interface IncomeChannelOpportunity {
@@ -459,6 +473,24 @@ export interface ContentEngineState {
   research: IncomeChannelOpportunity[];
   drafts: ContentDraft[];
   updatedAt?: number;
+}
+
+export function fetchActionApprovals(): Promise<{ ok: true; approvals: ActionApproval[] }> {
+  return getJson('/actions/approvals');
+}
+
+export function requestActionApproval(action: RecommendedAction): Promise<{ ok: true; approval: ActionApproval }> {
+  return postJson('/actions/approvals', {
+    actionId: action.id,
+    actionKind: action.kind,
+    title: action.title,
+    prospectId: action.prospectId,
+    opportunityId: action.opportunityId,
+  });
+}
+
+export function reviewActionApproval(approvalId: string, decision: 'APPROVED' | 'REJECTED', note?: string): Promise<{ ok: true; approval: ActionApproval }> {
+  return postJson('/actions/approvals/review', { approvalId, decision, note });
 }
 
 export function fetchContentState(): Promise<{ ok: true; state: ContentEngineState }> {
