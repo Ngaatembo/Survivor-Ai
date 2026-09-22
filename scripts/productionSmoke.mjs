@@ -64,4 +64,47 @@ await check('/content/state', (body) => {
   if (!Array.isArray(body.state.drafts)) throw new Error('/content/state drafts is not an array');
 });
 
+
+async function checkPost(path, body, expectedStatus, validate) {
+  const response = await fetch(base + path, {
+    method: 'POST',
+    headers: { accept: 'application/json', 'content-type': 'application/json' },
+    body: JSON.stringify(body),
+    cache: 'no-store',
+  });
+  const text = await response.text();
+  let payload;
+  try { payload = JSON.parse(text); } catch { payload = null; }
+  if (response.status !== expectedStatus) {
+    throw new Error(`${path} expected HTTP ${expectedStatus}, got ${response.status}: ${text.slice(0, 500)}`);
+  }
+  if (!payload) throw new Error(`${path} did not return JSON`);
+  validate(payload);
+  console.log(`SMOKE PASS ${path} POST validation`);
+}
+
+await checkPost('/prospects/status', {}, 400, (body) => {
+  if (body.ok !== false || typeof body.error !== 'string') throw new Error('/prospects/status invalid validation response');
+});
+
+await checkPost('/offers/status', {}, 400, (body) => {
+  if (body.ok !== false || typeof body.error !== 'string') throw new Error('/offers/status invalid validation response');
+});
+
+await checkPost('/projects/milestone', {}, 400, (body) => {
+  if (body.ok !== false || typeof body.error !== 'string') throw new Error('/projects/milestone invalid validation response');
+});
+
+await checkPost('/real-revenue', {}, 400, (body) => {
+  if (body.ok !== false || typeof body.error !== 'string') throw new Error('/real-revenue invalid validation response');
+});
+
+await checkPost('/payments/requests', {}, 400, (body) => {
+  if (body.ok !== false || typeof body.error !== 'string') throw new Error('/payments/requests invalid validation response');
+});
+
+await checkPost('/treasury/spend-request', {}, 400, (body) => {
+  if (body.ok !== false || typeof body.error !== 'string') throw new Error('/treasury/spend-request invalid validation response');
+});
+
 console.log(`PRODUCTION SMOKE PASSED: ${base}`);
