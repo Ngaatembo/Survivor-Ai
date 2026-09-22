@@ -1,12 +1,13 @@
 import { useState } from 'react';
 import { useStore, useWalletTotals, backendConfigured } from '../store';
-import { discoverProspectsNow, BackendError } from '../services/backendApi';
+import { discoverProspectsNow } from '../services/backendApi';
 import { Panel, Stat, Badge, DataSourceBadge } from './ui';
 import { SurvivalMeter } from './SurvivalMeter';
 import { LoopPipeline } from './LoopPipeline';
 import { HumanHome } from './HumanHome';
 import { usd, usdWhole, pct, timeAgo } from '../lib/format';
 import type { View } from '../App';
+import type { Prospect } from '../types';
 
 const LIFECYCLE_ORDER = ['DISCOVERED', 'VALIDATING', 'PROVEN', 'SCALING', 'FAILED'] as const;
 const LIFECYCLE_TONE: Record<string, 'gray' | 'blue' | 'green' | 'purple' | 'red'> = {
@@ -34,20 +35,17 @@ export function CommandCenter({ go }: { go: (v: View) => void }) {
   const [finderQuery, setFinderQuery] = useState('hotels, guest houses, lodges, restaurants, car rentals, contractors, event venues, salons');
   const [finderBusy, setFinderBusy] = useState(false);
   const [finderMessage, setFinderMessage] = useState<string | null>(null);
-  const [finderResults, setFinderResults] = useState<Array<{
-    id: string; businessName: string; category: string; location: string; contactChannel: string; contactValue?: string; websiteUrl?: string;
-    verification?: { status?: string; confidence?: number; verifiedContactValue?: string; verifiedEmail?: string };
-  }>>([]);
+  const [finderResults, setFinderResults] = useState<Prospect[]>([]);
 
   const findClientsNow = async () => {
     setFinderBusy(true); setFinderMessage(null);
     try {
       const result = await discoverProspectsNow({ region: finderRegion.trim() || 'Zimbabwe', searchQuery: finderQuery.trim() || undefined });
-      setFinderResults(result.prospects as typeof finderResults);
+      setFinderResults(result.prospects);
       await syncFromBackend();
       setFinderMessage(`Search completed: ${result.discovered} businesses found, ${result.verified} accepted after identity/contact verification.${result.rejectedUnverifiedOrConflicting ? ` ${result.rejectedUnverifiedOrConflicting} rejected because the evidence was insufficient or conflicting.` : ''}`);
     } catch (e) {
-      setFinderMessage(e instanceof BackendError ? e.message : (e as Error).message || 'Client search failed.');
+      setFinderMessage((e as Error).message || 'Client search failed.');
       setFinderResults([]);
     } finally { setFinderBusy(false); }
   };
