@@ -88,6 +88,31 @@ function normalizePhone(value?: string): string {
   return (value ?? '').replace(/\D/g, '').replace(/^0/, '263');
 }
 
+function extractEmails(text: string): string[] {
+  return [...new Set((text.match(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/gi) ?? []).map((v) => v.toLowerCase()))];
+}
+
+function cleanUrl(url: string): string {
+  try {
+    const parsed = new URL(url);
+    return (parsed.protocol + '//' + parsed.hostname + parsed.pathname).replace(/\/$/, '');
+  } catch { return ''; }
+}
+
+function extractLocation(text: string, prospectLocation: string): string | undefined {
+  const patterns = [
+    /(?:address|located at|location|visit us|find us)\s*[:\-]?\s*([^|.]{8,120})/i,
+    /(?:shop|office|branch)\s+(?:at|in)\s+([^|.]{8,100})/i,
+  ];
+  for (const pattern of patterns) {
+    const match = text.match(pattern)?.[1]?.trim();
+    if (!match) continue;
+    const candidate = match.replace(/\s+/g, ' ').replace(/[;,\s]+$/, '');
+    if (candidate.length >= 8 && candidate.toLowerCase() !== prospectLocation.toLowerCase()) return candidate;
+  }
+  return undefined;
+}
+
 function sourceFor(result: SearchResult, note: string): ResearchSource {
   return {
     id: uid('vsrc'),
@@ -159,17 +184,44 @@ export async function verifyProspect(
   const sourceKeys = new Set(identityResults.map((x) => independentKey(x.r.url)).filter(Boolean));
   const canonical = chooseCanonicalName(prospect, results);
 
+  const emails = new Map<string, { keys: Set<string>; bestScore: number }>();
+  const websites = new Map<string, { keys: Set<string>; bestScore: number }>();
+  const locations = new Map<string, { raw: string; keys: Set<string>; bestScore: number }>();
   const contacts = new Map<string, { raw: string; keys: Set<string>; bestScore: number }>();
   for (const { r, score } of identityResults) {
     const key = independentKey(r.url);
     if (!key) continue;
-    for (const raw of extractPhones(`${r.title} ${r.snippet}`)) {
+    const resultText = r.title + ' ' + r.snippet;
+    for (const raw of extractPhones(resultText)) {
       const normalized = normalizePhone(raw);
       const current = contacts.get(normalized) ?? { raw, keys: new Set<string>(), bestScore: 0 };
       current.keys.add(key);
       current.bestScore = Math.max(current.bestScore, score);
       contacts.set(normalized, current);
     }
+    for (const email of extractEmails(resultText)) {
+      const current = emails.get(email) ?? { keys: new Set<string>(), bestScore: 0 };
+      current.keys.add(key);
+      current.bestScore = Math.max(current.bestScore, score);
+      emails.set(email, current);
+    }
+    const resultDomain = domainOf(r.url);
+    if (resultDomain && !/facebook\.com|instagram\.com|linkedin\.com|google\.com/i.test(resultDomain)) {
+      const website = cleanUrl(r.url);
+      const current = websites.get(website) ?? { keys: new Set<string>(), bestScore: 0 };
+      current.keys.add(key);
+      current.bestScore = Math.max(current.bestScore, score);
+      websites.set(website, current);
+    }
+    const location = extractLocation(resultText, prospect.location);
+    if (location) {
+      const normalizedLocation = location.toLowerCase();
+      const current = locations.get(normalizedLocation) ?? { raw: location, keys: new Set<string>(), bestScore: 0 };
+      current.keys.add(key);
+      current.bestScore = Math.max(current.bestScore, score);
+      locations.set(normalizedLocation, current);
+    }
+
   }
 
   const rankedContacts = [...contacts.entries()]
@@ -178,6 +230,12 @@ export async function verifyProspect(
 
   const existingNormalized = normalizePhone(prospect.contactValue);
   const bestContact = rankedContacts[0];
+  const rankedEmails = [...emails.entries()].map(([value, v]) => ({ value, ...v, sources: v.keys.size })).sort((a,b) => b.sources - a.sources || b.bestScore - a.bestScore);
+  const bestEmail = rankedEmails[0];
+  const rankedWebsites = [...websites.entries()].map(([url, v]) => ({ url, ...v, sources: v.keys.size })).sort((a,b) => b.sources - a.sources || b.bestScore - a.bestScore);
+  const bestWebsite = rankedWebsites[0];
+  const rankedLocations = [...locations.entries()].map(([key, v]) => ({ value: v.raw, ...v, key, sources: v.keys.size })).sort((a,b) => b.sources - a.sources || b.bestScore - a.bestScore);
+  const bestLocation = rankedLocations[0];
   const conflicts = rankedContacts
     .filter((c) => c.sources >= 1)
     .map((c) => c.raw)
@@ -187,6 +245,9 @@ export async function verifyProspect(
     bestContact.sources >= 2 ||
     (bestContact.sources >= 1 && bestContact.bestScore >= 0.82)
   );
+  const verifiedEmail = bestEmail && (bestEmail.sources >= 2 || (bestEmail.sources >= 1 && bestEmail.bestScore >= 0.82));
+  const verifiedWebsite = bestWebsite && bestWebsite.bestScore >= 0.72;
+  const verifiedLocation = bestLocation && (bestLocation.sources >= 2 || (bestLocation.sources >= 1 && bestLocation.bestScore >= 0.82));
 
   const identityScore = canonical.score;
   const contactScore = bestContact
@@ -210,7 +271,7 @@ export async function verifyProspect(
 
   const verifiedChannel: ContactChannel | undefined = verifiedValue
     ? 'PHONE'
-    : undefined;
+    : (verifiedEmail && (status === 'VERIFIED' || status === 'PROVISIONAL') ? 'EMAIL' : undefined);
 
   const notes: string[] = [];
   if (sourceKeys.size >= 2) notes.push(`${sourceKeys.size} independent public source domains support the business identity.`);
@@ -218,6 +279,10 @@ export async function verifyProspect(
   if (bestContact?.sources >= 2) notes.push('The same phone number appears on multiple independent public sources.');
   else if (bestContact) notes.push('A phone number was found on a matching source, but it is not corroborated across multiple domains.');
   if (rankedContacts.length > 1) notes.push(`Multiple contact numbers were found: ${rankedContacts.map((c) => c.raw).join(', ')}. Keep the conflict visible for human review.`);
+  if (bestEmail?.sources >= 2) notes.push('The same email appears on multiple independent public sources.');
+  else if (bestEmail) notes.push('An email was found on a matching source, but it is not corroborated across multiple domains.');
+  if (verifiedWebsite) notes.push('A matching business website was found: ' + bestWebsite.url);
+  if (verifiedLocation) notes.push('A matching location signal was found: ' + bestLocation.value);
   if (canonical.name && nameSimilarity(prospect.businessName, canonical.name) < 1) notes.push(`Canonical source name differs from the discovery label: "${canonical.name}".`);
 
   const verification: ProspectVerification = {
@@ -225,7 +290,11 @@ export async function verifyProspect(
     confidence: Math.round(((identityScore * 0.55) + (contactScore * 0.45)) * 100),
     verifiedBusinessName: canonical.name && identityScore >= 0.72 ? canonical.name : undefined,
     verifiedContactChannel: verifiedChannel,
-    verifiedContactValue: verifiedValue,
+    verifiedContactValue: verifiedValue ?? (verifiedEmail ? bestEmail.value : undefined),
+    verifiedEmail: verifiedEmail ? bestEmail.value : undefined,
+    verifiedWebsiteUrl: verifiedWebsite ? bestWebsite.url : undefined,
+    verifiedLocation: verifiedLocation ? bestLocation.value : undefined,
+    alternateContacts: [...rankedContacts.slice(0, 4).map((c) => c.raw), ...rankedEmails.slice(0, 4).map((e) => e.value)].filter((v, i, arr) => arr.indexOf(v) === i),
     businessNameMatchScore: Number(identityScore.toFixed(3)),
     contactMatchScore: Number(contactScore.toFixed(3)),
     independentSources: sourceKeys.size,
@@ -250,6 +319,8 @@ export async function verifyProspect(
     businessName: verification.verifiedBusinessName ?? prospect.businessName,
     contactChannel: verification.verifiedContactChannel ?? (status === 'CONFLICT' ? 'UNKNOWN' : prospect.contactChannel),
     contactValue: verification.verifiedContactValue,
+    location: verification.verifiedLocation ?? prospect.location,
+    websiteUrl: verification.verifiedWebsiteUrl ?? prospect.websiteUrl,
     verification,
     sources: mergedSources,
     evidenceNotes: `${prospect.evidenceNotes} Verification: ${verification.notes.join(' ')}`.trim(),
