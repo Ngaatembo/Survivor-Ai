@@ -26,7 +26,7 @@ await check('/status', (body) => {
 
 await check('/state', (body) => {
   if (body.ok !== true) throw new Error('/state ok=false');
-  if (!body.state || !body.state.agent) throw new Error('/state missing state.agent');
+  if (!body.agent || typeof body.agent.id !== 'string') throw new Error('/state missing agent');
 });
 
 console.log(`PRODUCTION SMOKE PASSED: ${base}`);
