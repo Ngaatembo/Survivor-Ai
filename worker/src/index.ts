@@ -36,6 +36,7 @@ import {
   offersAwaitingSend,
 } from '../../src/lib/revenueFunnel';
 import { computeSurvivalStatus } from '../../src/engine/seed';
+import { buildEconomicMemory } from '../../src/lib/economicMemory';
 import { computeMoneyMetrics } from '../../src/lib/moneyMetrics';
 import {
   calculateTreasurySnapshot,
@@ -1014,6 +1015,7 @@ export default {
         const balance = balanceFrom(await repo.listTransactions());
         const survivalStatus = computeSurvivalStatus(balance);
         const state = await loadEconomyState(repo);
+        const realRevenue = await repo.listRealRevenue();
         const ctx = { state, providers: { tavily, brave }, survivalStatus, now: Date.now(), cycleStartedAt: Date.now() };
         const strategies = requested
           ? INCOME_CHANNEL_STRATEGIES.filter(s => s.kind === requested)
