@@ -25,3 +25,5 @@ jobs:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
       - name: Production runtime smoke test
         run: node scripts/productionSmoke.mjs
+        env:
+          SURVIVOR_EXPECTED_BUILD_SHA: ${{ github.sha }}
