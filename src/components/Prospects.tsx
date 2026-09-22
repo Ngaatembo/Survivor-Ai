@@ -1,5 +1,6 @@
 import { useMemo, useState } from 'react';
-import { useStore } from '../store';
+import { useStore, backendConfigured } from '../store';
+import { discoverProspectsNow, BackendError } from '../services/backendApi';
 import { Badge, DataSourceBadge, Panel } from './ui';
 import { ProspectDrawer } from './ProspectDrawer';
 import type { Prospect, ProspectStatus } from '../types';
@@ -44,6 +45,10 @@ export function Prospects() {
   const [statusFilter, setStatusFilter] = useState<(typeof STATUS_FILTERS)[number]>('ACTIVE');
   const [priorityFilter, setPriorityFilter] = useState<Prospect['priority'] | 'ALL'>('ALL');
   const [q, setQ] = useState('');
+  const [region, setRegion] = useState('Zimbabwe');
+  const [searchQuery, setSearchQuery] = useState('restaurant OR cafe OR hotel');
+  const [discoverBusy, setDiscoverBusy] = useState(false);
+  const [discoverMessage, setDiscoverMessage] = useState<string | null>(null);
 
   const pipeline = useMemo(() => {
     const counts: Record<string, number> = {};
@@ -66,6 +71,30 @@ export function Prospects() {
   }, [prospects, statusFilter, priorityFilter, q]);
 
   const drawerProspect = drawerId ? prospects.find((p) => p.id === drawerId) ?? null : null;
+  const opportunities = useStore((s) => s.opportunities);
+  const syncFromBackend = useStore((s) => s.syncFromBackend);
+  const discoverNow = async () => {
+    setDiscoverBusy(true);
+    setDiscoverMessage(null);
+    try {
+      const target = opportunities
+        .filter((o) => o.researchStage !== 'UNDISCOVERED')
+        .sort((a, b) => (b.score?.total ?? 0) - (a.score?.total ?? 0))[0];
+      if (!target) throw new Error('Run research first so Survivor has a validated opportunity to target.');
+      const result = await discoverProspectsNow({
+        opportunityId: target.id,
+        region: region.trim() || 'Zimbabwe',
+        searchQuery: searchQuery.trim() || undefined,
+      });
+      await syncFromBackend();
+      setDiscoverMessage(`Found ${result.discovered} businesses; ${result.verified} passed identity/contact verification. ${result.rejectedUnverifiedOrConflicting} were rejected because the evidence was insufficient or conflicting.`);
+    } catch (e) {
+      setDiscoverMessage(e instanceof BackendError ? e.message : (e as Error).message || 'Business discovery failed.');
+    } finally {
+      setDiscoverBusy(false);
+    }
+  };
+
   const highPriority = prospects.filter((p) => p.priority === 'HIGH').length;
   const dueFollowUps = prospects.filter((p) => p.nextFollowUpAt && p.nextFollowUpAt <= Date.now()).length;
 
@@ -75,6 +104,23 @@ export function Prospects() {
         Prospects are real businesses surfaced by live web search for a validated opportunity — never
         fabricated. Outreach messages are AI-drafted drafts for a human to review and send; SURVIVE AI
         never contacts anyone automatically.
+      </div>
+
+      <div className="panel" style={{ marginBottom: 14, padding: 14 }}>
+        <div style={{ fontWeight: 700, marginBottom: 6 }}>Find real businesses now</div>
+        <div className="faint small" style={{ marginBottom: 10 }}>
+          Survivor searches live sources, then verifies the business identity and contact before adding it to the CRM.
+          Unverified or conflicting contacts are rejected.
+        </div>
+        <div className="filter-bar" style={{ marginBottom: 8 }}>
+          <input className="text-input" placeholder="Area, e.g. Harare" value={region} onChange={(e) => setRegion(e.target.value)} />
+          <input className="text-input" placeholder="What businesses? e.g. hotels, restaurants" value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} />
+          <button className="btn primary" disabled={!backendConfigured || discoverBusy} onClick={discoverNow}>
+            {discoverBusy ? 'Searching & verifying…' : 'Find businesses now'}
+          </button>
+        </div>
+        {discoverMessage && <div className="small" role="status">{discoverMessage}</div>}
+        {!backendConfigured && <div className="faint small">Live backend is not configured.</div>}
       </div>
 
       <div className="grid cols-4" style={{ marginBottom: 14 }}>
