@@ -5,6 +5,7 @@ export interface Env {
   SUPABASE_URL?: string;
   SUPABASE_SERVICE_ROLE_KEY?: string;
   AGENT_ID?: string;
+  BUILD_SHA?: string;
 
   // EcoCash credentials/configuration are Worker-only. Never expose these to the browser.
   // EIP sandbox currently uses HTTP Basic Auth.
