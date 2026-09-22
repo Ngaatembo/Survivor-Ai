@@ -63,6 +63,7 @@ import {
   addRealRevenueEntry as apiAddRealRevenueEntry,
   updateProjectOutcome as apiUpdateProjectOutcome,
   researchProspectNow as apiResearchProspectNow,
+  verifyProspectNow as apiVerifyProspectNow,
   regenerateProspectDemo as apiRegenerateProspectDemo,
   demoUrl as apiDemoUrl,
   type EconomicEfficiencySnapshot,
@@ -489,6 +490,44 @@ export const useStore = create<SurviveState>()(
             const message = e instanceof BackendError ? e.message : (e as Error).message;
             get().logEvent('WARNING', `Income research failed: ${message}`);
           }
+        },
+
+        verifyProspectNow: async (prospectId: string) => {
+          if (featureFlags.backend) {
+            try {
+              await apiVerifyProspectNow(prospectId);
+              await get().syncFromBackend();
+            } catch (e) {
+              const message = e instanceof BackendError ? e.message : (e as Error).message;
+              get().logEvent('WARNING', `Failed to verify prospect: ${message}`);
+            }
+            return;
+          }
+          if (!tavily?.connected && !brave?.connected) {
+            get().logEvent('WARNING', 'Failed to verify prospect: no live search provider connected.');
+            return;
+          }
+          const prospects = await repo.listProspects();
+          const prospect = prospects.find((p) => p.id === prospectId);
+          if (!prospect) {
+            get().logEvent('WARNING', `Failed to verify prospect: no prospect found with id ${prospectId}.`);
+            return;
+          }
+          const now = Date.now();
+          const balance = balanceFrom(await repo.listTransactions());
+          const economyState = await loadEconomyState(repo);
+          const ctx = {
+            state: economyState,
+            providers: { tavily, brave },
+            survivalStatus: computeSurvivalStatus(balance),
+            now,
+            cycleStartedAt: now,
+          };
+          const { verifyProspect } = await import('./services/prospectVerification');
+          const verified = await verifyProspect(ctx, prospect, now);
+          await saveEconomyState(repo, ctx.state);
+          await repo.upsertProspects([verified]);
+          set({ prospects: await repo.listProspects() } as any);
         },
 
         researchProspectNow: async (prospectId: string) => {
