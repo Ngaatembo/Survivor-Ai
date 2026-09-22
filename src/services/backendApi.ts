@@ -437,6 +437,7 @@ export interface IncomeStrategyResponse {
     decision: { lifecycle: string; realRevenue: number; realSales: number; reasons: string[]; nextExperiment: string };
   }>;
   evidence: Array<{ channel: string; title: string; description: string; sourceUrls: string[] }>;
+  channelPlans: Array<{ kind: string; decision: { lifecycle: string; realRevenue: number; realSales: number; reasons: string[]; nextExperiment: string }; plan: { objective: string; steps: string[]; humanActions: string[]; evidenceToCollect: string[]; successMetrics: string[]; stopConditions: string[]; currentEvidence: { realSales: number; realRevenue: number; dataQuality: string } } }>;
   forex: {
     target: string; status: 'FOUND'|'PARTIAL'|'NOT_FOUND';
     findings: Array<{ query:string; title:string; snippet:string; sourceUrl:string; sourceType:string }>;
