@@ -1001,6 +1001,9 @@ export default {
           realRevenueTotal: dealMetrics.avgDealSize !== null ? realRevenue.reduce((s, r) => s + r.amountReceived, 0) : 0,
           expectedValueOfOpenPipeline: openPipelineExpectedValue(prospects),
         });
+        const approvalRaw = await repo.getKV('human_action_approvals');
+        let actionApprovals: unknown[] = [];
+        try { actionApprovals = approvalRaw ? JSON.parse(approvalRaw) : []; } catch { actionApprovals = []; }
         const humanActionQueue = {
           topAction: actions[0] ?? null,
           queue: actions,
@@ -1024,6 +1027,7 @@ export default {
           fetchedAt: new Date().toISOString(),
           agent,
           survivalScore,
+          actionApprovals,
           economicEfficiency: {
             searchEconomy,
             revenueFunnel: funnel,
@@ -1194,6 +1198,68 @@ export default {
             academicDishonesty: false,
           },
         });
+      } catch (e) {
+        return json({ ok: false, error: (e as Error).message }, { status: 500 });
+      }
+    }
+
+    if (url.pathname === '/actions/approvals' && req.method === 'GET') {
+      try {
+        const { repo } = buildEngine(env);
+        const raw = await repo.getKV('human_action_approvals');
+        const approvals = raw ? JSON.parse(raw) : [];
+        return json({ ok: true, approvals: Array.isArray(approvals) ? approvals.slice(-200) : [] });
+      } catch (e) {
+        return json({ ok: false, error: (e as Error).message }, { status: 500 });
+      }
+    }
+
+    if (url.pathname === '/actions/approvals' && req.method === 'POST') {
+      try {
+        const body: any = await req.json();
+        if (typeof body?.actionId !== 'string' || typeof body?.actionKind !== 'string' || typeof body?.title !== 'string') {
+          return json({ ok: false, error: 'actionId, actionKind and title are required' }, { status: 400 });
+        }
+        const { repo } = buildEngine(env);
+        const raw = await repo.getKV('human_action_approvals');
+        const approvals: any[] = raw ? JSON.parse(raw) : [];
+        const existing = approvals.find((a) => a.actionId === body.actionId && a.status === 'PENDING');
+        if (existing) return json({ ok: true, approval: existing });
+        const approval = {
+          id: 'approval_' + crypto.randomUUID(),
+          actionId: body.actionId,
+          actionKind: body.actionKind,
+          title: body.title.trim(),
+          prospectId: typeof body.prospectId === 'string' ? body.prospectId : undefined,
+          opportunityId: typeof body.opportunityId === 'string' ? body.opportunityId : undefined,
+          status: 'PENDING',
+          createdAt: Date.now(),
+        };
+        approvals.push(approval);
+        await repo.setKV('human_action_approvals', JSON.stringify(approvals.slice(-200)));
+        return json({ ok: true, approval });
+      } catch (e) {
+        return json({ ok: false, error: (e as Error).message }, { status: 500 });
+      }
+    }
+
+    if (url.pathname === '/actions/approvals/review' && req.method === 'POST') {
+      try {
+        const body: any = await req.json();
+        if (typeof body?.approvalId !== 'string' || !['APPROVED', 'REJECTED'].includes(body?.decision)) {
+          return json({ ok: false, error: 'approvalId and decision are required' }, { status: 400 });
+        }
+        const { repo } = buildEngine(env);
+        const raw = await repo.getKV('human_action_approvals');
+        const approvals: any[] = raw ? JSON.parse(raw) : [];
+        const approval = approvals.find((a) => a.id === body.approvalId);
+        if (!approval) return json({ ok: false, error: 'approval not found' }, { status: 404 });
+        if (approval.status !== 'PENDING') return json({ ok: false, error: 'approval is already reviewed' }, { status: 409 });
+        approval.status = body.decision;
+        approval.reviewedAt = Date.now();
+        if (typeof body.note === 'string') approval.note = body.note;
+        await repo.setKV('human_action_approvals', JSON.stringify(approvals));
+        return json({ ok: true, approval });
       } catch (e) {
         return json({ ok: false, error: (e as Error).message }, { status: 500 });
       }
