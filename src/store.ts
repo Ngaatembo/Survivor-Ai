@@ -561,10 +561,16 @@ export const useStore = create<SurviveState>()(
             now,
             cycleStartedAt: now,
           };
-          const intel = await researchProspect(ctx, llm, prospect, now, { statusChanged: true });
+          const { verifyProspect } = await import('./services/prospectVerification');
+          const verified = await verifyProspect(ctx, prospect, now);
+          await repo.upsertProspects([verified]);
+          const intel = await researchProspect(ctx, llm, verified, now, { statusChanged: true });
           await saveEconomyState(repo, ctx.state);
           await repo.upsertProspectIntelligence(intel);
-          set({ prospectIntelligence: await repo.listProspectIntelligence() } as any);
+          set({
+            prospects: await repo.listProspects(),
+            prospectIntelligence: await repo.listProspectIntelligence(),
+          } as any);
         },
 
         regenerateProspectDemo: async (prospectId: string) => {
