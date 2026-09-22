@@ -40,3 +40,4 @@ AGENT_ID = "agent-survive-01"
 [triggers]
 crons = ["*/30 * * * *"]
 
+\n[assets]\ndirectory = "../dist"\nbinding = "ASSETS"\n
