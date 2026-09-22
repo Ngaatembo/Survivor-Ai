@@ -8,6 +8,7 @@ import {
   cancelPaymentRequest,
   createApprovedFinivexLink,
   markPaymentRequestPaid,
+  researchIncomeChannels as apiResearchIncomeChannels,
   type PaymentRequest,
 } from '../services/backendApi';
 import { Panel, Badge } from './ui';
@@ -37,6 +38,20 @@ export function IncomeHub() {
   const [paymentBusy, setPaymentBusy] = useState(false);
   const [paymentError, setPaymentError] = useState('');
   const [paymentForm, setPaymentForm] = useState({ clientName: '', amount: '', description: '', paymentMethod: 'OTHER' as PaymentRequest['payment_method'] });
+  const [channelBusy, setChannelBusy] = useState<string | null>(null);
+  const [channelResults, setChannelResults] = useState<Record<string, typeof incomeIntelligence>>({});
+  const runChannelResearch = async (channel: string) => {
+    if (!backendConnected || channelBusy) return;
+    setChannelBusy(channel);
+    try {
+      const result = await apiResearchIncomeChannels(channel);
+      setChannelResults((current) => ({ ...current, [channel]: result.opportunities.filter((o) => o.channel === channel).slice(0, 8) }));
+    } catch (e) {
+      setPaymentError((e as Error).message);
+    } finally {
+      setChannelBusy(null);
+    }
+  };
 
   const refreshPayments = async () => {
     if (!backendConnected) return;
@@ -154,13 +169,23 @@ export function IncomeHub() {
       <div className="faint small" style={{ marginTop: 8 }}>For Finivex, Survivor marks the request paid only after the server verifies the provider status. A client payment never gives Survivor control of the funds.</div>
     </Panel>
 
-    <Panel title="INCOME CHANNELS" right={<span className="faint small mono">{backendConnected ? 'LIVE DATA' : 'BACKEND REQUIRED'}</span>}>
-      <div className="grid cols-2">{CHANNELS.map(([id, icon, name, desc, status, next]) =>
-        <div key={id} className="opp-card" style={{ cursor: 'default' }}>
+    <Panel title="INCOME CHANNELS" right={<span className="faint small mono">{backendConnected ? 'LIVE SEARCH READY' : 'BACKEND REQUIRED'}</span>}>
+      <div className="grid cols-2">{CHANNELS.map(([id, icon, name, desc, status, next]) => {
+        const searchChannel = id === 'content' ? 'content-social' : id === 'freelance' ? 'freelance-remote' : id === 'products' ? 'digital-products' : id === 'affiliate' ? 'affiliate-referral' : id === 'other' ? 'other' : null;
+        const results = searchChannel ? (channelResults[searchChannel] ?? incomeIntelligence.filter((o) => o.channel === searchChannel).slice(0, 8)) : [];
+        return <div key={id} className="opp-card" style={{ cursor: 'default' }}>
           <div className="opp-head"><div><div style={{ fontSize: 14, fontWeight: 700 }}>{icon} {name}</div><div className="faint small" style={{ marginTop: 6, lineHeight: 1.5 }}>{desc}</div></div><Badge tone={tone(status)}>{status}</Badge></div>
-          <div className="opp-foot"><span className="faint small">Next: {next}</span></div>
-        </div>
-      )}</div>
+          <div className="opp-foot" style={{ display: 'block' }}>
+            <div className="faint small" style={{ marginBottom: 8 }}>Next: {next}</div>
+            {searchChannel ? <>
+              <button className="btn small primary" disabled={!backendConnected || channelBusy !== null} onClick={() => void runChannelResearch(searchChannel)}>{channelBusy === searchChannel ? 'Searching live…' : results.length ? 'Refresh live research' : 'Research this channel'}</button>
+              {results.length > 0 && <div style={{ marginTop: 9 }}>
+                {results.slice(0, 3).map((o) => <div key={o.id} className="faint small" style={{ marginBottom: 6 }}><strong>{o.title}</strong>{o.sourceUrls[0] && <> · <a href={o.sourceUrls[0]} target="_blank" rel="noreferrer">source ↗</a></>}</div>)}
+              </div>}
+            </> : <span className="faint small">NWT Dev uses the live prospect/revenue pipeline above.</span>}
+          </div>
+        </div>;
+      })}</div>
     </Panel>
 
     <div className="grid cols-2" style={{ marginTop: 14 }}>
