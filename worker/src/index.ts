@@ -1130,6 +1130,129 @@ export default {
       }
     }
 
+    if (url.pathname === '/income/strategy' && req.method === 'POST') {
+      try {
+        let body: any = {};
+        try { body = await req.json(); } catch { body = {}; }
+
+        const requested = typeof body?.channel === 'string' ? body.channel.trim() : '';
+        const strategies = requested
+          ? INCOME_CHANNEL_STRATEGIES.filter((s) => s.kind === requested)
+          : INCOME_CHANNEL_STRATEGIES;
+
+        if (requested && strategies.length === 0) {
+          return json({ ok: false, error: 'unknown income channel' }, { status: 400 });
+        }
+
+        const { repo, tavily, brave } = buildEngine(env);
+        const entries = await repo.listRealRevenue();
+        const memory = buildEconomicMemory(entries);
+        const state = await loadEconomyState(repo);
+        const ctx = {
+          state,
+          providers: { tavily, brave },
+          survivalStatus: computeSurvivalStatus(balanceFrom(await repo.listTransactions())),
+          now: Date.now(),
+          cycleStartedAt: Date.now(),
+        };
+
+        const evidence: Array<{ channel: string; title: string; description: string; sourceUrls: string[] }> = [];
+        const strategiesOut: Array<any> = [];
+        const channelPlans: Array<any> = [];
+
+        // One live demand query per channel keeps this human-triggered endpoint
+        // bounded while still grounding every strategy in fresh evidence.
+        for (const strategy of strategies) {
+          const query = strategy.demandQueries[0];
+          let searchResultCount = 0;
+          if (query) {
+            const result = await (await import('../../src/services/searchEconomy')).runSearch(ctx, {
+              purpose: 'OTHER',
+              query,
+              entityId: `income-strategy:${strategy.kind}`,
+              priority: strategy.kind === 'TRADING_RESEARCH' ? 'HIGH' : 'MEDIUM',
+              max: 5,
+            });
+            searchResultCount = result.results.length;
+            for (const item of result.results.slice(0, 5)) {
+              if (!item.url || !item.title) continue;
+              evidence.push({
+                channel: strategy.kind,
+                title: item.title.slice(0, 180),
+                description: item.snippet.slice(0, 700),
+                sourceUrls: [item.url],
+              });
+            }
+          }
+
+          const decision = decideIncomeChannel(strategy, memory, entries);
+          const plan = (await import('../../src/lib/incomeChannelBrain')).buildIncomeExecutionPlan(strategy, memory, entries);
+          strategiesOut.push({
+            kind: strategy.kind,
+            name: strategy.name,
+            category: strategy.category,
+            lifecycle: decision.lifecycle,
+            marketId: strategy.marketId,
+            customer: strategy.customer,
+            problemToSolve: strategy.problemToSolve,
+            delivery: strategy.delivery,
+            requiredHumanAction: strategy.requiredHumanAction,
+            risk: strategy.risk,
+            testCost: strategy.testCost,
+            nextExperiment: decision.nextExperiment,
+            searchResultCount,
+            decision,
+          });
+          channelPlans.push({ kind: strategy.kind, decision, plan });
+        }
+
+        // Forex gets a dedicated evidence package because it has stricter
+        // research-only guardrails than ordinary income channels.
+        const forexQueries = INCOME_CHANNEL_STRATEGIES.find((s) => s.kind === 'TRADING_RESEARCH')?.demandQueries ?? [];
+        const forexFindings: ForexResearchFinding[] = [];
+        for (const query of forexQueries.slice(0, 4)) {
+          const result = await (await import('../../src/services/searchEconomy')).runSearch(ctx, {
+            purpose: 'OTHER',
+            query,
+            entityId: 'income-strategy:TRADING_RESEARCH',
+            priority: 'HIGH',
+            max: 5,
+          });
+          for (const item of result.results) {
+            if (!item.url || !item.title) continue;
+            forexFindings.push({
+              query,
+              title: item.title.slice(0, 180),
+              snippet: item.snippet.slice(0, 700),
+              sourceUrl: item.url,
+              sourceType: classifyForexSource(query, item.title),
+            });
+          }
+        }
+
+        await saveEconomyState(repo, ctx.state);
+        const forex = buildForexResearchPackage(forexFindings);
+
+        return json({
+          ok: true,
+          generatedAt: new Date().toISOString(),
+          strategies: strategiesOut,
+          evidence: evidence.slice(0, 80),
+          channelPlans,
+          forex,
+          guardrails: {
+            autonomousTrading: false,
+            autonomousPublishing: false,
+            autonomousOutreach: false,
+            autonomousPayments: false,
+            academicDishonesty: false,
+          },
+        });
+      } catch (e) {
+        return json({ ok: false, error: (e as Error).message }, { status: 500 });
+      }
+    }
+
     if (url.pathname === '/income/research' && req.method === 'POST') {
       try {
         let body: any = {};
