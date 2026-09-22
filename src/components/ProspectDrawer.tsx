@@ -44,6 +44,7 @@ export function ProspectDrawer({ prospect, onClose }: { prospect: Prospect; onCl
   const updateProspectStatus = useStore((s) => s.updateProspectStatus);
   const updateOfferStatus = useStore((s) => s.updateOfferStatus);
   const intelligence = useStore((s) => s.prospectIntelligence.find((i) => i.prospectId === prospect.id));
+  const marketPrice = useStore((s) => s.marketPriceResearch.find((m) => m.opportunityId === prospect.opportunityId));
   const researchProspectNow = useStore((s) => s.researchProspectNow);
   const unifiedProspectResearchNow = useStore((s) => s.unifiedProspectResearchNow);
   const verifyProspectNow = useStore((s) => s.verifyProspectNow);
@@ -284,6 +285,76 @@ export function ProspectDrawer({ prospect, onClose }: { prospect: Prospect; onCl
             <div className="empty">
               No deep research yet. This runs automatically on your top 3 prospects each cycle, or click
               "Research now" to run it on this one immediately.
+            </div>
+          )}
+        </div>
+
+        <div className="drawer-section">
+          <h3>Full research result</h3>
+          <p className="faint small" style={{ marginBottom: 10 }}>
+            Survivor combines the verified business identity/contact evidence, business-specific research,
+            and real market-price research before this package is treated as decision support.
+          </p>
+          <div className="kv">
+            <KV k="Business name" v={prospect.verification?.verifiedBusinessName ?? prospect.businessName} />
+            <KV k="Location" v={prospect.verification?.verifiedLocation ?? prospect.location} />
+            <KV k="Contact" v={prospect.verification?.verifiedContactValue ?? prospect.contactValue ?? 'Not verified'} />
+            <KV k="Website" v={prospect.verification?.verifiedWebsiteUrl ?? prospect.websiteUrl ?? 'Not verified'} />
+            {marketPrice && (
+              <KV
+                k="Market price"
+                v={
+                  marketPrice.priceMax > 0
+                    ? `${marketPrice.currency} ${marketPrice.priceMin}–${marketPrice.priceMax}`
+                    : 'Insufficient pricing evidence'
+                }
+              />
+            )}
+          </div>
+          {marketPrice && (
+            <div style={{ marginTop: 10 }}>
+              <div style={{ display: 'flex', gap: 7, alignItems: 'center', flexWrap: 'wrap', marginBottom: 6 }}>
+                <Badge tone={marketPrice.confidence === 'HIGH' ? 'green' : marketPrice.confidence === 'MEDIUM' ? 'blue' : 'amber'}>
+                  {marketPrice.confidence} PRICING CONFIDENCE
+                </Badge>
+                <span className="faint small">
+                  {marketPrice.generator === 'llm' ? 'Synthesized from observed prices' : 'Source digest only'} · {marketPrice.sources.length} source(s)
+                </span>
+              </div>
+              <p className="small muted" style={{ marginBottom: 8 }}>
+                <span className="mono-label">Pricing basis — </span>{marketPrice.rationale}
+              </p>
+              {marketPrice.sources.length > 0 && (
+                <details>
+                  <summary className="small faint" style={{ cursor: 'pointer' }}>Pricing sources</summary>
+                  <ul style={{ marginTop: 6, paddingLeft: 18 }}>
+                    {marketPrice.sources.map((s) => (
+                      <li key={s.id} className="small muted" style={{ marginBottom: 3 }}>
+                        {s.url ? <a href={s.url} target="_blank" rel="noreferrer">{s.title}</a> : s.title}
+                      </li>
+                    ))}
+                  </ul>
+                </details>
+              )}
+            </div>
+          )}
+          {prospect.verification?.status === 'CONFLICT' && (
+            <div className="warn-banner" style={{ marginTop: 10 }}>
+              <strong>Do not use the contact automatically.</strong> Independent sources disagree; review the conflicting contacts above before reaching out.
+            </div>
+          )}
+          {prospect.verification?.status !== 'CONFLICT' && prospect.verification?.verifiedContactValue && (
+            <div style={{ display: 'flex', gap: 7, flexWrap: 'wrap', marginTop: 10 }}>
+              {['PHONE', 'WHATSAPP'].includes(prospect.verification.verifiedContactChannel ?? '') && (
+                <a className="btn small" href={prospect.verification.verifiedContactChannel === 'WHATSAPP'
+                  ? `https://wa.me/${prospect.verification.verifiedContactValue.replace(/\\D/g, '')}`
+                  : `tel:${prospect.verification.verifiedContactValue}`}>
+                  {prospect.verification.verifiedContactChannel === 'WHATSAPP' ? 'Open WhatsApp' : 'Call'}
+                </a>
+              )}
+              {prospect.verification.verifiedEmail && (
+                <a className="btn small" href={`mailto:${prospect.verification.verifiedEmail}`}>Email</a>
+              )}
             </div>
           )}
         </div>
