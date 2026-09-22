@@ -274,6 +274,59 @@ export default {
     if (req.method === 'OPTIONS') return new Response(null, { status: 204 });
 
 
+    if (url.pathname === '/payments/finivex/status' && req.method === 'GET') {
+      return json({ ok: true, payment: finivexStatus(finivexConfig(env)) });
+    }
+
+    if (url.pathname === '/payments/finivex/payment-link' && req.method === 'POST') {
+      const secret = req.headers.get('x-trigger-secret');
+      if (!env.TRIGGER_SECRET || secret !== env.TRIGGER_SECRET) return json({ ok: false, error: 'unauthorized' }, { status: 401 });
+      let body: any;
+      try { body = await req.json(); } catch { return json({ ok: false, error: 'invalid JSON body' }, { status: 400 }); }
+      const amount = body?.amount;
+      const currency = body?.currency === 'ZWG' ? 'ZWG' : body?.currency === 'USD' ? 'USD' : null;
+      if (typeof amount !== 'number' || !Number.isFinite(amount) || amount <= 0) return json({ ok: false, error: 'amount must be a positive number' }, { status: 400 });
+      if (!currency) return json({ ok: false, error: 'currency must be USD or ZWG' }, { status: 400 });
+      const config = finivexConfig(env);
+      if (!finivexStatus(config).configured) return json({ ok: false, error: 'Finivex credentials are not configured' }, { status: 503 });
+      try {
+        const transactionId = 'NWT-' + Date.now() + '-' + crypto.randomUUID().slice(0, 8);
+        const description = typeof body.description === 'string' && body.description.trim() ? body.description.trim() : 'NWT Dev payment';
+        const result = await createFinivexPaymentLink(config, {
+          amount, currency, description,
+          customerEmail: typeof body.customerEmail === 'string' ? body.customerEmail.trim() : undefined,
+          customerPhone: typeof body.customerPhone === 'string' ? body.customerPhone.trim() : undefined,
+          redirectUrl: typeof body.redirectUrl === 'string' ? body.redirectUrl : undefined,
+          expiresInMinutes: typeof body.expiresInMinutes === 'number' ? Math.max(5, Math.min(10080, Math.floor(body.expiresInMinutes))) : undefined,
+        });
+        const provider = result.body as any;
+        const data = provider?.data ?? {};
+        const now = new Date().toISOString();
+        await env.DB.prepare("INSERT INTO finivex_payment_links (id, agent_id, transaction_id, provider_reference, amount, currency, description, customer_email, customer_phone, payment_link, status, provider_response, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
+          .bind('fl_' + crypto.randomUUID(), env.AGENT_ID ?? 'agent-survive-01', transactionId, data.reference ?? data.orderId ?? null, amount, currency, description, typeof body.customerEmail === 'string' ? body.customerEmail.trim() : null, typeof body.customerPhone === 'string' ? body.customerPhone.trim() : null, data.paymentLink ?? null, result.ok ? 'ACTIVE' : 'FAILED', JSON.stringify(provider), now, now).run();
+        return json({ ok: result.ok, transactionId, paymentLink: data.paymentLink ?? null, provider, httpStatus: result.httpStatus, note: 'Payment-link creation does not move money. The customer must complete payment.' }, { status: result.ok ? 200 : 502 });
+      } catch (e) { return json({ ok: false, error: (e as Error).message }, { status: 500 }); }
+    }
+
+    if (url.pathname === '/payments/finivex/payment-status' && req.method === 'GET') {
+      const secret = req.headers.get('x-trigger-secret');
+      if (!env.TRIGGER_SECRET || secret !== env.TRIGGER_SECRET) return json({ ok: false, error: 'unauthorized' }, { status: 401 });
+      const transactionId = url.searchParams.get('transactionId')?.trim() ?? '';
+      if (!transactionId) return json({ ok: false, error: 'transactionId is required' }, { status: 400 });
+      try {
+        const config = finivexConfig(env);
+        if (!finivexStatus(config).configured) return json({ ok: false, error: 'Finivex credentials are not configured' }, { status: 503 });
+        const result = await getFinivexPaymentStatus(config, transactionId);
+        const provider = result.body as any;
+        const status = String(provider?.data?.status ?? '').toUpperCase();
+        const mapped = status === 'COMPLETED' ? 'PAID' : ['FAILED','CANCELLED','EXPIRED','REFUNDED'].includes(status) ? status : 'ACTIVE';
+        const now = new Date().toISOString();
+        await env.DB.prepare("UPDATE finivex_payment_links SET status = ?, provider_response = ?, updated_at = ?, paid_at = CASE WHEN ? = 'PAID' THEN COALESCE(paid_at, ?) ELSE paid_at END WHERE transaction_id = ?")
+          .bind(mapped, JSON.stringify(provider), now, mapped, now, transactionId).run();
+        return json({ ok: result.ok, transactionId, status: mapped, provider, httpStatus: result.httpStatus });
+      } catch (e) { return json({ ok: false, error: (e as Error).message }, { status: 500 }); }
+    }
+
     if (url.pathname === '/payments/status' && req.method === 'GET') {
       return json({
         ok: true,
