@@ -26,7 +26,7 @@ export const env = {
   // When unset, the app falls back to the original standalone browser demo
   // (localStorage + local rule engine), clearly labeled as DEMO in the UI.
   apiBaseUrl: pick(import.meta.env?.VITE_API_BASE_URL,
-    typeof window !== 'undefined' && /\\.workers\\.dev$/.test(window.location.hostname) ? window.location.origin : undefined,
+    typeof window !== 'undefined' && /\.workers\.dev$/.test(window.location.hostname) ? window.location.origin : undefined,
   ).replace(/\\/+$/, ''),
 };
 
