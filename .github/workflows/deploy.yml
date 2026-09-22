@@ -22,7 +22,6 @@ jobs:
       - name: Build dashboard
         run: npm run build
         env:
-          VITE_API_BASE_URL: https://survivor-ai-backend.ngaatendwew.workers.dev
       - run: npm run worker:dry-run -- --var BUILD_SHA:${{ github.sha }}
       - run: npm run worker:deploy -- --var BUILD_SHA:${{ github.sha }}
         env:
