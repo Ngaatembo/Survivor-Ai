@@ -81,7 +81,7 @@ export function IncomeHub() {
           if (index >= 0) next[index] = item;
           else next.push(item);
         }
-        return { ...current, generatedAt: result.generatedAt, strategies: next, evidence: [...current.evidence, ...result.evidence], forex: result.forex };
+        return { ...current, generatedAt: result.generatedAt, strategies: next, evidence: [...current.evidence, ...result.evidence], forex: result.forex, channelPlans: result.channelPlans };
       });
     } catch (e) { setPaymentError((e as Error).message); }
     finally { setStrategyBusy(false); }
@@ -275,6 +275,20 @@ export function IncomeHub() {
           <div className="muted small" style={{ marginTop:6 }}>{s.nextExperiment}</div>
         </div>)}
       </div>}
+      {strategy?.channelPlans?.length > 0 && <Panel title="EXECUTION PLANS" style={{ marginTop: 12 }}>
+        <div className="grid cols-2">
+          {strategy.channelPlans.map((item) => <div key={item.kind} className="event" style={{ display:'block' }}>
+            <div style={{ display:'flex', justifyContent:'space-between', gap:8 }}><strong>{strategy.strategies.find((s) => s.kind === item.kind)?.name ?? item.kind}</strong><Badge tone={item.decision.lifecycle === 'PROVEN' ? 'green' : item.kind === 'TRADING_RESEARCH' ? 'red' : 'blue'}>{item.decision.lifecycle}</Badge></div>
+            <div className="muted small" style={{ marginTop:6 }}>{item.plan.objective}</div>
+            <div className="faint small" style={{ marginTop:6 }}><strong>Steps:</strong> {item.plan.steps.join(' → ')}</div>
+            <div className="faint small" style={{ marginTop:6 }}><strong>Human:</strong> {item.plan.humanActions.join(' · ')}</div>
+            <div className="faint small" style={{ marginTop:6 }}><strong>Success:</strong> {item.plan.successMetrics.join(' · ')}</div>
+            <div className="faint small" style={{ marginTop:6 }}><strong>Stop:</strong> {item.plan.stopConditions.join(' · ')}</div>
+            <div className="faint small mono" style={{ marginTop:6 }}>Observed: {item.plan.currentEvidence.realSales} sale(s) · {item.plan.currentEvidence.realRevenue.toFixed(2)} USD · data {item.plan.currentEvidence.dataQuality}</div>
+          </div>)}
+        </div>
+      </Panel>}
+
       {strategy?.forex && <div className="event" style={{ display:'block', marginTop:12 }}>
         <div style={{ display:'flex', justifyContent:'space-between', gap:8 }}><strong>Forex research: {strategy.forex.target}</strong><Badge tone={strategy.forex.status === 'FOUND' ? 'blue' : 'amber'}>{strategy.forex.status}</Badge></div>
         <div className="muted small" style={{ marginTop:6 }}>{strategy.forex.verificationNotes[0]}</div>
