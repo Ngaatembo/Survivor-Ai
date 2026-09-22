@@ -8,7 +8,8 @@ import { featureFlags } from '../config/env';
 
 type SortKey = 'score' | 'capital' | 'speed' | 'risk' | 'potential' | 'evidence';
 
-const LIFECYCLE_STATES: (OpportunityLifecycleState | 'ALL')[] = ['ALL', 'DISCOVERED', 'VALIDATING', 'PROVEN', 'SCALING', 'FAILED', 'ARCHIVED'];
+const PORTFOLIO_STATES: OpportunityLifecycleState[] = ['DISCOVERED', 'VALIDATING', 'PROVEN', 'SCALING', 'FAILED', 'ARCHIVED'];
+const LIFECYCLE_STATES: (OpportunityLifecycleState | 'ALL')[] = ['ALL', ...PORTFOLIO_STATES];
 const LIFECYCLE_TONE: Record<OpportunityLifecycleState, 'green' | 'blue' | 'amber' | 'red' | 'gray' | 'purple'> = {
   DISCOVERED: 'gray', VALIDATING: 'blue', PROVEN: 'green', SCALING: 'purple', FAILED: 'red', ARCHIVED: 'gray',
 };
@@ -78,7 +79,7 @@ export function OpportunityExplorer() {
 
   const drawerOpp = drawerId ? opportunities.find((o) => o.id === drawerId) ?? null : null;
   const liveCount = opportunities.filter((o) => o.dataSource === 'LIVE').length;
-  const lifecycleCounts = LIFECYCLE_STATES.slice(1).reduce((acc, state) => {
+  const lifecycleCounts = PORTFOLIO_STATES.reduce((acc, state) => {
     acc[state] = opportunities.filter((o) => o.lifecycleState === state).length;
     return acc;
   }, {} as Record<OpportunityLifecycleState, number>);
@@ -170,7 +171,7 @@ export function OpportunityExplorer() {
       </div>
 
       <div className="chip-list" style={{ marginBottom: 12 }}>
-        {LIFECYCLE_STATES.slice(1).map((state) => (
+        {PORTFOLIO_STATES.map((state) => (
           <button
             key={state}
             className="btn small"
