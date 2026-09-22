@@ -119,8 +119,9 @@ export async function discoverProspects(
   existingBusinessNames: string[],
   categoryStats?: CategoryRealWorldStats,
   now: number = Date.now(),
+  options: { region?: string; searchQuery?: string } = {},
 ): Promise<{ prospects: Prospect[]; queriesRun: number; sourcesCount: number; cacheHits: number; budgetExceeded: number }> {
-  const region = opportunity.geographicRelevance[0] ?? 'Zimbabwe';
+  const region = options.region?.trim() || opportunity.geographicRelevance[0] || 'Zimbabwe';
   const seeds = rotatedSeeds(now);
   const found: Prospect[] = [];
   let queriesRun = 0;
@@ -137,7 +138,7 @@ export async function discoverProspects(
     const entityId = `${opportunity.id}::${seed.label}`;
     const searchOutcome = await runSearch(ctx, {
       purpose: 'PROSPECT_DISCOVERY',
-      query: `${seed.terms} small business in ${region} contact`,
+      query: `${options.searchQuery?.trim() || seed.terms} small business in ${region} contact`,
       entityId,
       max: MAX_RESULTS_PER_QUERY,
     });
