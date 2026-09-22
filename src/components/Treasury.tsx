@@ -10,7 +10,7 @@ import {
   type TreasurySpendRequest,
 } from '../services/backendApi';
 
-const money = (n: number) => \`$\${n.toFixed(2)}\`;
+const money = (n: number) => `${n.toFixed(2)}`;
 
 export function Treasury() {
   const [data, setData] = useState<TreasuryResponse | null>(null);
