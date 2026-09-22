@@ -3,7 +3,9 @@ export type WindsorConnector =
   | 'googleanalytics4'
   | 'facebook_organic'
   | 'instagram'
-  | 'tiktok_organic';
+  | 'tiktok_organic'
+  | 'youtube'
+  | 'linkedin_organic';
 
 export type WindsorConfig = {
   apiKey?: string;
@@ -44,6 +46,13 @@ async function query(
 
   const body = await response.json().catch(() => null) as any;
   if (!response.ok) {
+    const retryAfter = response.headers.get('retry-after');
+    if (response.status === 429) {
+      throw new Error(
+        `RATE_LIMITED: ${connector} returned HTTP 429. Windsor or the upstream source has temporarily throttled requests.` +
+        (retryAfter ? ` Retry-After: ${retryAfter}.` : ' Retry later; Survivor will not retry aggressively.')
+      );
+    }
     throw new Error(body?.error ?? `Windsor ${connector} returned HTTP ${response.status}`);
   }
 
@@ -63,6 +72,8 @@ export async function getWindsorIncomeSummary(config: WindsorConfig) {
     ['facebook_organic', ['date', 'account_name', 'page_fans', 'page_daily_follows', 'page_daily_unfollows', 'page_actions_post_reactions_total'], 'facebook'],
     ['instagram', ['date', 'account_name', 'follower_count_1d', 'accounts_engaged', 'comments', 'likes', 'shares', 'saves'], 'instagram'],
     ['tiktok_organic', ['date', 'account_name', 'followers_count', 'engaged_audience', 'likes', 'comments', 'shares', 'video_views'], 'tiktok'],
+    ['youtube', ['date', 'account_id', 'account_name', 'video_title', 'views', 'likes', 'comments', 'shares', 'subscribers_gained', 'estimated_minutes_watched'], 'youtube'],
+    ['linkedin_organic', ['date', 'organization_id', 'organization_name', 'page_followers', 'page_daily_follows', 'page_daily_unfollows', 'all_page_views', 'comments', 'likes', 'shares'], 'linkedin'],
   ];
 
   await Promise.all(jobs.map(async ([connector, fields, key]) => {
