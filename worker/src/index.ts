@@ -53,10 +53,25 @@ import {
   verifyEcoCashWebhook,
 } from './paymentProvider';
 import { finivexStatus, createFinivexPaymentLink, getFinivexPaymentStatus } from './finivexProvider';
+import { getWindsorIncomeSummary } from './windsorProvider';
 
 
 function finivexConfig(env: Env) {
   return { baseUrl: env.FINIVEX_BASE_URL ?? 'https://gateway.finivex.online/api/pg', apiKey: env.FINIVEX_API_KEY, apiSecret: env.FINIVEX_API_SECRET };
+}
+
+function windsorConfig(env: Env) {
+  return {
+    apiKey: env.WINDSOR_API_KEY,
+    baseUrl: env.WINDSOR_BASE_URL,
+    accounts: {
+      searchconsole: env.WINDSOR_SEARCHCONSOLE_ACCOUNT_ID,
+      googleanalytics4: env.WINDSOR_GA4_ACCOUNT_ID,
+      facebook_organic: env.WINDSOR_FACEBOOK_ACCOUNT_ID,
+      instagram: env.WINDSOR_INSTAGRAM_ACCOUNT_ID,
+      tiktok_organic: env.WINDSOR_TIKTOK_ACCOUNT_ID,
+    },
+  };
 }
 
 function ecoCashConfig(env: Env) {
@@ -277,6 +292,15 @@ export default {
 
     if (req.method === 'OPTIONS') return new Response(null, { status: 204 });
 
+
+    if (url.pathname === '/integrations/windsor/summary' && req.method === 'GET') {
+      try {
+        const summary = await getWindsorIncomeSummary(windsorConfig(env));
+        return json({ ok: true, ...summary });
+      } catch (e) {
+        return json({ ok: false, error: (e as Error).message }, { status: 500 });
+      }
+    }
 
     if (url.pathname === '/payments/finivex/status' && req.method === 'GET') {
       return json({ ok: true, payment: finivexStatus(finivexConfig(env)) });
