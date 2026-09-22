@@ -88,6 +88,11 @@ export interface TreasuryResponse { ok: true; treasury: TreasurySnapshot; spendR
 
 export interface BackendHealth {
   ok: boolean;
+  ready?: boolean;
+  schema?: {
+    ready: boolean;
+    missingTables: string[];
+  };
   service: string;
   time: string;
   runtime?: {
