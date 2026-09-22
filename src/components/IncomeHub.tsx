@@ -275,11 +275,9 @@ export function IncomeHub() {
           <div className="muted small" style={{ marginTop:6 }}>{s.nextExperiment}</div>
         </div>)}
       </div>}
-      {strategy && (() => {
-        const plans = strategy.channelPlans ?? [];
-        return plans.length > 0 && <Panel title="EXECUTION PLANS" style={{ marginTop: 12 }}>
+      {strategy?.channelPlans && strategy.channelPlans.length > 0 && <Panel title="EXECUTION PLANS" style={{ marginTop: 12 }}>
         <div className="grid cols-2">
-          {plans.map((item) => <div key={item.kind} className="event" style={{ display:'block' }}>
+          {strategy.channelPlans.map((item) => <div key={item.kind} className="event" style={{ display:'block' }}>
             <div style={{ display:'flex', justifyContent:'space-between', gap:8 }}><strong>{strategy.strategies.find((s) => s.kind === item.kind)?.name ?? item.kind}</strong><Badge tone={item.decision.lifecycle === 'PROVEN' ? 'green' : item.kind === 'TRADING_RESEARCH' ? 'red' : 'blue'}>{item.decision.lifecycle}</Badge></div>
             <div className="muted small" style={{ marginTop:6 }}>{item.plan.objective}</div>
             <div className="faint small" style={{ marginTop:6 }}><strong>Steps:</strong> {item.plan.steps.join(' → ')}</div>
@@ -289,8 +287,7 @@ export function IncomeHub() {
             <div className="faint small mono" style={{ marginTop:6 }}>Observed: {item.plan.currentEvidence.realSales} sale(s) · {item.plan.currentEvidence.realRevenue.toFixed(2)} USD · data {item.plan.currentEvidence.dataQuality}</div>
           </div>)}
         </div>
-      </Panel>;
-      })()}
+      </Panel>}
 
       {strategy?.forex && <div className="event" style={{ display:'block', marginTop:12 }}>
         <div style={{ display:'flex', justifyContent:'space-between', gap:8 }}><strong>Forex research: {strategy.forex.target}</strong><Badge tone={strategy.forex.status === 'FOUND' ? 'blue' : 'amber'}>{strategy.forex.status}</Badge></div>
