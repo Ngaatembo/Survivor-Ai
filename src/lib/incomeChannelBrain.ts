@@ -48,8 +48,8 @@ export function decideIncomeChannel(strategy: IncomeChannelStrategy, memory: Eco
   if (strategy.kind==='TRADING_RESEARCH') lifecycle='RESEARCHING';
   return { channel: strategy.kind, lifecycle, reasons: [
     strategy.kind==='TRADING_RESEARCH' ? 'Trading stays research/paper-trading only until independently observed evidence exists.' : 'No channel is proven from forecasts alone.',
-    matching.length ? \`\${matching.length} real sale(s) are recorded for this channel.\` : 'No real sales are recorded for this channel yet.',
-    memory.dataQuality==='NONE' ? 'Economic memory has no verified revenue yet.' : \`Economic memory contains \${memory.sampleSize} verified sale(s).\`
+    matching.length ? `${matching.length} real sale(s) are recorded for this channel.` : 'No real sales are recorded for this channel yet.',
+    memory.dataQuality==='NONE' ? 'Economic memory has no verified revenue yet.' : `Economic memory contains ${memory.sampleSize} verified sale(s).`
   ], nextExperiment: strategy.nextExperiment, realRevenue: revenue, realSales: matching.length };
 }
 
