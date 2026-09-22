@@ -70,6 +70,8 @@ function windsorConfig(env: Env) {
       facebook_organic: env.WINDSOR_FACEBOOK_ACCOUNT_ID ?? '1252129927993703',
       instagram: env.WINDSOR_INSTAGRAM_ACCOUNT_ID ?? '17841472745490723',
       tiktok_organic: env.WINDSOR_TIKTOK_ACCOUNT_ID ?? '_000aVorMZyL807-8WN-eULnSn11kQPtr8yb',
+      youtube: env.WINDSOR_YOUTUBE_ACCOUNT_ID ?? '43093',
+      linkedin_organic: env.WINDSOR_LINKEDIN_ACCOUNT_ID,
     },
   };
 }
