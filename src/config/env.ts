@@ -25,7 +25,7 @@ export const env = {
   // two independent sources of truth for the same simulated business state.
   // When unset, the app falls back to the original standalone browser demo
   // (localStorage + local rule engine), clearly labeled as DEMO in the UI.
-  apiBaseUrl: pick(import.meta.env?.VITE_API_BASE_URL).replace(/\/+$/, ''),
+  apiBaseUrl: (pick(import.meta.env?.VITE_API_BASE_URL) || (!import.meta.env?.DEV && typeof window !== 'undefined' ? window.location.origin : '')).replace(/\/+$/, ''),
 };
 
 export const featureFlags = {
