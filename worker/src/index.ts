@@ -1568,6 +1568,7 @@ export default {
     }
 
     if (url.pathname === '/prospects/status' && req.method === 'POST') {
+      if (!(await requireOperator(req, env))) return json({ ok: false, error: 'operator authentication required' }, { status: 401 });
       // The CRM write path (Phase 3, carried forward from the original
       // build spec): a human records a real-world outcome for a prospect.
       // Narrow and unauthenticated like the rest of this single-operator
@@ -1892,6 +1893,7 @@ export default {
     }
 
     if (url.pathname === '/offers/status' && req.method === 'POST') {
+      if (!(await requireOperator(req, env))) return json({ ok: false, error: 'operator authentication required' }, { status: 401 });
       // Same pattern as /prospects/status — a human marks a drafted offer
       // sent/accepted/declined. Never called autonomously.
       let body: any;
