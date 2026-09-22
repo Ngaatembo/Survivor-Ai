@@ -127,6 +127,7 @@ export interface ActionApproval {
   note?: string;
   createdAt: number;
   reviewedAt?: number;
+  executedAt?: number;
 }
 
 export interface SurvivalScore {
