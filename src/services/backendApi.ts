@@ -247,6 +247,31 @@ export class BackendError extends Error {
 
 const TIMEOUT_MS = 12_000;
 
+let operatorSessionToken: string | null = null;
+
+async function loginOperator(): Promise<void> {
+  if (!env.apiBaseUrl) throw new BackendError('VITE_API_BASE_URL is not configured');
+  if (operatorSessionToken) return;
+  if (typeof window === 'undefined') throw new BackendError('Operator authentication requires the browser dashboard');
+  const secret = window.prompt('Survivor operator secret (TRIGGER_SECRET):');
+  if (!secret) throw new BackendError('Operator authentication cancelled');
+  const res = await fetch(`${env.apiBaseUrl}/auth/login`, {
+    method: 'POST',
+    headers: { accept: 'application/json', 'content-type': 'application/json' },
+    body: JSON.stringify({ secret }),
+  });
+  let body: any = null;
+  try { body = await res.json(); } catch {}
+  if (!res.ok || typeof body?.token !== 'string') {
+    throw new BackendError(body?.error ?? `Operator login failed (HTTP ${res.status})`, body);
+  }
+  operatorSessionToken = body.token;
+}
+
+function operatorHeaders(): Record<string, string> {
+  return operatorSessionToken ? { authorization: `Bearer ${operatorSessionToken}` } : {};
+}
+
 async function getJson<T>(path: string): Promise<T> {
   if (!env.apiBaseUrl) throw new BackendError('VITE_API_BASE_URL is not configured');
   const controller = new AbortController();
@@ -255,13 +280,17 @@ async function getJson<T>(path: string): Promise<T> {
     const res = await fetch(`${env.apiBaseUrl}${path}`, {
       method: 'GET',
       signal: controller.signal,
-      headers: { accept: 'application/json' },
+      headers: { accept: 'application/json', ...operatorHeaders() },
     });
     let body: any = null;
     try {
       body = await res.json();
     } catch {
       // fall through — body stays null, handled below
+    }
+    if (res.status === 401 && path.startsWith('/actions/approvals')) {
+      await loginOperator();
+      return getJson<T>(path);
     }
     if (!res.ok) {
       throw new BackendError(body?.error ?? `Backend returned HTTP ${res.status}`, body);
@@ -297,7 +326,7 @@ async function postJson<T>(path: string, body: unknown): Promise<T> {
     const res = await fetch(`${env.apiBaseUrl}${path}`, {
       method: 'POST',
       signal: controller.signal,
-      headers: { accept: 'application/json', 'content-type': 'application/json' },
+      headers: { accept: 'application/json', 'content-type': 'application/json', ...operatorHeaders() },
       body: JSON.stringify(body),
     });
     let responseBody: any = null;
@@ -305,6 +334,11 @@ async function postJson<T>(path: string, body: unknown): Promise<T> {
       responseBody = await res.json();
     } catch {
       // fall through — body stays null, handled below
+    }
+    if (res.status === 401 && path.startsWith('/actions/approvals')) {
+      operatorSessionToken = null;
+      await loginOperator();
+      return postJson<T>(path, body);
     }
     if (!res.ok) {
       throw new BackendError(responseBody?.error ?? `Backend returned HTTP ${res.status}`, responseBody);
