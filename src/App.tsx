@@ -8,6 +8,7 @@ import { Prospects } from './components/Prospects';
 import { Projects } from './components/Projects';
 import { Analytics } from './components/Analytics';
 import { EconomicEfficiency } from './components/EconomicEfficiency';
+import { IncomeHub } from './components/IncomeHub';
 import { DecisionCenter } from './components/DecisionCenter';
 import { Experiments } from './components/Experiments';
 import { MemoryView } from './components/MemoryView';
@@ -26,6 +27,7 @@ export type View =
   | 'projects'
   | 'analytics'
   | 'economics'
+  | 'income'
   | 'decision'
   | 'experiments'
   | 'memory'
@@ -47,6 +49,7 @@ const NAV: { id: View; label: string; icon: string; section: string }[] = [
   { id: 'experiments', label: 'Experiments', icon: '▶', section: 'INTELLIGENCE' },
   { id: 'analytics', label: 'Performance', icon: '📊', section: 'ANALYTICS' },
   { id: 'economics', label: 'Economic Efficiency', icon: '⚖', section: 'ANALYTICS' },
+  { id: 'income', label: 'Income Hub', icon: '💰', section: 'ANALYTICS' },
   { id: 'wallet', label: 'Simulated Wallet', icon: '◇', section: 'ANALYTICS' },
   { id: 'treasury', label: 'Treasury', icon: '₿', section: 'ANALYTICS' },
   { id: 'activity', label: 'Activity Log', icon: '☰', section: 'SYSTEM' },
@@ -61,6 +64,7 @@ const TITLES: Record<View, string> = {
   projects: 'Delivery Projects',
   analytics: 'Simulation vs. Reality Analytics',
   economics: 'Economic Efficiency — Search Cost, Revenue Funnel, Next Money Action',
+  income: 'Income Hub — Multi-Channel Revenue & Money Actions',
   decision: 'AI Decision Center',
   experiments: 'Experiment System',
   memory: 'Agent Memory',
@@ -226,6 +230,7 @@ export function App() {
           {view === 'projects' && <Projects />}
           {view === 'analytics' && <Analytics />}
           {view === 'economics' && <EconomicEfficiency />}
+          {view === 'income' && <IncomeHub />}
           {view === 'decision' && <DecisionCenter />}
           {view === 'experiments' && <Experiments />}
           {view === 'memory' && <MemoryView />}
