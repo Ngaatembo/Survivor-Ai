@@ -1,4 +1,4 @@
-import { useStore } from '../store';
+import { useStore, backendConfigured } from '../store';
 import { Badge, Bar, DataSourceBadge, EvidenceBadge, KV, RecommendationBadge } from './ui';
 import { capRange, dayRange, dateTime } from '../lib/format';
 import { FACTOR_LABELS } from '../lib/scoring';
@@ -165,24 +165,33 @@ export function OpportunityDrawer({ opp, onClose }: { opp: Opportunity; onClose:
         )}
 
         <div className="drawer-section" style={{ display: 'flex', gap: 9, flexWrap: 'wrap' }}>
-          <button
-            className="btn primary"
-            disabled={dead || busy || opp.executionBlocked}
-            onClick={() => {
-              runManualExperiment(opp.id);
-              onClose();
-            }}
-            title={opp.executionBlocked ? opp.blockReason : 'Runs a SIMULATED experiment — no real money'}
-          >
-            ▶ Simulate experiment (simulated $)
-          </button>
-          <button
-            className="btn"
-            onClick={() => generateReportFor(opp.id)}
-            disabled={hasReport}
-          >
-            {hasReport ? '✓ Report generated' : 'Generate research report'}
-          </button>
+          {!backendConfigured && (
+            <button
+              className="btn primary"
+              disabled={dead || busy || opp.executionBlocked}
+              onClick={() => {
+                runManualExperiment(opp.id);
+                onClose();
+              }}
+              title={opp.executionBlocked ? opp.blockReason : 'Runs a SIMULATED experiment — no real money'}
+            >
+              ▶ Simulate experiment (simulated $)
+            </button>
+          )}
+          {!backendConfigured && (
+            <button
+              className="btn"
+              onClick={() => generateReportFor(opp.id)}
+              disabled={hasReport}
+            >
+              {hasReport ? '✓ Report generated' : 'Generate research report'}
+            </button>
+          )}
+          {backendConfigured && (
+            <span className="faint small">
+              Live mode: simulation/report generation is handled by the backend cycle. This dashboard is read-only for those actions.
+            </span>
+          )}
         </div>
         <div className="faint small mono" style={{ marginTop: 10 }}>
           All experiments are simulations. No real transactions, accounts or APIs are connected.
