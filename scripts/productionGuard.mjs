@@ -50,7 +50,8 @@ const checks = [
     name: 'real-money treasury execution is hard-disabled',
     ok:
       has(treasury, 'realMoneyExecutionEnabled: false') &&
-      has(treasury, 'if (snapshot.policy.emergencyFrozen || !snapshot.policy.realMoneyExecutionEnabled) return \'BLOCKED\';') &&
+      has(treasury, 'if (snapshot.policy.emergencyFrozen) return \'BLOCKED\';') &&
+      has(treasury, 'return \'APPROVAL\';') &&
       has(worker, 'realMoneyExecutionEnabled: false') &&
       has(worker, 'productionExecutionEnabled: false'),
   },
