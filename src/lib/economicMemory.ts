@@ -16,12 +16,12 @@ export function buildEconomicMemory(entries: RealRevenueEntry[], now = Date.now(
     const fastest = [...valid].sort((a, b) => a.daysFromDiscoveryToPayment - b.daysFromDiscoveryToPayment)[0];
     const highestProfit = [...valid].sort((a, b) => b.profit - a.profit)[0];
     observedLessons.push(
-      \`Recorded evidence: \${valid.length} paid sale\${valid.length === 1 ? '' : 's'}, \${money(totalRevenue)} revenue and \${money(totalProfit)} recorded profit.\`,
+      `Recorded evidence: ${valid.length} paid sale${valid.length === 1 ? '' : 's'}, ${money(totalRevenue)} revenue and ${money(totalProfit)} recorded profit.`,
     );
-    if (fastest) observedLessons.push(\`Fastest recorded time-to-payment: \${fastest.daysFromDiscoveryToPayment} day\${fastest.daysFromDiscoveryToPayment === 1 ? '' : 's'} (\${fastest.opportunityName}).\`);
-    if (highestProfit) observedLessons.push(\`Highest recorded profit: \${money(highestProfit.profit)} from \${highestProfit.opportunityName}.\`);
+    if (fastest) observedLessons.push(`Fastest recorded time-to-payment: ${fastest.daysFromDiscoveryToPayment} day${fastest.daysFromDiscoveryToPayment === 1 ? '' : 's'} (${fastest.opportunityName}).`);
+    if (highestProfit) observedLessons.push(`Highest recorded profit: ${money(highestProfit.profit)} from ${highestProfit.opportunityName}.`);
     const top = [...byOpportunity].sort((a, b) => b.revenue - a.revenue)[0];
-    if (top && byOpportunity.length > 1) observedLessons.push(\`Revenue is distributed across \${byOpportunity.length} opportunity types; the largest recorded contributor is \${top.opportunityName} with \${money(top.revenue)}.\`);
+    if (top && byOpportunity.length > 1) observedLessons.push(`Revenue is distributed across ${byOpportunity.length} opportunity types; the largest recorded contributor is ${top.opportunityName} with ${money(top.revenue)}.`);
   }
 
   return {
@@ -75,5 +75,5 @@ function aggregateChannel(entries: RealRevenueEntry[]) {
 }
 
 function money(value: number) {
-  return \`$\${value.toFixed(2)}\`;
+  return `$${value.toFixed(2)}`;
 }
