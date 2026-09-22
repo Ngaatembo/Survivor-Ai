@@ -113,6 +113,8 @@ function seedInitialState() {
     // renders an honest "backend-only" note in that mode).
     economicEfficiency: null as EconomicEfficiencySnapshot | null,
     incomeIntelligence: [] as IncomeChannelOpportunity[],
+    actionError: null as string | null,
+    actionSuccess: null as string | null,
   };
 }
 
@@ -164,6 +166,9 @@ interface SurviveState {
   incomeIntelligence: IncomeChannelOpportunity[];
   loop: LoopState;
   backend: BackendSyncState;
+  /** Last human-action result. Errors are surfaced in the UI; never swallowed into the activity log only. */
+  actionError: string | null;
+  actionSuccess: string | null;
 
   logEvent: (type: AgentEvent['type'], message: string) => void;
   startLoop: () => void;
@@ -348,9 +353,11 @@ export const useStore = create<SurviveState>()(
           if (featureFlags.backend) {
             try {
               await apiUpdateProspectStatus(prospectId, status, reasonLost);
+              set({ actionError: null, actionSuccess: `Prospect status updated to ${status}.` } as any);
               await get().syncFromBackend();
             } catch (e) {
               const message = e instanceof BackendError ? e.message : (e as Error).message;
+              set({ actionError: `Failed to update prospect status: ${message}`, actionSuccess: null } as any);
               get().logEvent('WARNING', `Failed to update prospect status: ${message}`);
             }
             return;
@@ -363,9 +370,11 @@ export const useStore = create<SurviveState>()(
           if (featureFlags.backend) {
             try {
               await apiUpdateOfferStatus(offerId, status);
+              set({ actionError: null, actionSuccess: `Offer status updated to ${status}.` } as any);
               await get().syncFromBackend();
             } catch (e) {
               const message = e instanceof BackendError ? e.message : (e as Error).message;
+              set({ actionError: `Failed to update offer status: ${message}`, actionSuccess: null } as any);
               get().logEvent('WARNING', `Failed to update offer status: ${message}`);
             }
             return;
@@ -378,9 +387,11 @@ export const useStore = create<SurviveState>()(
           if (featureFlags.backend) {
             try {
               await apiAdvanceProjectMilestone(projectId, milestone);
+              set({ actionError: null, actionSuccess: `Project milestone advanced to ${milestone}.` } as any);
               await get().syncFromBackend();
             } catch (e) {
               const message = e instanceof BackendError ? e.message : (e as Error).message;
+              set({ actionError: `Failed to advance project milestone: ${message}`, actionSuccess: null } as any);
               get().logEvent('WARNING', `Failed to advance project milestone: ${message}`);
             }
             return;
@@ -407,9 +418,11 @@ export const useStore = create<SurviveState>()(
           if (featureFlags.backend) {
             try {
               await apiAddRealRevenueEntry(input);
+              set({ actionError: null, actionSuccess: 'Real revenue recorded and learning updated.' } as any);
               await get().syncFromBackend();
             } catch (e) {
               const message = e instanceof BackendError ? e.message : (e as Error).message;
+              set({ actionError: `Failed to record real revenue: ${message}`, actionSuccess: null } as any);
               get().logEvent('WARNING', `Failed to record real revenue: ${message}`);
             }
             return;
@@ -474,9 +487,11 @@ export const useStore = create<SurviveState>()(
           if (featureFlags.backend) {
             try {
               await apiUpdateProjectOutcome(projectId, outcome);
+              set({ actionError: null, actionSuccess: 'Project outcome recorded.' } as any);
               await get().syncFromBackend();
             } catch (e) {
               const message = e instanceof BackendError ? e.message : (e as Error).message;
+              set({ actionError: `Failed to update project outcome: ${message}`, actionSuccess: null } as any);
               get().logEvent('WARNING', `Failed to update project outcome: ${message}`);
             }
             return;
@@ -500,9 +515,11 @@ export const useStore = create<SurviveState>()(
           if (featureFlags.backend) {
             try {
               await apiVerifyProspectNow(prospectId);
+              set({ actionError: null, actionSuccess: 'Prospect verification completed.' } as any);
               await get().syncFromBackend();
             } catch (e) {
               const message = e instanceof BackendError ? e.message : (e as Error).message;
+              set({ actionError: `Failed to verify prospect: ${message}`, actionSuccess: null } as any);
               get().logEvent('WARNING', `Failed to verify prospect: ${message}`);
             }
             return;
@@ -538,9 +555,11 @@ export const useStore = create<SurviveState>()(
           if (featureFlags.backend) {
             try {
               await apiResearchProspectNow(prospectId);
+              set({ actionError: null, actionSuccess: 'Prospect research completed.' } as any);
               await get().syncFromBackend();
             } catch (e) {
               const message = e instanceof BackendError ? e.message : (e as Error).message;
+              set({ actionError: `Failed to research prospect: ${message}`, actionSuccess: null } as any);
               get().logEvent('WARNING', `Failed to research prospect: ${message}`);
             }
             return;
@@ -584,9 +603,11 @@ export const useStore = create<SurviveState>()(
           }
           try {
             await apiUnifiedProspectResearchNow(prospectId);
+            set({ actionError: null, actionSuccess: 'Unified prospect research completed.' } as any);
             await get().syncFromBackend();
           } catch (e) {
             const message = e instanceof BackendError ? e.message : (e as Error).message;
+            set({ actionError: `Failed unified research: ${message}`, actionSuccess: null } as any);
             get().logEvent('WARNING', `Failed unified research: ${message}`);
           }
         },
@@ -595,9 +616,11 @@ export const useStore = create<SurviveState>()(
           if (featureFlags.backend) {
             try {
               await apiRegenerateProspectDemo(prospectId);
+              set({ actionError: null, actionSuccess: 'Prospect demo regenerated.' } as any);
               await get().syncFromBackend();
             } catch (e) {
               const message = e instanceof BackendError ? e.message : (e as Error).message;
+              set({ actionError: `Failed to regenerate demo: ${message}`, actionSuccess: null } as any);
               get().logEvent('WARNING', `Failed to regenerate demo: ${message}`);
             }
             return;
