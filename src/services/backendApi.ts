@@ -34,6 +34,7 @@ import type {
   ProspectDemo,
   ProspectInteraction,
   ProspectIntelligence,
+  UnifiedProspectResearch,
   ProspectStatus,
   RealRevenueEntry,
   RecommendedAction,
@@ -360,6 +361,10 @@ export function updateProjectOutcome(
 
 /** Phase 6: manually trigger deep research on one specific prospect right
  *  now, rather than waiting for the capped per-cycle automatic pass. */
+export function unifiedProspectResearchNow(prospectId: string): Promise<{ ok: true } & UnifiedProspectResearch> {
+  return postJson('/prospects/research/full', { prospectId });
+}
+
 export function researchProspectNow(prospectId: string): Promise<{ ok: true; prospect?: Prospect; intelligence: ProspectIntelligence }> {
   return postJson('/prospects/research', { prospectId });
 }

@@ -1116,6 +1116,57 @@ export default {
       }
     }
 
+    if (url.pathname === '/prospects/research/full' && req.method === 'POST') {
+      // Unified Research Engine: identity -> business intelligence -> market pricing.
+      let body: any;
+      try { body = await req.json(); } catch {
+        return json({ ok: false, error: 'invalid JSON body' }, { status: 400 });
+      }
+      const { prospectId } = body ?? {};
+      if (typeof prospectId !== 'string' || !prospectId) {
+        return json({ ok: false, error: 'prospectId is required' }, { status: 400 });
+      }
+      try {
+        const { repo, tavily, brave, llm } = buildEngine(env);
+        if (!tavily?.connected && !brave?.connected) {
+          return json({ ok: false, error: 'no live search provider connected — nothing real to research' }, { status: 503 });
+        }
+        const prospects = await repo.listProspects();
+        const prospect = prospects.find((p) => p.id === prospectId);
+        if (!prospect) return json({ ok: false, error: `no prospect found with id ${prospectId}` }, { status: 404 });
+        const opportunities = await repo.listOpportunities();
+        const opportunity = opportunities.find((o) => o.id === prospect.opportunityId);
+        if (!opportunity) return json({ ok: false, error: 'linked opportunity not found' }, { status: 404 });
+
+        const now = Date.now();
+        const balance = balanceFrom(await repo.listTransactions());
+        const state = await loadEconomyState(repo);
+        const ctx = {
+          state,
+          providers: { tavily, brave },
+          survivalStatus: computeSurvivalStatus(balance),
+          now,
+          cycleStartedAt: now,
+        };
+
+        const packageResult = await runUnifiedProspectResearch(ctx, llm, prospect, opportunity, now);
+        await repo.upsertProspects([packageResult.prospect]);
+        await repo.upsertProspectIntelligence(packageResult.intelligence);
+        await repo.upsertMarketPriceResearch(packageResult.marketPrice);
+        await saveEconomyState(repo, ctx.state);
+        await repo.appendProspectInteraction({
+          id: `pint_${crypto.randomUUID()}`,
+          prospectId,
+          kind: 'INTELLIGENCE_GATHERED',
+          summary: `Unified research completed: identity + business intelligence + market pricing; ${packageResult.sources.length} unique source(s), ${packageResult.overallConfidence.toLowerCase()} overall confidence.`,
+          createdAt: now,
+        });
+        return json({ ok: true, ...packageResult });
+      } catch (e) {
+        return json({ ok: false, error: (e as Error).message }, { status: 500 });
+      }
+    }
+
     if (url.pathname === '/prospects/research' && req.method === 'POST') {
       // Phase 6 — manually trigger deep research on one specific prospect
       // right now, rather than waiting for the capped per-cycle automatic
