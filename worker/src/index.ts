@@ -22,6 +22,7 @@ import type { ProspectStatus, OfferStatus, ProjectMilestoneKey, RealRevenueEntry
 import { computeProfit, generateLearningEvent, foldRealRevenueIntoMemory, computeCategoryRealWorldStats, statsForCategory } from '../../src/lib/realRevenue';
 import { researchProspect } from '../../src/services/prospectIntelligence';
 import { verifyProspect } from '../../src/services/prospectVerification';
+import { discoverProspects } from '../../src/services/prospectDiscovery';
 import { generateProspectDemo } from '../../src/lib/demoGenerator';
 import { createLLMProvider } from '../../src/services/providers/llm';
 import { createSearchProviders } from '../../src/services/providers/search';
