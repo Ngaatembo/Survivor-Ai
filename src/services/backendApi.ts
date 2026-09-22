@@ -423,6 +423,42 @@ export function recordTreasuryCapital(input: { amount: number; description?: str
   return postJson('/treasury/record-capital', input);
 }
 
+export type ContentDraftStatus = 'DRAFT' | 'READY' | 'PUBLISHED' | 'ARCHIVED';
+
+export interface ContentDraft {
+  id: string;
+  platform: 'WhatsApp' | 'Facebook' | 'LinkedIn' | 'TikTok';
+  purpose: 'AWARENESS' | 'PROOF' | 'LEAD' | 'MONETIZATION';
+  hook: string;
+  body: string;
+  cta: string;
+  sourceTitle: string;
+  sourceUrl?: string;
+  sourceId: string;
+  createdAt: number;
+  status: ContentDraftStatus;
+  campaign?: string;
+  offer?: string;
+  publishedAt?: number;
+  metrics: { reach: number; impressions: number; clicks: number; leads: number; revenue: number };
+}
+
+export interface ContentEngineState {
+  version: 1;
+  researchedAt: number | null;
+  research: IncomeChannelOpportunity[];
+  drafts: ContentDraft[];
+  updatedAt?: number;
+}
+
+export function fetchContentState(): Promise<{ ok: true; state: ContentEngineState }> {
+  return getJson('/content/state');
+}
+
+export function saveContentState(state: Omit<ContentEngineState, 'version' | 'updatedAt'>): Promise<{ ok: true; state: ContentEngineState }> {
+  return postJson('/content/state', state);
+}
+
 export function researchIncomeChannels(channel?: string): Promise<{ ok: true; opportunities: IncomeChannelOpportunity[]; researchedAt: string }> {
   return postJson('/income/research', channel ? { channel } : {});
 }
