@@ -1020,7 +1020,6 @@ export default {
         const strategies = requested
           ? INCOME_CHANNEL_STRATEGIES.filter(s => s.kind === requested)
           : INCOME_CHANNEL_STRATEGIES;
-        const realRevenue = await repo.listRealRevenue();
         const findings: ForexResearchFinding[] = [];
         const results: Array<{ channel: string; title: string; description: string; sourceUrls: string[] }> = [];
         for (const strategy of strategies) {
