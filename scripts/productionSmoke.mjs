@@ -1,6 +1,6 @@
 const base = process.env.SURVIVOR_PRODUCTION_URL || 'https://survivor-ai-backend.ngaatendwew.workers.dev';
 
-async function check(path, validate, attempts = 8) {
+async function check(path, validate, attempts = 20) {
   let lastError;
   for (let attempt = 1; attempt <= attempts; attempt++) {
     try {
