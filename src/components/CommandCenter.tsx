@@ -1,4 +1,6 @@
+import { useState } from 'react';
 import { useStore, useWalletTotals, backendConfigured } from '../store';
+import { discoverProspectsNow, BackendError } from '../services/backendApi';
 import { Panel, Stat, Badge, DataSourceBadge } from './ui';
 import { SurvivalMeter } from './SurvivalMeter';
 import { LoopPipeline } from './LoopPipeline';
@@ -27,6 +29,28 @@ export function CommandCenter({ go }: { go: (v: View) => void }) {
   const actions = useStore((s) => s.actions);
   const prospects = useStore((s) => s.prospects);
   const dead = agent.status === 'DEAD';
+  const syncFromBackend = useStore((s) => s.syncFromBackend);
+  const [finderRegion, setFinderRegion] = useState('Harare, Zimbabwe');
+  const [finderQuery, setFinderQuery] = useState('hotels, guest houses, lodges, restaurants, car rentals, contractors, event venues, salons');
+  const [finderBusy, setFinderBusy] = useState(false);
+  const [finderMessage, setFinderMessage] = useState<string | null>(null);
+  const [finderResults, setFinderResults] = useState<Array<{
+    id: string; businessName: string; category: string; location: string; contactChannel: string; contactValue?: string; websiteUrl?: string;
+    verification?: { status?: string; confidence?: number; verifiedContactValue?: string; verifiedEmail?: string };
+  }>>([]);
+
+  const findClientsNow = async () => {
+    setFinderBusy(true); setFinderMessage(null);
+    try {
+      const result = await discoverProspectsNow({ region: finderRegion.trim() || 'Zimbabwe', searchQuery: finderQuery.trim() || undefined });
+      setFinderResults(result.prospects as typeof finderResults);
+      await syncFromBackend();
+      setFinderMessage(`Search completed: ${result.discovered} businesses found, ${result.verified} accepted after identity/contact verification.${result.rejectedUnverifiedOrConflicting ? ` ${result.rejectedUnverifiedOrConflicting} rejected because the evidence was insufficient or conflicting.` : ''}`);
+    } catch (e) {
+      setFinderMessage(e instanceof BackendError ? e.message : (e as Error).message || 'Client search failed.');
+      setFinderResults([]);
+    } finally { setFinderBusy(false); }
+  };
 
   const highPriorityProspects = prospects.filter((p) => p.priority === 'HIGH').length;
   const dueFollowUps = prospects.filter((p) => p.nextFollowUpAt && p.nextFollowUpAt <= Date.now()).length;
@@ -60,6 +84,36 @@ export function CommandCenter({ go }: { go: (v: View) => void }) {
 
       <HumanHome go={go} />
 
+      <Panel title="Find real clients now" right={<span className="faint small mono">LIVE WEB → VERIFY → CRM</span>}>
+        <div className="muted small" style={{ marginBottom: 10, lineHeight: 1.5 }}>
+          This is the revenue action. Search for real Zimbabwean businesses, verify their public identity/contact evidence, and put accepted prospects into the CRM. Survivor never sends outreach automatically.
+        </div>
+        <div className="filter-bar" style={{ marginBottom: 8 }}>
+          <input className="text-input" placeholder="Area, e.g. Harare, Zimbabwe" value={finderRegion} onChange={(e) => setFinderRegion(e.target.value)} />
+          <input className="text-input" placeholder="Business types / keywords" value={finderQuery} onChange={(e) => setFinderQuery(e.target.value)} />
+          <button className="btn primary" disabled={!backendConfigured || finderBusy} onClick={() => void findClientsNow()}>
+            {finderBusy ? 'Searching & verifying…' : '🔎 FIND REAL CLIENTS'}
+          </button>
+        </div>
+        {!backendConfigured && <div className="banner banner-error small">Live backend is required for real business search.</div>}
+        {finderMessage && <div className="small" role="status" style={{ marginTop: 8 }}>{finderMessage}</div>}
+        {finderResults.length > 0 && (
+          <div style={{ marginTop: 12, display: 'flex', flexDirection: 'column', gap: 8 }}>
+            {finderResults.slice(0, 6).map((p) => (
+              <div key={p.id} className="event" style={{ display: 'block' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8, flexWrap: 'wrap' }}>
+                  <strong>{p.businessName}</strong>
+                  <span className="stage-badge lit small">{p.verification?.status ?? 'UNVERIFIED'} {p.verification?.confidence ? `· ${p.verification.confidence}%` : ''}</span>
+                </div>
+                <div className="muted small" style={{ marginTop: 3 }}>{p.category} · {p.location}</div>
+                <div className="small" style={{ marginTop: 4 }}><strong>{p.contactChannel?.replace('_', ' ') ?? 'CONTACT'}</strong>: {p.verification?.verifiedContactValue ?? p.contactValue ?? p.verification?.verifiedEmail ?? 'No verified contact surfaced'}</div>
+                {p.websiteUrl && <a className="small" href={p.websiteUrl} target="_blank" rel="noreferrer">{p.websiteUrl}</a>}
+              </div>
+            ))}
+            <button className="btn small" onClick={() => go('prospects')}>Open full CRM →</button>
+          </div>
+        )}
+      </Panel>
       <details className="tech-details">
         <summary>Technical view — simulated wallet, autonomous loop, survival</summary>
       <div className="grid cols-4" style={{ marginBottom: 14 }}>
