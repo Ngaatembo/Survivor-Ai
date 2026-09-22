@@ -163,6 +163,8 @@ function OutcomeControls({ project }: { project: Project }) {
 export function Projects() {
   const projects = useStore((s) => s.projects);
   const advanceProjectMilestone = useStore((s) => s.advanceProjectMilestone);
+  const updateProjectOutcome = useStore((s) => s.updateProjectOutcome);
+  const actionError = useStore((s) => s.actionError);
   const realRevenue = useStore((s) => s.realRevenue);
   const [paymentFormFor, setPaymentFormFor] = useState<string | null>(null);
 
@@ -175,6 +177,8 @@ export function Projects() {
 
   return (
     <div className="view-enter">
+      {actionError && <div className="warn-banner" role="alert" style={{ marginBottom: 10 }}>Action failed: {actionError}</div>}
+
       <div className="warn-banner">
         A delivery project is created automatically the moment a prospect's offer is marked WON. Recording a
         payment below writes to the separate, append-only real-revenue ledger (Phase 4) — it never touches
