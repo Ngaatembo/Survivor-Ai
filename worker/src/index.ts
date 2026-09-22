@@ -153,6 +153,7 @@ const json = (data: unknown, init?: ResponseInit) =>
       'access-control-allow-origin': '*',
       'access-control-allow-methods': 'GET, POST, OPTIONS',
       'access-control-allow-headers': 'content-type, x-trigger-secret, authorization',
+      'access-control-max-age': '600',
       ...(init?.headers ?? {}),
     },
   });
@@ -414,7 +415,12 @@ export default {
     if (env.DB_BACKEND === 'd1') await ensureProductionCoreTables(env.DB);
     const url = new URL(req.url);
 
-    if (req.method === 'OPTIONS') return json({ ok: true }, { status: 204 });
+    if (req.method === 'OPTIONS') return new Response(null, { status: 204, headers: {
+      'access-control-allow-origin': '*',
+      'access-control-allow-methods': 'GET, POST, OPTIONS',
+      'access-control-allow-headers': 'content-type, x-trigger-secret, authorization',
+      'access-control-max-age': '600',
+    } });
 
     if (url.pathname === '/auth/login' && req.method === 'POST') {
       try {
