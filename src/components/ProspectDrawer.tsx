@@ -56,11 +56,15 @@ export function ProspectDrawer({ prospect, onClose }: { prospect: Prospect; onCl
   const [researching, setResearching] = useState(false);
   const [fullResearching, setFullResearching] = useState(false);
   const [verifying, setVerifying] = useState(false);
+  const [actionError, setActionError] = useState('');
 
   const setStatus = async (status: ProspectStatus) => {
     setUpdating(true);
+    setActionError('');
     try {
       await updateProspectStatus(prospect.id, status);
+    } catch (e) {
+      setActionError((e as Error).message || 'Could not update prospect status.');
     } finally {
       setUpdating(false);
     }
