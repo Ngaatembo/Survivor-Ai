@@ -335,7 +335,7 @@ async function postJson<T>(path: string, body: unknown): Promise<T> {
     } catch {
       // fall through — body stays null, handled below
     }
-    if (res.status === 401 && path.startsWith('/actions/approvals')) {
+    if (res.status === 401 && path !== '/auth/login') {
       operatorSessionToken = null;
       await loginOperator();
       return postJson<T>(path, body);
