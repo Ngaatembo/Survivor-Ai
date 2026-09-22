@@ -45,12 +45,14 @@ export function ProspectDrawer({ prospect, onClose }: { prospect: Prospect; onCl
   const updateOfferStatus = useStore((s) => s.updateOfferStatus);
   const intelligence = useStore((s) => s.prospectIntelligence.find((i) => i.prospectId === prospect.id));
   const researchProspectNow = useStore((s) => s.researchProspectNow);
+  const verifyProspectNow = useStore((s) => s.verifyProspectNow);
   const demo = useStore((s) => s.prospectDemos.find((d) => d.prospectId === prospect.id));
   const regenerateProspectDemo = useStore((s) => s.regenerateProspectDemo);
   const viewProspectDemo = useStore((s) => s.viewProspectDemo);
   const [buildingDemo, setBuildingDemo] = useState(false);
   const [updating, setUpdating] = useState(false);
   const [researching, setResearching] = useState(false);
+  const [verifying, setVerifying] = useState(false);
 
   const setStatus = async (status: ProspectStatus) => {
     setUpdating(true);
@@ -58,6 +60,15 @@ export function ProspectDrawer({ prospect, onClose }: { prospect: Prospect; onCl
       await updateProspectStatus(prospect.id, status);
     } finally {
       setUpdating(false);
+    }
+  };
+
+  const runVerification = async () => {
+    setVerifying(true);
+    try {
+      await verifyProspectNow(prospect.id);
+    } finally {
+      setVerifying(false);
     }
   };
 
@@ -138,6 +149,61 @@ export function ProspectDrawer({ prospect, onClose }: { prospect: Prospect; onCl
               </li>
             ))}
           </ul>
+        </div>
+
+        <div className="drawer-section">
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+            <div>
+              <h3 style={{ margin: 0 }}>IDENTITY & CONTACT VERIFICATION</h3>
+              <div className="faint small" style={{ marginTop: 3 }}>Combines independent public sources before Survivor treats a contact or location as reliable.</div>
+            </div>
+            <button className="btn small primary" disabled={verifying} onClick={runVerification}>
+              {verifying ? 'Verifying…' : prospect.verification ? 'Verify again' : 'Verify now'}
+            </button>
+          </div>
+          {prospect.verification ? (
+            <>
+              <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 8 }}>
+                <Badge tone={prospect.verification.status === 'VERIFIED' ? 'green' : prospect.verification.status === 'CONFLICT' ? 'amber' : 'blue'}>
+                  {prospect.verification.status}
+                </Badge>
+                <span className="faint small mono">{prospect.verification.confidence}% confidence</span>
+                <span className="faint small">{prospect.verification.independentSources} independent source(s)</span>
+                <span className="faint small">{prospect.verification.contactSources} contact source(s)</span>
+              </div>
+              <div className="kv">
+                <KV k="Verified business name" v={prospect.verification.verifiedBusinessName ?? prospect.businessName} />
+                <KV k="Verified contact" v={prospect.verification.verifiedContactValue ?? 'Not verified'} />
+                <KV k="Verified email" v={prospect.verification.verifiedEmail ?? 'Not verified'} />
+                <KV k="Verified website" v={prospect.verification.verifiedWebsiteUrl ?? prospect.websiteUrl ?? 'Not verified'} />
+                <KV k="Verified location" v={prospect.verification.verifiedLocation ?? prospect.location ?? 'Not verified'} />
+              </div>
+              {prospect.verification.conflictingContacts.length > 0 && (
+                <div className="warn-banner" style={{ marginTop: 10 }}>
+                  <strong>Contact conflict:</strong> {prospect.verification.conflictingContacts.join(' · ')}. Survivor will not choose an ambiguous number automatically.
+                </div>
+              )}
+              {prospect.verification.notes.length > 0 && (
+                <ul style={{ marginTop: 8, paddingLeft: 18 }}>
+                  {prospect.verification.notes.map((note, i) => <li key={i} className="small muted" style={{ marginBottom: 3 }}>{note}</li>)}
+                </ul>
+              )}
+              {prospect.verification.sourceUrls.length > 0 && (
+                <details style={{ marginTop: 8 }}>
+                  <summary className="small faint" style={{ cursor: 'pointer' }}>Verification sources</summary>
+                  <ul style={{ marginTop: 6, paddingLeft: 18 }}>
+                    {prospect.verification.sourceUrls.map((url) => (
+                      <li key={url} className="small muted" style={{ marginBottom: 3 }}>
+                        <a href={url} target="_blank" rel="noreferrer">{url}</a>
+                      </li>
+                    ))}
+                  </ul>
+                </details>
+              )}
+            </>
+          ) : (
+            <div className="empty">Not verified yet. Run verification to search independent public sources and consolidate the business identity, contact, website and location.</div>
+          )}
         </div>
 
         <div className="drawer-section">

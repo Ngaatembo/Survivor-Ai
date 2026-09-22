@@ -21,6 +21,7 @@ import type { EngineRepository } from '../../src/engine/repository';
 import type { ProspectStatus, OfferStatus, ProjectMilestoneKey, RealRevenueEntry } from '../../src/types';
 import { computeProfit, generateLearningEvent, foldRealRevenueIntoMemory, computeCategoryRealWorldStats, statsForCategory } from '../../src/lib/realRevenue';
 import { researchProspect } from '../../src/services/prospectIntelligence';
+import { verifyProspect } from '../../src/services/prospectVerification';
 import { generateProspectDemo } from '../../src/lib/demoGenerator';
 import { createLLMProvider } from '../../src/services/providers/llm';
 import { createSearchProviders } from '../../src/services/providers/search';
@@ -1031,6 +1032,55 @@ export default {
       }
     }
 
+    if (url.pathname === '/prospects/verify' && req.method === 'POST') {
+      // Human-triggered identity/contact consolidation. Searches independent
+      // public sources and persists the result; ambiguous contacts are never
+      // promoted into the CRM contact field.
+      let body: any;
+      try {
+        body = await req.json();
+      } catch {
+        return json({ ok: false, error: 'invalid JSON body' }, { status: 400 });
+      }
+      const { prospectId } = body ?? {};
+      if (typeof prospectId !== 'string' || !prospectId) {
+        return json({ ok: false, error: 'prospectId is required' }, { status: 400 });
+      }
+      try {
+        const { repo, tavily, brave } = buildEngine(env);
+        if (!tavily?.connected && !brave?.connected) {
+          return json({ ok: false, error: 'no live search provider connected — nothing real to verify' }, { status: 503 });
+        }
+        const prospects = await repo.listProspects();
+        const prospect = prospects.find((p) => p.id === prospectId);
+        if (!prospect) return json({ ok: false, error: `no prospect found with id ${prospectId}` }, { status: 404 });
+
+        const now = Date.now();
+        const balance = balanceFrom(await repo.listTransactions());
+        const state = await loadEconomyState(repo);
+        const ctx = {
+          state,
+          providers: { tavily, brave },
+          survivalStatus: computeSurvivalStatus(balance),
+          now,
+          cycleStartedAt: now,
+        };
+        const verified = await verifyProspect(ctx, prospect, now);
+        await saveEconomyState(repo, ctx.state);
+        await repo.upsertProspects([verified]);
+        await repo.appendProspectInteraction({
+          id: `pint_${crypto.randomUUID()}`,
+          prospectId,
+          kind: 'NOTE',
+          summary: `Manual identity/contact verification: ${verified.verification?.status ?? 'UNVERIFIED'} (${verified.verification?.confidence ?? 0}% confidence), ${verified.verification?.independentSources ?? 0} independent source(s), ${verified.verification?.contactSources ?? 0} contact source(s).`,
+          createdAt: now,
+        });
+        return json({ ok: true, prospect: verified });
+      } catch (e) {
+        return json({ ok: false, error: (e as Error).message }, { status: 500 });
+      }
+    }
+
     if (url.pathname === '/prospects/research' && req.method === 'POST') {
       // Phase 6 — manually trigger deep research on one specific prospect
       // right now, rather than waiting for the capped per-cycle automatic
@@ -1069,17 +1119,23 @@ export default {
           now,
           cycleStartedAt: now,
         };
-        const intel = await researchProspect(ctx, llm, prospect, now, { statusChanged: true });
+        // Manual deep research starts with identity/contact consolidation so
+        // the research is performed against the best-supported business name,
+        // location and public contact rather than an unverified discovery label.
+        const verified = await verifyProspect(ctx, prospect, now);
+        await repo.upsertProspects([verified]);
+
+        const intel = await researchProspect(ctx, llm, verified, now, { statusChanged: true });
         await saveEconomyState(repo, ctx.state);
         await repo.upsertProspectIntelligence(intel);
         await repo.appendProspectInteraction({
           id: `pint_${crypto.randomUUID()}`,
           prospectId,
           kind: 'INTELLIGENCE_GATHERED',
-          summary: `Deep research completed manually (${intel.generator === 'llm' ? 'AI-synthesized' : 'raw source digest'}, ${intel.confidence.toLowerCase()} confidence) — ${intel.sources.length} source(s) reviewed.`,
+          summary: `Identity consolidated then deep research completed manually (${intel.generator === 'llm' ? 'AI-synthesized' : 'raw source digest'}, ${intel.confidence.toLowerCase()} confidence) — ${intel.sources.length} source(s) reviewed.`,
           createdAt: Date.now(),
         });
-        return json({ ok: true, intelligence: intel });
+        return json({ ok: true, prospect: verified, intelligence: intel });
       } catch (e) {
         return json({ ok: false, error: (e as Error).message }, { status: 500 });
       }

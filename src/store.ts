@@ -63,6 +63,7 @@ import {
   addRealRevenueEntry as apiAddRealRevenueEntry,
   updateProjectOutcome as apiUpdateProjectOutcome,
   researchProspectNow as apiResearchProspectNow,
+  verifyProspectNow as apiVerifyProspectNow,
   regenerateProspectDemo as apiRegenerateProspectDemo,
   demoUrl as apiDemoUrl,
   type EconomicEfficiencySnapshot,
@@ -203,6 +204,8 @@ interface SurviveState {
    *  same researchProspect() function directly against the local
    *  search/LLM providers. Requires live search to be connected. */
   researchProspectNow: (prospectId: string) => Promise<void>;
+  /** Human-triggered identity/contact consolidation using independent public sources. */
+  verifyProspectNow: (prospectId: string) => Promise<void>;
   researchIncomeChannels: () => Promise<void>;
   /** Phase 3 (deepened) — manually regenerate a prospect's real, working
    *  demo page right now. Requires an existing offer for this prospect. */
@@ -491,6 +494,44 @@ export const useStore = create<SurviveState>()(
           }
         },
 
+        verifyProspectNow: async (prospectId: string) => {
+          if (featureFlags.backend) {
+            try {
+              await apiVerifyProspectNow(prospectId);
+              await get().syncFromBackend();
+            } catch (e) {
+              const message = e instanceof BackendError ? e.message : (e as Error).message;
+              get().logEvent('WARNING', `Failed to verify prospect: ${message}`);
+            }
+            return;
+          }
+          if (!tavily?.connected && !brave?.connected) {
+            get().logEvent('WARNING', 'Failed to verify prospect: no live search provider connected.');
+            return;
+          }
+          const prospects = await repo.listProspects();
+          const prospect = prospects.find((p) => p.id === prospectId);
+          if (!prospect) {
+            get().logEvent('WARNING', `Failed to verify prospect: no prospect found with id ${prospectId}.`);
+            return;
+          }
+          const now = Date.now();
+          const balance = balanceFrom(await repo.listTransactions());
+          const economyState = await loadEconomyState(repo);
+          const ctx = {
+            state: economyState,
+            providers: { tavily, brave },
+            survivalStatus: computeSurvivalStatus(balance),
+            now,
+            cycleStartedAt: now,
+          };
+          const { verifyProspect } = await import('./services/prospectVerification');
+          const verified = await verifyProspect(ctx, prospect, now);
+          await saveEconomyState(repo, ctx.state);
+          await repo.upsertProspects([verified]);
+          set({ prospects: await repo.listProspects() } as any);
+        },
+
         researchProspectNow: async (prospectId: string) => {
           if (featureFlags.backend) {
             try {
@@ -522,10 +563,16 @@ export const useStore = create<SurviveState>()(
             now,
             cycleStartedAt: now,
           };
-          const intel = await researchProspect(ctx, llm, prospect, now, { statusChanged: true });
+          const { verifyProspect } = await import('./services/prospectVerification');
+          const verified = await verifyProspect(ctx, prospect, now);
+          await repo.upsertProspects([verified]);
+          const intel = await researchProspect(ctx, llm, verified, now, { statusChanged: true });
           await saveEconomyState(repo, ctx.state);
           await repo.upsertProspectIntelligence(intel);
-          set({ prospectIntelligence: await repo.listProspectIntelligence() } as any);
+          set({
+            prospects: await repo.listProspects(),
+            prospectIntelligence: await repo.listProspectIntelligence(),
+          } as any);
         },
 
         regenerateProspectDemo: async (prospectId: string) => {

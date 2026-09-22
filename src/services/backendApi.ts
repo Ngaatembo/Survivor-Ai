@@ -360,8 +360,13 @@ export function updateProjectOutcome(
 
 /** Phase 6: manually trigger deep research on one specific prospect right
  *  now, rather than waiting for the capped per-cycle automatic pass. */
-export function researchProspectNow(prospectId: string): Promise<{ ok: true; intelligence: ProspectIntelligence }> {
+export function researchProspectNow(prospectId: string): Promise<{ ok: true; prospect?: Prospect; intelligence: ProspectIntelligence }> {
   return postJson('/prospects/research', { prospectId });
+}
+
+/** Verify and consolidate a prospect's public identity, contact, website and location evidence now. */
+export function verifyProspectNow(prospectId: string): Promise<{ ok: true; prospect: Prospect }> {
+  return postJson('/prospects/verify', { prospectId });
 }
 
 /** Phase 3 (deepened): regenerate a prospect's real, working demo page —
