@@ -2,7 +2,7 @@ import { useStore } from '../store';
 import { Panel, Badge, EvidenceBadge, RecommendationBadge } from './ui';
 import { LoopPipeline } from './LoopPipeline';
 import { getConnectors } from '../services/connectors';
-import { browserConnections } from '../store';
+import { browserConnections, backendConfigured } from '../store';
 import { capRange, dayRange, timeAgo } from '../lib/format';
 import type { Opportunity } from '../types';
 
@@ -50,10 +50,16 @@ export function ResearchEngine({ onOpenOpp }: { onOpenOpp: (id: string) => void 
       <Panel title="Live pipeline — current cycle" style={{ marginBottom: 14 }}>
         <LoopPipeline />
         <div style={{ marginTop: 12, display: 'flex', gap: 8, alignItems: 'center' }}>
-          <button className="btn primary" disabled={busy} onClick={runNextCycle}>
-            ▶ Advance research cycle
-          </button>
-          <span className="faint small">or use START RESEARCH in the top bar for continuous autonomous looping.</span>
+          {backendConfigured ? (
+            <span className="faint small">Live mode: research cycles are run by the backend scheduler; this dashboard observes the results.</span>
+          ) : (
+            <button className="btn primary" disabled={busy} onClick={runNextCycle}>
+              ▶ Advance research cycle
+            </button>
+          )}
+          {!backendConfigured && (
+            <span className="faint small">or use START RESEARCH in the top bar for continuous autonomous looping.</span>
+          )}
         </div>
       </Panel>
 

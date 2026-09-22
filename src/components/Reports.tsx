@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { useStore } from '../store';
+import { useStore, backendConfigured } from '../store';
 import { Panel, Badge, DataSourceBadge, RecommendationBadge } from './ui';
 import { dateTime } from '../lib/format';
 import type { ResearchReport } from '../types';
@@ -137,9 +137,11 @@ export function Reports() {
                   <RecommendationBadge rec={o.score!.recommendation} />
                 </div>
                 <div className="opp-foot">
-                  <button className="btn small" onClick={() => generateReportFor(o.id)}>
-                    {reports.some((r) => r.opportunityId === o.id) ? 'Regenerate report' : 'Generate report'}
-                  </button>
+                  {!backendConfigured && (
+                    <button className="btn small" onClick={() => generateReportFor(o.id)}>
+                      {reports.some((r) => r.opportunityId === o.id) ? 'Regenerate report' : 'Generate report'}
+                    </button>
+                  )}
                   {reports.some((r) => r.opportunityId === o.id) && (
                     <button className="btn small" onClick={() => setOpenId(reports.find((r) => r.opportunityId === o.id)!.id)}>
                       View →
