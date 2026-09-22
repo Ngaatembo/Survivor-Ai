@@ -333,6 +333,7 @@ export const useStore = create<SurviveState>()(
               missions: state.missions,
               economicEfficiency: state.economicEfficiency ?? null,
               incomeIntelligence: state.incomeIntelligence ?? [],
+              survivalScore: state.survivalScore ?? null,
               backend: {
                 connected: true,
                 syncing: false,
