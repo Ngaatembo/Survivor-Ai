@@ -289,7 +289,8 @@ export function IncomeHub() {
             <div className="faint small mono" style={{ marginTop:6 }}>Observed: {item.plan.currentEvidence.realSales} sale(s) · {item.plan.currentEvidence.realRevenue.toFixed(2)} USD · data {item.plan.currentEvidence.dataQuality}</div>
           </div>)}
         </div>
-      </Panel>}
+      </Panel>;
+      })()}
 
       {strategy?.forex && <div className="event" style={{ display:'block', marginTop:12 }}>
         <div style={{ display:'flex', justifyContent:'space-between', gap:8 }}><strong>Forex research: {strategy.forex.target}</strong><Badge tone={strategy.forex.status === 'FOUND' ? 'blue' : 'amber'}>{strategy.forex.status}</Badge></div>
