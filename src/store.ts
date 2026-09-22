@@ -65,7 +65,7 @@ import {
   researchProspectNow as apiResearchProspectNow,
   regenerateProspectDemo as apiRegenerateProspectDemo,
   demoUrl as apiDemoUrl,
-  type EconomicEfficiencySnapshot,
+  type EconomicEfficiencySnapshot,\n  type IncomeChannelOpportunity,\n  researchIncomeChannels as apiResearchIncomeChannels,
 } from './services/backendApi';
 
 const delay = (ms: number) => new Promise((r) => setTimeout(r, ms));
@@ -107,7 +107,7 @@ function seedInitialState() {
     // /state (server-computed); the local browser demo does not attempt to
     // recompute it, so it stays null there (the EconomicEfficiency panel
     // renders an honest "backend-only" note in that mode).
-    economicEfficiency: null as EconomicEfficiencySnapshot | null,
+    economicEfficiency: null as EconomicEfficiencySnapshot | null,\n    incomeIntelligence: [] as IncomeChannelOpportunity[],
   };
 }
 
@@ -155,7 +155,7 @@ interface SurviveState {
   prospectDemos: Omit<ProspectDemo, 'html'>[];
   marketPriceResearch: MarketPriceResearch[];
   missions: Mission[];
-  economicEfficiency: EconomicEfficiencySnapshot | null;
+  economicEfficiency: EconomicEfficiencySnapshot | null;\n  incomeIntelligence: IncomeChannelOpportunity[];
   loop: LoopState;
   backend: BackendSyncState;
 
@@ -316,7 +316,7 @@ export const useStore = create<SurviveState>()(
               prospectDemos: state.prospectDemos,
               marketPriceResearch: state.marketPriceResearch,
               missions: state.missions,
-              economicEfficiency: state.economicEfficiency ?? null,
+              economicEfficiency: state.economicEfficiency ?? null,\n              incomeIntelligence: state.incomeIntelligence ?? [],
               backend: {
                 connected: true,
                 syncing: false,
