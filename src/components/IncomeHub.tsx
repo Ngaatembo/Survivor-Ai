@@ -18,12 +18,17 @@ import {
 import { Panel, Badge } from './ui';
 
 const CHANNELS = [
-  ['nwt-dev','◆','NWT Dev clients','Verified businesses, offers, outreach, delivery and recurring maintenance.','ACTIVE','Review the highest-value verified prospect.'],
-  ['content','◉','Content & social','Content performance, lead generation, platform monetization and sponsorship opportunities.','BUILDING','Connect read-only analytics before Survivor evaluates content revenue.'],
-  ['freelance','↗','Freelancing / remote work','Find legitimate projects that match your skills, prepare applications and track outcomes.','BUILDING','Add supported opportunity sources and application tracking.'],
-  ['products','▤','Digital products','Identify reusable products you can build once and sell repeatedly.','BUILDING','Turn repeated client problems into product opportunities.'],
-  ['affiliate','⌁','Affiliate / referral','Research legitimate programs and match them to relevant audiences or client workflows.','BUILDING','Research programs only where evidence of fit and payout exists.'],
-  ['other','＋','Other opportunities','A catch-all for new legitimate income channels Survivor discovers.','BUILDING','Let the opportunity engine classify new opportunities by channel.'],
+  ['nwt-dev','◆','NWT Dev services','Websites, business systems, automation and recurring client work.','ACTIVE','Qualify a real business and pursue the highest-value verified opportunity.','NWT_DEV_SERVICES'],
+  ['websites','◫','Website builds','Evidence-backed website projects for businesses with weak or missing digital presence.','ACTIVE','Find one qualified prospect and build a focused demo.','WEBSITES'],
+  ['whatsapp','◉','WhatsApp bots','Automate FAQs, lead capture, bookings and repetitive customer conversations.','BUILDING','Find a business with repeated WhatsApp questions and prototype the smallest useful bot.','WHATSAPP_BOTS'],
+  ['automation','↻','Business automation','Reduce repetitive admin, follow-ups, data entry and workflow friction.','BUILDING','Identify one repetitive workflow from a real business.','AUTOMATION'],
+  ['content','●','Content & social','Build useful content, measure distribution and test legitimate monetization.','BUILDING','Run a small content experiment and record actual results.','CONTENT_SOCIAL'],
+  ['freelance','↗','Freelancing / remote work','Find legitimate technical work that matches current skills and can be delivered.','BUILDING','Find one legitimate matching brief and prepare an application.','FREELANCE_REMOTE'],
+  ['products','▤','Digital products','Package repeated problems into templates, tools or other reusable products.','BUILDING','Identify a repeated client problem worth packaging.','DIGITAL_PRODUCTS'],
+  ['education','◇','Education & tutoring','Tutoring, explanations, study support and learning materials.','BUILDING','Test a small tutoring/study-support offer with real demand.','EDUCATION_TUTORING'],
+  ['affiliate','⌁','Affiliate / referral','Verify legitimate programs and recommend only relevant products or services.','BUILDING','Verify one legitimate program and its payout terms.','AFFILIATE_REFERRAL'],
+  ['trading','△','Forex / trading research','Tembo-backed market research, backtesting and paper trading only.','RESEARCHING','Validate evidence before considering any capital decision.','TRADING_RESEARCH'],
+  ['other','＋','Emerging opportunities','A controlled lane for new evidence-backed income ideas.','BUILDING','Research, classify and run the cheapest useful human-approved test.','OTHER'],
 ] as const;
 
 export function IncomeHub() {
@@ -59,6 +64,25 @@ export function IncomeHub() {
     } finally {
       setChannelBusy(null);
     }
+  };
+
+  const runChannelStrategy = async (kind: string) => {
+    if (!backendConnected || strategyBusy) return;
+    setStrategyBusy(true);
+    try {
+      const result = await fetchIncomeStrategy(kind);
+      setStrategy((current) => {
+        if (!current) return result;
+        const next = [...current.strategies];
+        for (const item of result.strategies) {
+          const index = next.findIndex((s) => s.kind === item.kind);
+          if (index >= 0) next[index] = item;
+          else next.push(item);
+        }
+        return { ...current, generatedAt: result.generatedAt, strategies: next, evidence: [...current.evidence, ...result.evidence], forex: result.forex };
+      });
+    } catch (e) { setPaymentError((e as Error).message); }
+    finally { setStrategyBusy(false); }
   };
 
   const refreshStrategy = async () => {
@@ -257,20 +281,23 @@ export function IncomeHub() {
       </div>}
     </Panel>
 
-    <Panel title="INCOME CHANNELS" right={<span className="faint small mono">{backendConnected ? 'LIVE SEARCH READY' : 'BACKEND REQUIRED'}</span>}>
-      <div className="grid cols-2">{CHANNELS.map(([id, icon, name, desc, status, next]) => {
-        const searchChannel = id === 'content' ? 'content-social' : id === 'freelance' ? 'freelance-remote' : id === 'products' ? 'digital-products' : id === 'affiliate' ? 'affiliate-referral' : id === 'other' ? 'other' : null;
-        const results = searchChannel ? (channelResults[searchChannel] ?? incomeIntelligence.filter((o) => o.channel === searchChannel).slice(0, 8)) : [];
+    <Panel title="INCOME CHANNELS" right={<span className="faint small mono">{backendConnected ? 'LIVE EVIDENCE READY' : 'BACKEND REQUIRED'}</span>}>
+      <div className="grid cols-2">{CHANNELS.map(([id, icon, name, desc, status, next, kind]) => {
+        const decision = strategy?.strategies.find((s) => s.kind === kind);
+        const decisionTone = decision?.lifecycle === 'PROVEN' ? 'green' : decision?.lifecycle === 'TESTING' ? 'blue' : decision?.lifecycle === 'FAILED' ? 'red' : 'amber';
         return <div key={id} className="opp-card" style={{ cursor: 'default' }}>
-          <div className="opp-head"><div><div style={{ fontSize: 14, fontWeight: 700 }}>{icon} {name}</div><div className="faint small" style={{ marginTop: 6, lineHeight: 1.5 }}>{desc}</div></div><Badge tone={tone(status)}>{status}</Badge></div>
+          <div className="opp-head">
+            <div><div style={{ fontSize: 14, fontWeight: 700 }}>{icon} {name}</div><div className="faint small" style={{ marginTop: 6, lineHeight: 1.5 }}>{desc}</div></div>
+            <Badge tone={decision ? decisionTone : tone(status)}>{decision?.lifecycle ?? status}</Badge>
+          </div>
           <div className="opp-foot" style={{ display: 'block' }}>
-            <div className="faint small" style={{ marginBottom: 8 }}>Next: {next}</div>
-            {searchChannel ? <>
-              <button className="btn small primary" disabled={!backendConnected || channelBusy !== null} onClick={() => void runChannelResearch(searchChannel)}>{channelBusy === searchChannel ? 'Searching live…' : results.length ? 'Refresh live research' : 'Research this channel'}</button>
-              {results.length > 0 && <div style={{ marginTop: 9 }}>
-                {results.slice(0, 3).map((o) => <div key={o.id} className="faint small" style={{ marginBottom: 6 }}><strong>{o.title}</strong>{o.sourceUrls[0] && <> · <a href={o.sourceUrls[0]} target="_blank" rel="noreferrer">source ↗</a></>}</div>)}
-              </div>}
-            </> : <span className="faint small">NWT Dev uses the live prospect/revenue pipeline above.</span>}
+            {decision ? <>
+              <div className="faint small">Evidence: {decision.searchResultCount} result(s) · real sales: {decision.decision.realSales} · revenue: {decision.decision.realRevenue.toFixed(2)}</div>
+              <div className="muted small" style={{ marginTop: 6 }}>Next: {decision.decision.nextExperiment}</div>
+              <div className="faint small" style={{ marginTop: 6 }}>{decision.decision.reasons[0]}</div>
+              {decision.kind === 'TRADING_RESEARCH' && <div className="warn-banner" style={{ marginTop: 8, marginBottom: 0 }}>Research / paper trading only. Survivor cannot place live trades.</div>}
+            </> : <div className="faint small" style={{ marginBottom: 8 }}>Next: {next}</div>}
+            <button className="btn small primary" style={{ marginTop: 9 }} disabled={!backendConnected || strategyBusy} onClick={() => void runChannelStrategy(kind)}>{strategyBusy ? 'Researching…' : decision ? 'Refresh evidence' : 'Research this channel'}</button>
           </div>
         </div>;
       })}</div>
