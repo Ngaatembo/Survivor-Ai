@@ -55,6 +55,7 @@ import {
 import { finivexStatus, createFinivexPaymentLink, getFinivexPaymentStatus } from './finivexProvider';
 import { getWindsorIncomeSummary } from './windsorProvider';
 import { INCOME_CHANNEL_STRATEGIES, decideIncomeChannel } from '../../src/lib/incomeChannelBrain';
+import { buildEconomicMemory } from '../../src/lib/economicMemory';
 import { buildForexResearchPackage, classifyForexSource, type ForexResearchFinding } from '../../src/lib/forexResearch';
 
 
@@ -1036,7 +1037,8 @@ export default {
         }
         await saveEconomyState(repo, ctx.state);
         const forex = buildForexResearchPackage(findings);
-        const decisions = new Map(strategies.map((s) => [s.kind, decideIncomeChannel(s, state.memory, realRevenue)]));
+        const economicMemory = buildEconomicMemory(realRevenue);
+        const decisions = new Map(strategies.map((s) => [s.kind, decideIncomeChannel(s, economicMemory, realRevenue)]));
         return json({
           ok:true,
           generatedAt:new Date().toISOString(),
