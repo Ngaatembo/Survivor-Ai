@@ -116,6 +116,15 @@ export interface BackendHealth {
   };
 }
 
+export interface SurvivalScore {
+  score: number;
+  status: 'ALIVE' | 'AT_RISK' | 'CRITICAL' | 'DEAD';
+  components: { cash: number; revenue: number; pipeline: number; resilience: number };
+  runwayTransactions: number;
+  explanation: string[];
+  calculatedAt: number;
+}
+
 export interface BackendState {
   ok: boolean;
   fetchedAt: string;
@@ -151,6 +160,7 @@ export interface BackendState {
   // this field existed) still round-trips without a hard type error.
   economicEfficiency?: EconomicEfficiencySnapshot;
   incomeIntelligence?: IncomeChannelOpportunity[];
+  survivalScore?: SurvivalScore;
 }
 
 export interface IncomeChannelOpportunity {
