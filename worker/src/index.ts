@@ -172,7 +172,7 @@ const INCOME_CHANNEL_QUERIES: Record<string, string[]> = {
   'other': ['Zimbabwe small business technology opportunities 2026', 'Zimbabwe online business opportunities services demand 2026'],
 };
 
-async function researchIncomeChannels(env: Env): Promise<IncomeChannelOpportunity[]> {
+async function researchIncomeChannels(env: Env, requestedChannel?: string): Promise<IncomeChannelOpportunity[]> {
   const { repo, tavily, brave } = buildEngine(env);
   const balance = balanceFrom(await repo.listTransactions());
   const survivalStatus = computeSurvivalStatus(balance);
@@ -187,7 +187,10 @@ async function researchIncomeChannels(env: Env): Promise<IncomeChannelOpportunit
   const existingRaw = await repo.getKV('income_intelligence');
   const existing: IncomeChannelOpportunity[] = existingRaw ? JSON.parse(existingRaw) : [];
   const found: IncomeChannelOpportunity[] = [...existing];
-  for (const [channel, queries] of Object.entries(INCOME_CHANNEL_QUERIES)) {
+  const channelEntries = requestedChannel && INCOME_CHANNEL_QUERIES[requestedChannel]
+    ? [[requestedChannel, INCOME_CHANNEL_QUERIES[requestedChannel]] as [string, string[]]]
+    : Object.entries(INCOME_CHANNEL_QUERIES);
+  for (const [channel, queries] of channelEntries) {
     for (const query of queries) {
       const result = await (await import('../../src/services/searchEconomy')).runSearch(ctx, {
         purpose: 'OTHER',
@@ -975,7 +978,13 @@ export default {
 
     if (url.pathname === '/income/research' && req.method === 'POST') {
       try {
-        const opportunities = await researchIncomeChannels(env);
+        let body: any = {};
+        try { body = await req.json(); } catch { body = {}; }
+        const requestedChannel = typeof body?.channel === 'string' ? body.channel : undefined;
+        if (requestedChannel && !INCOME_CHANNEL_QUERIES[requestedChannel]) {
+          return json({ ok: false, error: `unsupported income channel: ${requestedChannel}` }, { status: 400 });
+        }
+        const opportunities = await researchIncomeChannels(env, requestedChannel);
         return json({ ok: true, opportunities, researchedAt: new Date().toISOString() });
       } catch (e) {
         return json({ ok: false, error: (e as Error).message }, { status: 500 });
