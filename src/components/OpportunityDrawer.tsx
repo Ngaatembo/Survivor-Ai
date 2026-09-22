@@ -118,8 +118,10 @@ export function OpportunityDrawer({ opp, onClose, onOpenProspects }: { opp: Oppo
         <div className="drawer-section">
           <h3>Sales readiness</h3>
           {prospects.length === 0 ? (
-            <div className="empty">No real prospects are linked to this opportunity yet.</div>
-            <button className="btn primary small" style={{ marginTop: 9 }} onClick={onOpenProspects}>🔎 Find real prospects →</button>
+            <div>
+              <div className="empty">No real prospects are linked to this opportunity yet.</div>
+              <button className="btn primary small" style={{ marginTop: 9 }} onClick={onOpenProspects}>🔎 Find real prospects →</button>
+            </div>
           ) : (
             <div className="small">
               {prospects.map((prospect) => {
