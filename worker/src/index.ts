@@ -56,7 +56,6 @@ import {
 import { finivexStatus, createFinivexPaymentLink, getFinivexPaymentStatus } from './finivexProvider';
 import { getWindsorIncomeSummary } from './windsorProvider';
 import { INCOME_CHANNEL_STRATEGIES, decideIncomeChannel } from '../../src/lib/incomeChannelBrain';
-import { buildEconomicMemory } from '../../src/lib/economicMemory';
 import { buildForexResearchPackage, classifyForexSource, type ForexResearchFinding } from '../../src/lib/forexResearch';
 
 
@@ -1070,63 +1069,6 @@ export default {
         });
       } catch (e) {
         return json({ ok: false, error: (e as Error).message }, { status: 500 });
-      }
-    }
-
-    if (url.pathname === '/income/strategy' && req.method === 'POST') {
-      try {
-        let body: any = {};
-        try { body = await req.json(); } catch { body = {}; }
-        const requested = typeof body?.channel === 'string' ? body.channel : undefined;
-        const { repo, tavily, brave } = buildEngine(env);
-        const balance = balanceFrom(await repo.listTransactions());
-        const survivalStatus = computeSurvivalStatus(balance);
-        const state = await loadEconomyState(repo);
-        const realRevenue = await repo.listRealRevenue();
-        const ctx = { state, providers: { tavily, brave }, survivalStatus, now: Date.now(), cycleStartedAt: Date.now() };
-        const strategies = requested
-          ? INCOME_CHANNEL_STRATEGIES.filter(s => s.kind === requested)
-          : INCOME_CHANNEL_STRATEGIES;
-        const findings: ForexResearchFinding[] = [];
-        const results: Array<{ channel: string; title: string; description: string; sourceUrls: string[] }> = [];
-        for (const strategy of strategies) {
-          for (const query of strategy.demandQueries) {
-            const result = await (await import('../../src/services/searchEconomy')).runSearch(ctx, {
-              purpose: 'OTHER', query, entityId: `income-strategy:${strategy.kind}`, priority: 'MEDIUM', max: 4,
-            });
-            for (const item of result.results) {
-              if (!item.url || !item.title) continue;
-              if (strategy.kind === 'TRADING_RESEARCH') {
-                findings.push({ query, title: item.title.slice(0,180), snippet: item.snippet.slice(0,700), sourceUrl: item.url, sourceType: classifyForexSource(query,item.title) });
-              }
-              results.push({ channel: strategy.kind, title: item.title.slice(0,180), description: item.snippet.slice(0,700), sourceUrls:[item.url] });
-            }
-          }
-        }
-        await saveEconomyState(repo, ctx.state);
-        const forex = buildForexResearchPackage(findings);
-        const economicMemory = buildEconomicMemory(realRevenue);
-        const decisions = new Map(strategies.map((s) => [s.kind, decideIncomeChannel(s, economicMemory, realRevenue)]));
-        return json({
-          ok:true,
-          generatedAt:new Date().toISOString(),
-          strategies: strategies.map(s => ({
-            ...s,
-            searchResultCount: results.filter(r => r.channel === s.kind).length,
-            decision: decisions.get(s.kind),
-          })),
-          evidence: results.slice(0,120),
-          forex,
-          guardrails: {
-            autonomousTrading:false,
-            autonomousPublishing:false,
-            autonomousOutreach:false,
-            autonomousPayments:false,
-            academicDishonesty:false,
-          },
-        });
-      } catch (e) {
-        return json({ ok:false, error:(e as Error).message }, { status:500 });
       }
     }
 
