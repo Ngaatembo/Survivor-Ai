@@ -275,7 +275,7 @@ export function IncomeHub() {
           <div className="muted small" style={{ marginTop:6 }}>{s.nextExperiment}</div>
         </div>)}
       </div>}
-      {strategy?.channelPlans?.length > 0 && <Panel title="EXECUTION PLANS" style={{ marginTop: 12 }}>
+      {strategy && strategy.channelPlans && strategy.channelPlans.length > 0 && <Panel title="EXECUTION PLANS" style={{ marginTop: 12 }}>
         <div className="grid cols-2">
           {strategy.channelPlans.map((item) => <div key={item.kind} className="event" style={{ display:'block' }}>
             <div style={{ display:'flex', justifyContent:'space-between', gap:8 }}><strong>{strategy.strategies.find((s) => s.kind === item.kind)?.name ?? item.kind}</strong><Badge tone={item.decision.lifecycle === 'PROVEN' ? 'green' : item.kind === 'TRADING_RESEARCH' ? 'red' : 'blue'}>{item.decision.lifecycle}</Badge></div>
