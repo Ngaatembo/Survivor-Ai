@@ -107,7 +107,7 @@ await checkPost('/treasury/spend-request', {}, 400, (body) => {
   if (body.ok !== false || typeof body.error !== 'string') throw new Error('/treasury/spend-request invalid validation response');
 });
 
-await check(base + '/actions/approvals', (body) => {
+await check('/actions/approvals', (body) => {
   if (body.ok !== true || !Array.isArray(body.approvals)) throw new Error('/actions/approvals invalid response');
 });
 
