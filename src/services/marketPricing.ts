@@ -17,7 +17,7 @@ import type { LLMProvider } from './providers/types';
 import { runSearch, type SearchEconomyContext } from './searchEconomy';
 
 const MAX_SNIPPETS = 8;
-const PRICE_RE = /(?:US\\$|USD\\s*|\\$|ZAR\\s*|R\\s*|ZWL\\s*|ZW\\$)\\s*([0-9]{1,6}(?:[.,][0-9]{1,2})?)/gi;
+const PRICE_RE = /(?:US\$|USD\s*|\$|ZAR\s*|R\s*|ZWL\s*|ZW\$)\s*([0-9]{1,6}(?:[.,][0-9]{1,2})?)/gi;
 
 type ObservedPrice = { value: number; currency: string; snippet: string };
 
@@ -29,9 +29,9 @@ function extractObservedPrices(snippets: string[]): ObservedPrice[] {
       const value = Number(raw);
       if (!Number.isFinite(value) || value <= 0 || value > 1_000_000) continue;
       const before = snippet.slice(Math.max(0, (match.index ?? 0) - 8), match.index ?? 0);
-      const currency = /US\\$|USD/i.test(before) ? 'USD'
-        : /ZAR|\\bR\\s*$/i.test(before) ? 'ZAR'
-        : /ZWL|ZW\\$/i.test(before) ? 'ZWL'
+      const currency = /US\$|USD/i.test(before) ? 'USD'
+        : /ZAR|\bR\s*$/i.test(before) ? 'ZAR'
+        : /ZWL|ZW\$/i.test(before) ? 'ZWL'
         : 'USD';
       // Ignore obvious years and tiny numbers that are unlikely to be a service price.
       if ((value >= 1900 && value <= 2100) || value < 2) continue;
