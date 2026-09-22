@@ -397,8 +397,20 @@ export function updateTreasuryPolicy(input: Partial<TreasuryPolicy>): Promise<{ 
   return postJson('/treasury/policy', input);
 }
 
+export function approveTreasurySpendRequest(requestId: string, note?: string): Promise<{ ok: true; request: TreasurySpendRequest }> {
+  return postJson('/treasury/spend-request/approve', { requestId, note });
+}
+
+export function rejectTreasurySpendRequest(requestId: string, note?: string): Promise<{ ok: true; request: TreasurySpendRequest }> {
+  return postJson('/treasury/spend-request/reject', { requestId, note });
+}
+
 export function recordConfirmedTreasuryExpense(requestId: string): Promise<{ ok: true }> {
   return postJson('/treasury/record-confirmed-expense', { requestId });
+}
+
+export function recordTreasuryCapital(input: { amount: number; description?: string }): Promise<{ ok: true; transaction: Transaction; treasury: TreasurySnapshot }> {
+  return postJson('/treasury/record-capital', input);
 }
 
 export function researchIncomeChannels(): Promise<{ ok: true; opportunities: IncomeChannelOpportunity[]; researchedAt: string }> {
