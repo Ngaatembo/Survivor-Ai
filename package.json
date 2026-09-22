@@ -11,6 +11,7 @@
     "typecheck": "tsc --noEmit",
     "seed:supabase": "esbuild scripts/seedSupabase.ts --bundle --platform=node --format=esm --outfile=dist/seed.mjs --log-level=error --external:@supabase/supabase-js && node --env-file=.env dist/seed.mjs",
     "worker:dev": "npm run typecheck && wrangler dev worker/src/index.ts --config worker/wrangler.toml",
+    "worker:dry-run": "npm run typecheck && wrangler deploy worker/src/index.ts --config worker/wrangler.toml --dry-run",
     "worker:deploy": "npm run typecheck && wrangler deploy worker/src/index.ts --config worker/wrangler.toml",
     "production:guard": "node scripts/productionGuard.mjs"
   },
