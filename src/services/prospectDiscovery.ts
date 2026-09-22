@@ -122,7 +122,13 @@ export async function discoverProspects(
   options: { region?: string; searchQuery?: string } = {},
 ): Promise<{ prospects: Prospect[]; queriesRun: number; sourcesCount: number; cacheHits: number; budgetExceeded: number }> {
   const region = options.region?.trim() || opportunity.geographicRelevance[0] || 'Zimbabwe';
-  const seeds = rotatedSeeds(now);
+  const seeds = options.searchQuery?.trim()
+    ? [
+        { label: 'Targeted local business search', terms: options.searchQuery.trim() },
+        { label: 'Targeted local business contact search', terms: `${options.searchQuery.trim()} phone WhatsApp contact` },
+        { label: 'Targeted local business web/social search', terms: `${options.searchQuery.trim()} official website Facebook Instagram` },
+      ]
+    : rotatedSeeds(now);
   const found: Prospect[] = [];
   let queriesRun = 0;
   let sourcesCount = 0;
@@ -138,7 +144,7 @@ export async function discoverProspects(
     const entityId = `${opportunity.id}::${seed.label}`;
     const searchOutcome = await runSearch(ctx, {
       purpose: 'PROSPECT_DISCOVERY',
-      query: `${options.searchQuery?.trim() || seed.terms} small business in ${region} contact`,
+      query: `${seed.terms} small business in ${region}`,
       entityId,
       max: MAX_RESULTS_PER_QUERY,
     });
