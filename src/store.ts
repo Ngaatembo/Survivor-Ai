@@ -199,6 +199,7 @@ interface SurviveState {
    *  same researchProspect() function directly against the local
    *  search/LLM providers. Requires live search to be connected. */
   researchProspectNow: (prospectId: string) => Promise<void>;
+  researchIncomeChannels: () => Promise<void>;
   /** Phase 3 (deepened) — manually regenerate a prospect's real, working
    *  demo page right now. Requires an existing offer for this prospect. */
   regenerateProspectDemo: (prospectId: string) => Promise<void>;
@@ -472,6 +473,17 @@ export const useStore = create<SurviveState>()(
           }
           await repo.updateProjectOutcome(projectId, outcome);
           set({ projects: await repo.listProjects() } as any);
+        },
+
+        researchIncomeChannels: async () => {
+          if (!featureFlags.backend) return;
+          try {
+            await apiResearchIncomeChannels();
+            await get().syncFromBackend();
+          } catch (e) {
+            const message = e instanceof BackendError ? e.message : (e as Error).message;
+            get().logEvent('WARNING', `Income research failed: ${message}`);
+          }
         },
 
         researchProspectNow: async (prospectId: string) => {
