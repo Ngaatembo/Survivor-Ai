@@ -109,6 +109,7 @@ export interface BackendHealth {
     search: boolean;
     payments: {
       sandboxConfigured: boolean;
+      finivexConfigured?: boolean;
       productionExecutionEnabled: boolean;
     };
   };
@@ -401,4 +402,16 @@ export function recordConfirmedTreasuryExpense(requestId: string): Promise<{ ok:
 
 export function researchIncomeChannels(): Promise<{ ok: true; opportunities: IncomeChannelOpportunity[]; researchedAt: string }> {
   return postJson('/income/research', {});
+}
+
+
+export interface FinivexPaymentLinkResponse {
+  ok: boolean;
+  transactionId: string;
+  paymentLink: string | null;
+  provider?: unknown;
+}
+
+export function fetchFinivexStatus(): Promise<{ ok: true; payment: { provider: 'FINIVEX'; configured: boolean; canCreatePaymentLinks: boolean; canCheckStatus: boolean; note: string } }> {
+  return getJson('/payments/finivex/status');
 }
