@@ -186,6 +186,7 @@ export function Prospects() {
               <th>Priority</th>
               <th>Business</th>
               <th>Category / location</th>
+              <th>Contact</th>
               <th>Website</th>
               <th>Lead score</th>
               <th>Expected value</th>
@@ -206,7 +207,11 @@ export function Prospects() {
                   {p.category}
                   <div className="faint small mono">{p.location}</div>
                 </td>
-                <td className="small">{p.websitePresence.replace(/_/g, ' ').toLowerCase()}</td>
+                <td className="small">
+                  <div style={{ fontWeight: 600 }}>{p.verification?.verifiedContactValue ?? p.verification?.verifiedEmail ?? p.contactValue ?? 'Not found'}</div>
+                  <div className="faint small mono">{p.verification?.status ?? 'UNVERIFIED'}{p.verification?.confidence ? ` · ${p.verification.confidence}%` : ''}</div>
+                </td>
+                <td className="small">{p.websiteUrl ? <a href={p.websiteUrl} target="_blank" rel="noreferrer" onClick={(e) => e.stopPropagation()}>Open website</a> : p.websitePresence.replace(/_/g, ' ').toLowerCase()}</td>
                 <td className="num" style={{ fontWeight: 700 }}>{p.score.total}</td>
                 <td className="num small">${p.score.expectedValue.toFixed(0)}</td>
                 <td>
