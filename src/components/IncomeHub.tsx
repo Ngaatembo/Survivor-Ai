@@ -9,6 +9,8 @@ import {
   createApprovedFinivexLink,
   markPaymentRequestPaid,
   researchIncomeChannels as apiResearchIncomeChannels,
+  fetchIncomeStrategy,
+  type IncomeStrategyResponse,
   fetchWindsorIncomeSummary,
   type PaymentRequest,
   type WindsorIncomeSummary,
@@ -44,6 +46,8 @@ export function IncomeHub() {
   const [windsor, setWindsor] = useState<WindsorIncomeSummary | null>(null);
   const [windsorBusy, setWindsorBusy] = useState(false);
   const [channelResults, setChannelResults] = useState<Record<string, typeof incomeIntelligence>>({});
+  const [strategy, setStrategy] = useState<IncomeStrategyResponse | null>(null);
+  const [strategyBusy, setStrategyBusy] = useState(false);
   const runChannelResearch = async (channel: string) => {
     if (!backendConnected || channelBusy) return;
     setChannelBusy(channel);
@@ -55,6 +59,14 @@ export function IncomeHub() {
     } finally {
       setChannelBusy(null);
     }
+  };
+
+  const refreshStrategy = async () => {
+    if (!backendConnected) return;
+    setStrategyBusy(true);
+    try { setStrategy(await fetchIncomeStrategy()); }
+    catch (e) { setPaymentError((e as Error).message); }
+    finally { setStrategyBusy(false); }
   };
 
   const refreshPayments = async () => {
@@ -85,6 +97,7 @@ export function IncomeHub() {
   useEffect(() => {
     void refreshPayments();
     void refreshWindsor();
+    void refreshStrategy();
   }, [backendConnected]);
 
   const money = useMemo(() => ({
@@ -223,6 +236,25 @@ export function IncomeHub() {
           </div>)}
       </div>
       <div className="faint small" style={{ marginTop: 8 }}>For Finivex, Survivor marks the request paid only after the server verifies the provider status. A client payment never gives Survivor control of the funds.</div>
+    </Panel>
+
+    <Panel title="INCOME STRATEGY BRAIN" right={<button className="btn small" disabled={!backendConnected || strategyBusy} onClick={() => void refreshStrategy()}>{strategyBusy ? 'Researching…' : 'Run strategy research'}</button>}>
+      <div className="small muted" style={{ lineHeight: 1.7 }}>
+        Survivor now evaluates services, WhatsApp bots, websites, automation, content, freelancing, digital products, tutoring, referrals and a separate forex research lane. It chooses experiments from evidence; it does not automatically publish, contact, trade or spend.
+      </div>
+      {strategy && <div className="grid cols-2" style={{ marginTop: 12 }}>
+        {strategy.strategies.map((s) => <div key={s.kind} className="event" style={{ display:'block' }}>
+          <div style={{ display:'flex', justifyContent:'space-between', gap:8 }}><strong>{s.name}</strong><Badge tone={s.risk === 'VERY_HIGH' ? 'red' : s.lifecycle === 'PROVEN' ? 'green' : 'blue'}>{s.lifecycle}</Badge></div>
+          <div className="faint small" style={{ marginTop:5 }}>{s.category} · risk {s.risk} · test cost {s.testCost} · evidence {s.searchResultCount} result(s)</div>
+          <div className="muted small" style={{ marginTop:6 }}>{s.nextExperiment}</div>
+        </div>)}
+      </div>}
+      {strategy?.forex && <div className="event" style={{ display:'block', marginTop:12 }}>
+        <div style={{ display:'flex', justifyContent:'space-between', gap:8 }}><strong>Forex research: {strategy.forex.target}</strong><Badge tone={strategy.forex.status === 'FOUND' ? 'blue' : 'amber'}>{strategy.forex.status}</Badge></div>
+        <div className="muted small" style={{ marginTop:6 }}>{strategy.forex.verificationNotes[0]}</div>
+        <div className="faint small" style={{ marginTop:6 }}>{strategy.forex.nextStep}</div>
+        {strategy.forex.findings.slice(0,5).map((f,i) => <div key={i} className="faint small" style={{ marginTop:5 }}><strong>{f.title}</strong> · {f.sourceType} · <a href={f.sourceUrl} target="_blank" rel="noreferrer">source ↗</a></div>)}
+      </div>}
     </Panel>
 
     <Panel title="INCOME CHANNELS" right={<span className="faint small mono">{backendConnected ? 'LIVE SEARCH READY' : 'BACKEND REQUIRED'}</span>}>
