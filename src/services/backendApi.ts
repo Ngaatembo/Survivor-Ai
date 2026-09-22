@@ -147,7 +147,17 @@ export interface BackendState {
   // the revenue funnel and search ROI, computed server-side from the same
   // data above. Optional so an older/un-upgraded worker deployment (before
   // this field existed) still round-trips without a hard type error.
-  economicEfficiency?: EconomicEfficiencySnapshot;
+  economicEfficiency?: EconomicEfficiencySnapshot;\n  incomeIntelligence?: IncomeChannelOpportunity[];
+}
+
+export interface IncomeChannelOpportunity {
+  id: string;
+  channel: string;
+  title: string;
+  description: string;
+  evidence: string;
+  sourceUrls: string[];
+  discoveredAt: number;
 }
 
 export interface EconomicEfficiencySnapshot {
@@ -387,4 +397,8 @@ export function updateTreasuryPolicy(input: Partial<TreasuryPolicy>): Promise<{ 
 
 export function recordConfirmedTreasuryExpense(requestId: string): Promise<{ ok: true }> {
   return postJson('/treasury/record-confirmed-expense', { requestId });
+}
+
+export function researchIncomeChannels(): Promise<{ ok: true; opportunities: IncomeChannelOpportunity[]; researchedAt: string }> {
+  return postJson('/income/research', {});
 }

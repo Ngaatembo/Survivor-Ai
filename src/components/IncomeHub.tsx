@@ -19,6 +19,9 @@ export function IncomeHub() {
   const actions = useStore((s) => s.actions);
   const backendConnected = useStore((s) => s.backend.connected);
   const economicEfficiency = useStore((s) => s.economicEfficiency);
+  const incomeIntelligence = useStore((s) => s.incomeIntelligence);
+  const researchIncomeChannels = useStore((s) => s.researchIncomeChannels);
+  const backendSyncing = useStore((s) => s.backend.syncing);
 
   const money = useMemo(() => ({
     received: realRevenue.reduce((sum, r) => sum + r.amountReceived, 0),
@@ -50,6 +53,18 @@ export function IncomeHub() {
       <Panel tight><div className="stat-label">OFFERS READY</div><div className="stat-value">{money.offersToSend}</div><div className="faint small">awaiting human send</div></Panel>
       <Panel tight><div className="stat-label">PAYMENT FOLLOW-UP</div><div className="stat-value">{money.wonWithoutPayment}</div><div className="faint small">won but no revenue recorded</div></Panel>
     </div>
+
+    <Panel title="LIVE INCOME INTELLIGENCE" right={<button className="btn small" disabled={!backendConnected || backendSyncing} onClick={() => void researchIncomeChannels()}>{backendSyncing ? 'Researching…' : 'Research channels'}</button>}>
+      {incomeIntelligence.length === 0 ? <div className="empty">No channel opportunities researched yet. Run live research to find evidence-backed opportunities across the additional income channels.</div> :
+        <div className="feed" style={{ maxHeight: 360, overflowY: 'auto' }}>{incomeIntelligence.slice(0, 12).map((o) =>
+          <div key={o.id} className="event" style={{ display: 'block', marginBottom: 8 }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', gap: 10 }}><strong>{o.title}</strong><Badge tone="blue">{o.channel}</Badge></div>
+            <div className="muted small" style={{ marginTop: 4, lineHeight: 1.5 }}>{o.description}</div>
+            <div className="faint small mono" style={{ marginTop: 5 }}>{o.evidence}</div>
+            {o.sourceUrls[0] && <a className="faint small" href={o.sourceUrls[0]} target="_blank" rel="noreferrer">Open source ↗</a>}
+          </div>
+        )}</div>}
+    </Panel>
 
     <Panel title="INCOME CHANNELS" right={<span className="faint small mono">{backendConnected ? 'LIVE DATA' : 'BACKEND REQUIRED'}</span>}>
       <div className="grid cols-2">{CHANNELS.map(([id, icon, name, desc, status, next]) =>

@@ -65,7 +65,7 @@ import {
   researchProspectNow as apiResearchProspectNow,
   regenerateProspectDemo as apiRegenerateProspectDemo,
   demoUrl as apiDemoUrl,
-  type EconomicEfficiencySnapshot,
+  type EconomicEfficiencySnapshot,\n  type IncomeChannelOpportunity,\n  researchIncomeChannels as apiResearchIncomeChannels,
 } from './services/backendApi';
 
 const delay = (ms: number) => new Promise((r) => setTimeout(r, ms));
@@ -107,7 +107,7 @@ function seedInitialState() {
     // /state (server-computed); the local browser demo does not attempt to
     // recompute it, so it stays null there (the EconomicEfficiency panel
     // renders an honest "backend-only" note in that mode).
-    economicEfficiency: null as EconomicEfficiencySnapshot | null,
+    economicEfficiency: null as EconomicEfficiencySnapshot | null,\n    incomeIntelligence: [] as IncomeChannelOpportunity[],
   };
 }
 
@@ -155,7 +155,7 @@ interface SurviveState {
   prospectDemos: Omit<ProspectDemo, 'html'>[];
   marketPriceResearch: MarketPriceResearch[];
   missions: Mission[];
-  economicEfficiency: EconomicEfficiencySnapshot | null;
+  economicEfficiency: EconomicEfficiencySnapshot | null;\n  incomeIntelligence: IncomeChannelOpportunity[];
   loop: LoopState;
   backend: BackendSyncState;
 
@@ -199,6 +199,7 @@ interface SurviveState {
    *  same researchProspect() function directly against the local
    *  search/LLM providers. Requires live search to be connected. */
   researchProspectNow: (prospectId: string) => Promise<void>;
+  researchIncomeChannels: () => Promise<void>;
   /** Phase 3 (deepened) — manually regenerate a prospect's real, working
    *  demo page right now. Requires an existing offer for this prospect. */
   regenerateProspectDemo: (prospectId: string) => Promise<void>;
@@ -316,7 +317,7 @@ export const useStore = create<SurviveState>()(
               prospectDemos: state.prospectDemos,
               marketPriceResearch: state.marketPriceResearch,
               missions: state.missions,
-              economicEfficiency: state.economicEfficiency ?? null,
+              economicEfficiency: state.economicEfficiency ?? null,\n              incomeIntelligence: state.incomeIntelligence ?? [],
               backend: {
                 connected: true,
                 syncing: false,
@@ -472,6 +473,17 @@ export const useStore = create<SurviveState>()(
           }
           await repo.updateProjectOutcome(projectId, outcome);
           set({ projects: await repo.listProjects() } as any);
+        },
+
+        researchIncomeChannels: async () => {
+          if (!featureFlags.backend) return;
+          try {
+            await apiResearchIncomeChannels();
+            await get().syncFromBackend();
+          } catch (e) {
+            const message = e instanceof BackendError ? e.message : (e as Error).message;
+            get().logEvent('WARNING', `Income research failed: ${message}`);
+          }
         },
 
         researchProspectNow: async (prospectId: string) => {
