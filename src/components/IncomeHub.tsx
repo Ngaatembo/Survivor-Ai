@@ -148,6 +148,9 @@ export function IncomeHub() {
             ['LinkedIn', windsor.data.linkedin.length],
           ].map(([name, count]) => <div key={String(name)} className="event"><strong>{name}</strong><div className="stat-value" style={{ fontSize: 20 }}>{String(count)}</div><div className="faint small">rows / last 30d</div></div>)}
         </div>
+        {Object.entries(windsor.errors).some(([, v]) => v.startsWith('RATE_LIMITED:')) && <div className="warn-banner" style={{ marginTop: 10, marginBottom: 0 }}>
+          One connected source is temporarily rate-limited. Survivor keeps the other sources running and will not aggressively retry the limited source.
+        </div>}
         <div className="grid cols-2" style={{ marginTop: 10 }}>
           <div className="event" style={{ display: 'block' }}>
             <strong>Search opportunity signals</strong>
