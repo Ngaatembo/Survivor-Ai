@@ -1,19 +1,31 @@
 const base = process.env.SURVIVOR_PRODUCTION_URL || 'https://survivor-ai-backend.ngaatendwew.workers.dev';
 
-async function check(path, validate) {
-  const response = await fetch(base + path, { headers: { accept: 'application/json' } });
-  const text = await response.text();
-  let body;
-  try { body = JSON.parse(text); } catch { body = null; }
-  if (!response.ok) throw new Error(`${path} returned HTTP ${response.status}: ${text.slice(0, 500)}`);
-  if (!body) throw new Error(`${path} did not return JSON`);
-  validate(body);
-  console.log(`SMOKE PASS ${path}`);
-  return body;
+async function check(path, validate, attempts = 8) {
+  let lastError;
+  for (let attempt = 1; attempt <= attempts; attempt++) {
+    try {
+      const response = await fetch(base + path, { headers: { accept: 'application/json' }, cache: 'no-store' });
+      const text = await response.text();
+      let body;
+      try { body = JSON.parse(text); } catch { body = null; }
+      if (!response.ok) throw new Error(`${path} returned HTTP ${response.status}: ${text.slice(0, 500)}`);
+      if (!body) throw new Error(`${path} did not return JSON`);
+      validate(body);
+      console.log(`SMOKE PASS ${path} (attempt ${attempt})`);
+      return body;
+    } catch (error) {
+      lastError = error;
+      if (attempt < attempts) await new Promise((resolve) => setTimeout(resolve, 3000));
+    }
+  }
+  throw lastError;
 }
 
 const health = await check('/health', (body) => {
   if (body.ok !== true) throw new Error('/health ok=false');
+  if (process.env.SURVIVOR_EXPECTED_BUILD_SHA && body.deployment?.commit !== process.env.SURVIVOR_EXPECTED_BUILD_SHA) {
+    throw new Error(`/health served build ${body.deployment?.commit ?? 'unknown'}, expected ${process.env.SURVIVOR_EXPECTED_BUILD_SHA}`);
+  }
   if (body.ready !== true) throw new Error(`/health not ready: ${JSON.stringify(body.schema)}`);
   if (body.connectors?.db?.connected !== true) throw new Error('production database is not connected');
   if (body.connectors?.payments?.productionExecutionEnabled !== false) throw new Error('production payment execution is not hard-disabled');
