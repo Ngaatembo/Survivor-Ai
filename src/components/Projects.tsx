@@ -50,9 +50,11 @@ function RecordPaymentForm({ project, onClose }: { project: Project; onClose: ()
   );
   const [notes, setNotes] = useState('');
   const [saving, setSaving] = useState(false);
+  const [error, setError] = useState('');
 
   const submit = async () => {
     setSaving(true);
+    setError('');
     try {
       await addRealRevenueEntry({
         opportunityId: project.opportunityId,
@@ -69,6 +71,8 @@ function RecordPaymentForm({ project, onClose }: { project: Project; onClose: ()
         notes: notes || undefined,
       });
       onClose();
+    } catch (e) {
+      setError((e as Error).message);
     } finally {
       setSaving(false);
     }
@@ -76,6 +80,7 @@ function RecordPaymentForm({ project, onClose }: { project: Project; onClose: ()
 
   return (
     <div style={{ marginTop: 10, padding: 10, border: '1px solid var(--panel-3, #2a3340)', borderRadius: 8 }}>
+      {error && <div className="warn-banner" style={{ marginBottom: 8 }} role="alert">Payment recording failed: {error}</div>}
       <div className="grid cols-2" style={{ gap: 8, marginBottom: 8 }}>
         <label className="small">
           Amount received (${project.agreedPrice} quoted)
