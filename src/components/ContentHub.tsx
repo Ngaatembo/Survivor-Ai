@@ -22,10 +22,10 @@ function makeDraft(o: IncomeChannelOpportunity, platform: Draft['platform'], pur
   const topic = o.title.trim();
   const evidence = clean.length > 280 ? clean.slice(0, 277) + '…' : clean;
   const hooks: Record<Draft['purpose'], string> = {
-    AWARENESS: \`A practical question worth answering: \${topic}\`,
-    PROOF: \`Here's what the research is showing about \${topic}.\`,
-    LEAD: \`If you're dealing with \${topic.toLowerCase()}, this may help.\`,
-    MONETIZATION: \`There's a real business question behind \${topic.toLowerCase()}.\`,
+    AWARENESS: `A practical question worth answering: ${topic}`,
+    PROOF: `Here's what the research is showing about ${topic}.`,
+    LEAD: `If you're dealing with ${topic.toLowerCase()}, this may help.`,
+    MONETIZATION: `There's a real business question behind ${topic.toLowerCase()}.`,
   };
   const ctas: Record<Draft['purpose'], string> = {
     AWARENESS: 'Follow for practical business and technology research.',
@@ -34,9 +34,9 @@ function makeDraft(o: IncomeChannelOpportunity, platform: Draft['platform'], pur
     MONETIZATION: 'I only recommend a paid path after the demand and terms can be verified.',
   };
   const body = platform === 'TikTok'
-    ? \`Hook: \${hooks[purpose]}\n\nExplain: \${evidence}\n\nClose: \${ctas[purpose]}\`
-    : \`\${hooks[purpose]}\n\n\${evidence}\n\nThe important part is to separate what the evidence actually shows from assumptions. Survivor uses this approach so content can lead to a real business action instead of chasing views alone.\n\n\${ctas[purpose]}\`;
-  return { id: \`draft_\${Date.now()}_\${Math.random().toString(36).slice(2, 7)}\`, platform, purpose, hook: hooks[purpose], body, cta: ctas[purpose], sourceTitle: o.title, sourceUrl: o.sourceUrls[0], createdAt: Date.now() };
+    ? `Hook: ${hooks[purpose]}\n\nExplain: ${evidence}\n\nClose: ${ctas[purpose]}`
+    : `${hooks[purpose]}\n\n${evidence}\n\nThe important part is to separate what the evidence actually shows from assumptions. Survivor uses this approach so content can lead to a real business action instead of chasing views alone.\n\n${ctas[purpose]}`;
+  return { id: `draft_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`, platform, purpose, hook: hooks[purpose], body, cta: ctas[purpose], sourceTitle: o.title, sourceUrl: o.sourceUrls[0], createdAt: Date.now() };
 }
 
 export function ContentHub() {
