@@ -73,7 +73,7 @@ export async function getWindsorIncomeSummary(config: WindsorConfig) {
     ['instagram', ['date', 'account_name', 'follower_count_1d', 'accounts_engaged', 'comments', 'likes', 'shares', 'saves'], 'instagram'],
     ['tiktok_organic', ['date', 'account_name', 'followers_count', 'engaged_audience', 'likes', 'comments', 'shares', 'video_views'], 'tiktok'],
     ['youtube', ['date', 'account_id', 'account_name', 'video_title', 'views', 'likes', 'comments', 'shares', 'subscribers_gained', 'estimated_minutes_watched'], 'youtube'],
-    ['linkedin_organic', ['date', 'organization_id', 'organization_name', 'page_followers', 'page_daily_follows', 'page_daily_unfollows', 'all_page_views', 'comments', 'likes', 'shares'], 'linkedin'],
+    ['linkedin_organic', ['date', 'organization_id', 'account_analytics_impression_count', 'account_analytics_engagement', 'followers_gain_organic', 'share_clicks_count', 'share_engagement_rate'], 'linkedin'],
   ];
 
   await Promise.all(jobs.map(async ([connector, fields, key]) => {
