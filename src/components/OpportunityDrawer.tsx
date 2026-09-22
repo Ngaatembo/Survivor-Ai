@@ -22,6 +22,7 @@ export function OpportunityDrawer({ opp, onClose }: { opp: Opportunity; onClose:
   const busy = useStore((s) => s.loop.busy);
   const dead = useStore((s) => s.agent.status === 'DEAD');
   const memory = useStore((s) => s.memory.find((m) => m.kind === 'opportunity' && m.refId === opp.id));
+  const businessModel = useStore((s) => s.businessModels.find((m) => m.opportunityId === opp.id));
   const hasReport = reports.some((r) => r.opportunityId === opp.id);
 
   return (
@@ -77,6 +78,34 @@ export function OpportunityDrawer({ opp, onClose }: { opp: Opportunity; onClose:
             </div>
           </div>
         )}
+
+        <div className="drawer-section">
+          <h3>Commercial model</h3>
+          {businessModel ? (
+            <>
+              <div className="kv">
+                <KV k="Target customer" v={businessModel.targetCustomer} />
+                <KV k="Problem" v={businessModel.problem} />
+                <KV k="Offer" v={businessModel.offer} />
+                <KV k="Suggested price" v={`${businessModel.suggestedPrice}`} />
+                <KV k="Price basis" v={businessModel.priceRationale} />
+                <KV k="Acquisition" v={businessModel.acquisitionChannel} />
+                <KV k="First-sale window" v={`${businessModel.timeToFirstSaleDaysEstimate} days`} />
+                <KV k="Expected first-deal profit" v={`${businessModel.expectedProfitFirstDeal.toFixed(2)}`} />
+              </div>
+              <div style={{ marginTop: 10 }}>
+                <div className="mono-label" style={{ marginBottom: 5 }}>Sales message</div>
+                <p className="small">{businessModel.salesMessage}</p>
+              </div>
+              <div style={{ marginTop: 10 }}>
+                <div className="mono-label" style={{ marginBottom: 5 }}>Next action</div>
+                <p className="small">{businessModel.nextAction}</p>
+              </div>
+            </>
+          ) : (
+            <div className="empty">No commercial model has been generated for this opportunity yet.</div>
+          )}
+        </div>
 
         <div className="drawer-section">
           <h3>Economics</h3>
