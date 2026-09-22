@@ -1119,17 +1119,23 @@ export default {
           now,
           cycleStartedAt: now,
         };
-        const intel = await researchProspect(ctx, llm, prospect, now, { statusChanged: true });
+        // Manual deep research starts with identity/contact consolidation so
+        // the research is performed against the best-supported business name,
+        // location and public contact rather than an unverified discovery label.
+        const verified = await verifyProspect(ctx, prospect, now);
+        await repo.upsertProspects([verified]);
+
+        const intel = await researchProspect(ctx, llm, verified, now, { statusChanged: true });
         await saveEconomyState(repo, ctx.state);
         await repo.upsertProspectIntelligence(intel);
         await repo.appendProspectInteraction({
           id: `pint_${crypto.randomUUID()}`,
           prospectId,
           kind: 'INTELLIGENCE_GATHERED',
-          summary: `Deep research completed manually (${intel.generator === 'llm' ? 'AI-synthesized' : 'raw source digest'}, ${intel.confidence.toLowerCase()} confidence) — ${intel.sources.length} source(s) reviewed.`,
+          summary: `Identity consolidated then deep research completed manually (${intel.generator === 'llm' ? 'AI-synthesized' : 'raw source digest'}, ${intel.confidence.toLowerCase()} confidence) — ${intel.sources.length} source(s) reviewed.`,
           createdAt: Date.now(),
         });
-        return json({ ok: true, intelligence: intel });
+        return json({ ok: true, prospect: verified, intelligence: intel });
       } catch (e) {
         return json({ ok: false, error: (e as Error).message }, { status: 500 });
       }
