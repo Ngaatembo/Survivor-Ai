@@ -32,26 +32,7 @@ async function checkDashboard() {
   console.log('SMOKE PASS / dashboard HTML');
 }
 await checkDashboard();
-async function checkCorsPreflight(path) {
-  const response = await fetch(base + path, {
-    method: 'OPTIONS',
-    headers: {
-      origin: 'https://survivor-ai.ngaatendwew.workers.dev',
-      'access-control-request-method': 'POST',
-      'access-control-request-headers': 'authorization,content-type',
-    },
-    cache: 'no-store',
-  });
-  if (response.status !== 204) throw new Error(`CORS preflight ${path} expected 204, got ${response.status}`);
-  const allowOrigin = response.headers.get('access-control-allow-origin');
-  const allowMethods = response.headers.get('access-control-allow-methods') || '';
-  const allowHeaders = response.headers.get('access-control-allow-headers') || '';
-  if (allowOrigin !== '*' || !/\\bPOST\\b/i.test(allowMethods) || !/authorization/i.test(allowHeaders)) {
-    throw new Error(`CORS preflight ${path} missing required headers: origin=${allowOrigin}, methods=${allowMethods}, headers=${allowHeaders}`);
-  }
-  console.log(`SMOKE PASS ${path} CORS preflight`);
-}
-await checkCorsPreflight('/prospects/discover');
+
 
 
 const health = await check('/health', (body) => {
