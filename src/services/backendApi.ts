@@ -148,7 +148,8 @@ export interface BackendState {
   // the revenue funnel and search ROI, computed server-side from the same
   // data above. Optional so an older/un-upgraded worker deployment (before
   // this field existed) still round-trips without a hard type error.
-  economicEfficiency?: EconomicEfficiencySnapshot;\n  incomeIntelligence?: IncomeChannelOpportunity[];
+  economicEfficiency?: EconomicEfficiencySnapshot;
+  incomeIntelligence?: IncomeChannelOpportunity[];
 }
 
 export interface IncomeChannelOpportunity {
