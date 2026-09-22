@@ -148,6 +148,72 @@ function buildEngine(env: Env): {
   };
 }
 
+type IncomeChannelOpportunity = {
+  id: string;
+  channel: string;
+  title: string;
+  description: string;
+  evidence: string;
+  sourceUrls: string[];
+  discoveredAt: number;
+};
+
+const INCOME_CHANNEL_QUERIES: Record<string, string[]> = {
+  'content-social': ['Zimbabwe content creator monetization opportunities 2026', 'Zimbabwe social media businesses sponsorship creator opportunities'],
+  'freelance-remote': ['remote freelance web development jobs Africa Zimbabwe', 'remote junior web developer contract opportunities Africa'],
+  'digital-products': ['digital products demand Zimbabwe small businesses websites templates', 'Zimbabwe small business digital services online demand'],
+  'affiliate-referral': ['Zimbabwe affiliate programs technology business services', 'Africa affiliate programs web hosting software services'],
+  'other': ['Zimbabwe small business technology opportunities 2026', 'Zimbabwe online business opportunities services demand 2026'],
+};
+
+async function researchIncomeChannels(env: Env): Promise<IncomeChannelOpportunity[]> {
+  const { repo, tavily, brave } = buildEngine(env);
+  const agent = await repo.getAgent();
+  const balance = balanceFrom(await repo.listTransactions());
+  const survivalStatus = computeSurvivalStatus(balance);
+  const state = await loadEconomyState(repo);
+  const ctx = {
+    state,
+    providers: { tavily, brave },
+    survivalStatus,
+    now: Date.now(),
+    cycleStartedAt: Date.now(),
+  };
+  const existingRaw = await repo.getKV('income_intelligence');
+  const existing: IncomeChannelOpportunity[] = existingRaw ? JSON.parse(existingRaw) : [];
+  const found: IncomeChannelOpportunity[] = [...existing];
+  for (const [channel, queries] of Object.entries(INCOME_CHANNEL_QUERIES)) {
+    for (const query of queries) {
+      const result = await (await import('../../src/services/searchEconomy')).runSearch(ctx, {
+        purpose: 'OTHER',
+        query,
+        entityId: `income:${channel}`,
+        priority: 'MEDIUM',
+        max: 5,
+      });
+      for (const item of result.results) {
+        if (!item.url || !item.title) continue;
+        const id = await sha256Hex(`${channel}|${item.url}`);
+        const entry: IncomeChannelOpportunity = {
+          id: `inc_${id.slice(0, 20)}`,
+          channel,
+          title: item.title.slice(0, 180),
+          description: item.snippet.slice(0, 700),
+          evidence: `Found through live search for: ${query}`,
+          sourceUrls: [item.url],
+          discoveredAt: Date.now(),
+        };
+        const pos = found.findIndex((x) => x.id === entry.id);
+        if (pos >= 0) found[pos] = entry; else found.push(entry);
+      }
+    }
+  }
+  ctx.state && await saveEconomyState(repo, ctx.state);
+  const bounded = found.sort((a,b) => b.discoveredAt - a.discoveredAt).slice(0, 100);
+  await repo.setKV('income_intelligence', JSON.stringify(bounded));
+  return bounded;
+}
+
 async function runCycle(env: Env): Promise<Response> {
   const { engine, repo, connections } = buildEngine(env);
   try {
@@ -662,6 +728,15 @@ export default {
           // Survivor 2.0 §10 — the structured mission ladder.
           missions,
         });
+      } catch (e) {
+        return json({ ok: false, error: (e as Error).message }, { status: 500 });
+      }
+    }
+
+    if (url.pathname === '/income/research' && req.method === 'POST') {
+      try {
+        const opportunities = await researchIncomeChannels(env);
+        return json({ ok: true, opportunities, researchedAt: new Date().toISOString() });
       } catch (e) {
         return json({ ok: false, error: (e as Error).message }, { status: 500 });
       }
