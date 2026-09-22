@@ -468,6 +468,10 @@ export interface ProspectVerification {
   verifiedBusinessName?: string;
   verifiedContactChannel?: ContactChannel;
   verifiedContactValue?: string;
+  verifiedEmail?: string;
+  verifiedWebsiteUrl?: string;
+  verifiedLocation?: string;
+  alternateContacts?: string[];
   businessNameMatchScore: number; // 0..1
   contactMatchScore: number; // 0..1
   independentSources: number;
