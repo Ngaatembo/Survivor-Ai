@@ -427,6 +427,27 @@ export function researchIncomeChannels(channel?: string): Promise<{ ok: true; op
   return postJson('/income/research', channel ? { channel } : {});
 }
 
+export interface IncomeStrategyResponse {
+  ok: true;
+  generatedAt: string;
+  strategies: Array<{
+    kind: string; name: string; category: string; lifecycle: string; marketId: string;
+    customer: string; problemToSolve: string; delivery: string; requiredHumanAction: string;
+    risk: string; testCost: string; nextExperiment: string; searchResultCount: number;
+  }>;
+  evidence: Array<{ channel: string; title: string; description: string; sourceUrls: string[] }>;
+  forex: {
+    target: string; status: 'FOUND'|'PARTIAL'|'NOT_FOUND';
+    findings: Array<{ query:string; title:string; snippet:string; sourceUrl:string; sourceType:string }>;
+    verificationNotes: string[]; nextStep: string;
+  };
+  guardrails: { autonomousTrading:boolean; autonomousPublishing:boolean; autonomousOutreach:boolean; autonomousPayments:boolean; academicDishonesty:boolean };
+}
+
+export function fetchIncomeStrategy(channel?: string): Promise<IncomeStrategyResponse> {
+  return postJson('/income/strategy', channel ? { channel } : {});
+}
+
 
 export interface PaymentRequest {
   id: string;
