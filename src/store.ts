@@ -69,6 +69,8 @@ import {
   demoUrl as apiDemoUrl,
   type EconomicEfficiencySnapshot,
   type IncomeChannelOpportunity,
+  type ActionApproval,
+  type SurvivalScore,
   researchIncomeChannels as apiResearchIncomeChannels,
 } from './services/backendApi';
 
@@ -113,6 +115,8 @@ function seedInitialState() {
     // renders an honest "backend-only" note in that mode).
     economicEfficiency: null as EconomicEfficiencySnapshot | null,
     incomeIntelligence: [] as IncomeChannelOpportunity[],
+    survivalScore: null as SurvivalScore | null,
+    actionApprovals: [] as ActionApproval[],
     actionError: null as string | null,
     actionSuccess: null as string | null,
   };
@@ -164,6 +168,8 @@ interface SurviveState {
   missions: Mission[];
   economicEfficiency: EconomicEfficiencySnapshot | null;
   incomeIntelligence: IncomeChannelOpportunity[];
+  survivalScore: SurvivalScore | null;
+  actionApprovals: ActionApproval[];
   loop: LoopState;
   backend: BackendSyncState;
   /** Last human-action result. Errors are surfaced in the UI; never swallowed into the activity log only. */
