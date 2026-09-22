@@ -4,6 +4,7 @@ import type {
   Prospect,
   ProspectDemo,
   ProspectIntelligence,
+  MarketPriceResearch,
 } from '../types';
 
 export type SalesReadinessState =
@@ -30,6 +31,7 @@ export function salesReadiness(
   offer?: Offer,
   demo?: Omit<ProspectDemo, 'html'>,
   outreach?: OutreachMessageSet,
+  marketPrice?: MarketPriceResearch,
   now = Date.now(),
 ): SalesReadiness {
   if (prospect.status === 'WON') return { state: 'WON', label: 'Won', complete: 0, total: 0, missing: [] };
@@ -46,8 +48,12 @@ export function salesReadiness(
     return { state: 'CONTACTED', label: 'Contacted', complete: 0, total: 0, missing: [] };
   }
 
+  const verificationReady = prospect.verification?.status === 'VERIFIED' || prospect.verification?.status === 'PROVISIONAL';
+  const pricingReady = Boolean(marketPrice && marketPrice.sources.length > 0);
   const checks = [
-    ['Research', Boolean(intelligence)],
+    ['Identity/contact verified', verificationReady],
+    ['Business research', Boolean(intelligence)],
+    ['Market pricing', pricingReady],
     ['Offer', Boolean(offer)],
     ['Demo', Boolean(demo)],
     ['Outreach', Boolean(outreach)],

@@ -272,6 +272,7 @@ function SalesReady({ go }: { go: (v: View) => void }) {
   const offers = useStore((s) => s.offers);
   const demos = useStore((s) => s.prospectDemos);
   const outreach = useStore((s) => s.outreachMessages);
+  const marketPriceResearch = useStore((s) => s.marketPriceResearch);
   const live = useLiveState();
 
   const ready = prospects
@@ -283,6 +284,7 @@ function SalesReady({ go }: { go: (v: View) => void }) {
         offers.find((x) => x.prospectId === prospect.id),
         demos.find((x) => x.prospectId === prospect.id),
         outreach.find((x) => x.prospectId === prospect.id),
+        marketPriceResearch.find((x) => x.opportunityId === prospect.opportunityId),
       ),
     }))
     .filter((x) => x.readiness.state === 'READY_FOR_REVIEW')
