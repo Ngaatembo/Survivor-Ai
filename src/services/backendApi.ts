@@ -490,3 +490,24 @@ export interface FinivexPaymentLinkResponse {
 export function fetchFinivexStatus(): Promise<{ ok: true; payment: { provider: 'FINIVEX'; configured: boolean; canCreatePaymentLinks: boolean; canCheckStatus: boolean; note: string } }> {
   return getJson('/payments/finivex/status');
 }
+
+
+export interface WindsorIncomeSummary {
+  configured: boolean;
+  generatedAt: string;
+  datePreset: string;
+  data: {
+    searchConsole: Record<string, unknown>[];
+    analytics: Record<string, unknown>[];
+    facebook: Record<string, unknown>[];
+    instagram: Record<string, unknown>[];
+    tiktok: Record<string, unknown>[];
+    youtube: Record<string, unknown>[];
+    linkedin: Record<string, unknown>[];
+  };
+  errors: Record<string, string>;
+}
+
+export function fetchWindsorIncomeSummary(): Promise<{ ok: true } & WindsorIncomeSummary> {
+  return getJson('/integrations/windsor/summary');
+}

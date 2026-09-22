@@ -31,4 +31,15 @@ export interface Env {
   FINIVEX_BASE_URL?: string;
   FINIVEX_API_KEY?: string;
   FINIVEX_API_SECRET?: string;
+
+  // Windsor.ai server-side API key. Never expose this to the browser.
+  WINDSOR_API_KEY?: string;
+  WINDSOR_BASE_URL?: string;
+  WINDSOR_SEARCHCONSOLE_ACCOUNT_ID?: string;
+  WINDSOR_GA4_ACCOUNT_ID?: string;
+  WINDSOR_FACEBOOK_ACCOUNT_ID?: string;
+  WINDSOR_INSTAGRAM_ACCOUNT_ID?: string;
+  WINDSOR_TIKTOK_ACCOUNT_ID?: string;
+  WINDSOR_YOUTUBE_ACCOUNT_ID?: string;
+  WINDSOR_LINKEDIN_ACCOUNT_ID?: string;
 }
