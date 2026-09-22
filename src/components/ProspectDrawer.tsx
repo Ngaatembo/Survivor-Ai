@@ -110,6 +110,7 @@ export function ProspectDrawer({ prospect, onClose }: { prospect: Prospect; onCl
     <>
       <div className="drawer-backdrop" onClick={onClose} />
       <div className="drawer">
+        {actionError && <div className="banner banner-error" role="alert" style={{ marginBottom: 10 }}>{actionError}</div>}
         <div className="drawer-head">
           <div>
             <div style={{ display: 'flex', gap: 7, marginBottom: 8, flexWrap: 'wrap' }}>
