@@ -119,4 +119,8 @@ await checkPost('/actions/approvals/review', {}, 400, (body) => {
   if (body.ok !== false || typeof body.error !== 'string') throw new Error('/actions/approvals/review invalid validation response');
 });
 
+await checkPost('/actions/approvals/execute', {}, 400, (body) => {
+  if (body.ok !== false || typeof body.error !== 'string') throw new Error('/actions/approvals/execute invalid validation response');
+});
+
 console.log(`PRODUCTION SMOKE PASSED: ${base}`);
