@@ -377,6 +377,23 @@ export function ProspectDrawer({ prospect, onClose }: { prospect: Prospect; onCl
         </div>
 
         <div className="drawer-section">
+          <h3>Social & web links</h3>
+          {prospect.socialLinks?.length ? (
+            <div style={{ display: 'flex', gap: 7, flexWrap: 'wrap' }}>
+              {prospect.socialLinks.map((url) => {
+                let label = 'Open link';
+                if (/facebook\\.com/i.test(url)) label = 'Facebook';
+                else if (/instagram\\.com/i.test(url)) label = 'Instagram';
+                else if (/linkedin\\.com/i.test(url)) label = 'LinkedIn';
+                return <a key={url} className="btn small" href={url} target="_blank" rel="noreferrer">{label}</a>;
+              })}
+            </div>
+          ) : (
+            <div className="empty">No verified social-media profile was found yet.</div>
+          )}
+        </div>
+
+        <div className="drawer-section">
           <h3>Contact</h3>
           <div className="kv">
             <KV k="Channel" v={prospect.contactChannel.replace('_', ' ')} />
