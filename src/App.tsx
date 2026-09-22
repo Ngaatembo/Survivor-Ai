@@ -250,7 +250,7 @@ export function App() {
           )}
           {view === 'command' && <CommandCenter go={setView} />}
           {view === 'research' && <ResearchEngine onOpenOpp={openOpp} />}
-          {view === 'explorer' && <OpportunityExplorer />}
+          {view === 'explorer' && <OpportunityExplorer onOpenProspects={() => setView('prospects')} />}
           {view === 'prospects' && <Prospects />}
           {view === 'projects' && <Projects />}
           {view === 'analytics' && <Analytics />}
