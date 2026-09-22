@@ -115,6 +115,36 @@ async function sha256Hex(value: string): Promise<string> {
   return Array.from(digest).map((b) => b.toString(16).padStart(2, '0')).join('');
 }
 
+const OPERATOR_SESSION_TTL_MS = 8 * 60 * 60 * 1000;
+
+async function createOperatorSession(repo: EngineRepository): Promise<{ token: string; expiresAt: number }> {
+  const token = crypto.randomUUID() + crypto.randomUUID();
+  const expiresAt = Date.now() + OPERATOR_SESSION_TTL_MS;
+  const tokenHash = await sha256Hex(token);
+  const raw = await repo.getKV('operator_sessions');
+  let sessions: any[] = [];
+  try { sessions = raw ? JSON.parse(raw) : []; } catch { sessions = []; }
+  if (!Array.isArray(sessions)) sessions = [];
+  const active = sessions.filter((x) => typeof x?.expiresAt === 'number' && x.expiresAt > Date.now()).slice(-49);
+  active.push({ tokenHash, expiresAt });
+  await repo.setKV('operator_sessions', JSON.stringify(active));
+  return { token, expiresAt };
+}
+
+async function requireOperator(req: Request, env: Env): Promise<boolean> {
+  if (!env.TRIGGER_SECRET) return false;
+  const match = (req.headers.get('authorization') ?? '').match(/^Bearer\s+(.+)$/i);
+  if (!match?.[1]) return false;
+  const tokenHash = await sha256Hex(match[1].trim());
+  const { repo } = buildEngine(env);
+  const raw = await repo.getKV('operator_sessions');
+  if (!raw) return false;
+  let sessions: any[] = [];
+  try { sessions = JSON.parse(raw); } catch { return false; }
+  if (!Array.isArray(sessions)) return false;
+  return sessions.some((x) => x?.tokenHash === tokenHash && typeof x?.expiresAt === 'number' && x.expiresAt > Date.now());
+}
+
 const json = (data: unknown, init?: ResponseInit) =>
   new Response(JSON.stringify(data, null, 2), {
     ...init,
@@ -122,7 +152,7 @@ const json = (data: unknown, init?: ResponseInit) =>
       'content-type': 'application/json',
       'access-control-allow-origin': '*',
       'access-control-allow-methods': 'GET, POST, OPTIONS',
-      'access-control-allow-headers': 'content-type, x-trigger-secret',
+      'access-control-allow-headers': 'content-type, x-trigger-secret, authorization',
       ...(init?.headers ?? {}),
     },
   });
@@ -384,7 +414,21 @@ export default {
     if (env.DB_BACKEND === 'd1') await ensureProductionCoreTables(env.DB);
     const url = new URL(req.url);
 
-    if (req.method === 'OPTIONS') return new Response(null, { status: 204 });
+    if (req.method === 'OPTIONS') return json({ ok: true }, { status: 204 });
+
+    if (url.pathname === '/auth/login' && req.method === 'POST') {
+      try {
+        const body: any = await req.json();
+        if (typeof body?.secret !== 'string' || !env.TRIGGER_SECRET || body.secret !== env.TRIGGER_SECRET) {
+          return json({ ok: false, error: 'unauthorized' }, { status: 401 });
+        }
+        const { repo } = buildEngine(env);
+        const session = await createOperatorSession(repo);
+        return json({ ok: true, token: session.token, expiresAt: session.expiresAt });
+      } catch (e) {
+        return json({ ok: false, error: (e as Error).message }, { status: 500 });
+      }
+    }
 
 
     if (url.pathname === '/integrations/windsor/summary' && req.method === 'GET') {
@@ -1224,6 +1268,7 @@ export default {
     }
 
     if (url.pathname === '/actions/approvals' && req.method === 'GET') {
+      if (!(await requireOperator(req, env))) return json({ ok: false, error: 'operator authentication required' }, { status: 401 });
       try {
         const { repo } = buildEngine(env);
         const raw = await repo.getKV('human_action_approvals');
@@ -1235,6 +1280,7 @@ export default {
     }
 
     if (url.pathname === '/actions/approvals' && req.method === 'POST') {
+      if (!(await requireOperator(req, env))) return json({ ok: false, error: 'operator authentication required' }, { status: 401 });
       try {
         const body: any = await req.json();
         if (typeof body?.actionId !== 'string' || typeof body?.actionKind !== 'string' || typeof body?.title !== 'string') {
@@ -1264,6 +1310,7 @@ export default {
     }
 
     if (url.pathname === '/actions/approvals/review' && req.method === 'POST') {
+      if (!(await requireOperator(req, env))) return json({ ok: false, error: 'operator authentication required' }, { status: 401 });
       try {
         const body: any = await req.json();
         if (typeof body?.approvalId !== 'string' || !['APPROVED', 'REJECTED'].includes(body?.decision)) {
@@ -1286,6 +1333,7 @@ export default {
     }
 
     if (url.pathname === '/actions/approvals/execute' && req.method === 'POST') {
+      if (!(await requireOperator(req, env))) return json({ ok: false, error: 'operator authentication required' }, { status: 401 });
       try {
         const body: any = await req.json();
         if (typeof body?.approvalId !== 'string') return json({ ok: false, error: 'approvalId is required' }, { status: 400 });
