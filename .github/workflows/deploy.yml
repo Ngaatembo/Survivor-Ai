@@ -19,7 +19,7 @@ jobs:
           node-version: 20
       - run: npm ci
       - run: npm run production:guard
-      - run: npm run worker:dry-run
-      - run: npm run worker:deploy
+      - run: npm run worker:dry-run -- --var BUILD_SHA:${{ github.sha }}
+      - run: npm run worker:deploy -- --var BUILD_SHA:${{ github.sha }}
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
