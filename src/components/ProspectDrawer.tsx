@@ -45,6 +45,7 @@ export function ProspectDrawer({ prospect, onClose }: { prospect: Prospect; onCl
   const updateOfferStatus = useStore((s) => s.updateOfferStatus);
   const intelligence = useStore((s) => s.prospectIntelligence.find((i) => i.prospectId === prospect.id));
   const researchProspectNow = useStore((s) => s.researchProspectNow);
+  const unifiedProspectResearchNow = useStore((s) => s.unifiedProspectResearchNow);
   const verifyProspectNow = useStore((s) => s.verifyProspectNow);
   const demo = useStore((s) => s.prospectDemos.find((d) => d.prospectId === prospect.id));
   const regenerateProspectDemo = useStore((s) => s.regenerateProspectDemo);
@@ -52,6 +53,7 @@ export function ProspectDrawer({ prospect, onClose }: { prospect: Prospect; onCl
   const [buildingDemo, setBuildingDemo] = useState(false);
   const [updating, setUpdating] = useState(false);
   const [researching, setResearching] = useState(false);
+  const [fullResearching, setFullResearching] = useState(false);
   const [verifying, setVerifying] = useState(false);
 
   const setStatus = async (status: ProspectStatus) => {
@@ -78,6 +80,15 @@ export function ProspectDrawer({ prospect, onClose }: { prospect: Prospect; onCl
       await researchProspectNow(prospect.id);
     } finally {
       setResearching(false);
+    }
+  };
+
+  const runFullResearch = async () => {
+    setFullResearching(true);
+    try {
+      await unifiedProspectResearchNow(prospect.id);
+    } finally {
+      setFullResearching(false);
     }
   };
 
@@ -209,9 +220,15 @@ export function ProspectDrawer({ prospect, onClose }: { prospect: Prospect; onCl
         <div className="drawer-section">
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
             <h3 style={{ margin: 0 }}>Deep research</h3>
-            <button className="btn small" disabled={researching} onClick={runResearch}>
-              {researching ? 'Researching…' : intelligence ? 'Research again' : 'Research now'}
-            </button>
+            <div style={{ display: 'flex', gap: 6 }}>
+              <button className="btn small" disabled={researching || fullResearching} onClick={runResearch}>
+                {researching ? 'Researching…' : intelligence ? 'Research again' : 'Research now'}
+              </button>
+              <button className="btn small" disabled={researching || fullResearching} onClick={runFullResearch}>
+                {fullResearching ? 'Full research…' : 'Full research'}
+              </button>
+            </div>
+
           </div>
           {intelligence ? (
             <>
