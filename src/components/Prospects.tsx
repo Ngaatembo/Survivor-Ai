@@ -80,9 +80,8 @@ export function Prospects() {
       const target = opportunities
         .filter((o) => o.researchStage !== 'UNDISCOVERED')
         .sort((a, b) => (b.score?.total ?? 0) - (a.score?.total ?? 0))[0];
-      if (!target) throw new Error('Run research first so Survivor has a validated opportunity to target.');
       const result = await discoverProspectsNow({
-        opportunityId: target.id,
+        ...(target ? { opportunityId: target.id } : {}),
         region: region.trim() || 'Zimbabwe',
         searchQuery: searchQuery.trim() || undefined,
       });
@@ -101,8 +100,7 @@ export function Prospects() {
   return (
     <div className="view-enter">
       <div className="warn-banner">
-        Prospects are real businesses surfaced by live web search for a validated opportunity — never
-        fabricated. Outreach messages are AI-drafted drafts for a human to review and send; SURVIVE AI
+        Prospects are real businesses surfaced by live web search — never fabricated. Survivor verifies identity and public contact evidence before adding a business to the CRM. Outreach messages are AI-drafted drafts for a human to review and send; SURVIVE AI
         never contacts anyone automatically.
       </div>
 
@@ -183,7 +181,7 @@ export function Prospects() {
       {filtered.length === 0 ? (
         <div className="empty">
           {prospects.length === 0
-            ? 'No prospects yet — these are discovered automatically once an opportunity in the Local / Real-World category has a business model and evidence of real demand. Connect a live search provider to enable discovery.'
+            ? 'No prospects yet — use “Find businesses now” above to search live sources. Survivor will verify the business identity and public contact evidence before adding it.'
             : 'No prospects match these filters.'}
         </div>
       ) : (
