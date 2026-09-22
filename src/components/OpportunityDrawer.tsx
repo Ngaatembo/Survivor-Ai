@@ -15,7 +15,7 @@ function FactorBar({ factor }: { factor: { key: ScoreFactorKey; raw: number; wei
   );
 }
 
-export function OpportunityDrawer({ opp, onClose }: { opp: Opportunity; onClose: () => void }) {
+export function OpportunityDrawer({ opp, onClose, onOpenProspects }: { opp: Opportunity; onClose: () => void; onOpenProspects: () => void }) {
   const runManualExperiment = useStore((s) => s.runManualExperiment);
   const generateReportFor = useStore((s) => s.generateReportFor);
   const reports = useStore((s) => s.reports);
@@ -118,7 +118,8 @@ export function OpportunityDrawer({ opp, onClose }: { opp: Opportunity; onClose:
         <div className="drawer-section">
           <h3>Sales readiness</h3>
           {prospects.length === 0 ? (
-            <div className="empty">Find and verify a real prospect before sales execution can begin.</div>
+            <div className="empty">No real prospects are linked to this opportunity yet.</div>
+            <button className="btn primary small" style={{ marginTop: 9 }} onClick={onOpenProspects}>🔎 Find real prospects →</button>
           ) : (
             <div className="small">
               {prospects.map((prospect) => {
