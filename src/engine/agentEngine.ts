@@ -49,6 +49,7 @@ import { computeCategoryRealWorldStats, statsForCategory } from '../lib/realReve
 import { computeRecommendedActions } from '../lib/recommendedActions';
 import { rankRevenueProspects } from '../lib/revenueConversion';
 import { verifyProspect } from '../services/prospectVerification';
+import { resolveProspectEntities } from '../services/prospectEntityResolution';
 
 export const STEP_ORDER: CycleStepKey[] = [
   'RESEARCH',
@@ -646,7 +647,14 @@ export class AgentEngine {
               computeCategoryRealWorldStats(allOppsForStats, existingProspects, realRevenueForStats),
               opp.category,
             );
-            const { prospects, sourcesCount } = await discoverProspects(searchCtx, opp, model, existingNames, categoryStats);
+            const { prospects: discoveredProspects, sourcesCount } = await discoverProspects(searchCtx, opp, model, existingNames, categoryStats);
+            if (discoveredProspects.length === 0) continue;
+
+            // Phase 1 V2 — resolve the same real business across different
+            // search results before persistence. Only high-confidence matches
+            // (same verified contact, or strong name + location) are merged;
+            // similarly named businesses are kept separate.
+            const { accepted: prospects, merged: mergedProspects } = resolveProspectEntities(existingProspects, discoveredProspects);
             if (prospects.length === 0) continue;
             await this.repo.upsertProspects(prospects);
             for (const p of prospects) {
@@ -660,6 +668,9 @@ export class AgentEngine {
             }
             newProspectsCount += prospects.length;
             highPriorityCount += prospects.filter((p) => p.priority === 'HIGH').length;
+            if (mergedProspects > 0) {
+              await hooks.log('VERIFY', `Entity resolution merged ${mergedProspects} duplicate discovery result(s) into existing business record(s).`);
+            }
           }
           if (newProspectsCount > 0) {
             await hooks.log(
