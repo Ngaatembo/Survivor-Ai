@@ -733,7 +733,11 @@ export default {
             (p) => p.status === 'WON' && !realRevenue.some((r) => r.prospectId === p.id),
           ).length,
         };
-        const incomeRaw = await repo.getKV('income_intelligence');\n        let incomeIntelligence: unknown[] = [];\n        try { incomeIntelligence = incomeRaw ? JSON.parse(incomeRaw) : []; } catch { incomeIntelligence = []; }\n\n        const moneyMetrics = computeMoneyMetrics(prospects, offers, realRevenue);
+        const incomeRaw = await repo.getKV('income_intelligence');
+        let incomeIntelligence: unknown[] = [];
+        try { incomeIntelligence = incomeRaw ? JSON.parse(incomeRaw) : []; } catch { incomeIntelligence = []; }
+
+        const moneyMetrics = computeMoneyMetrics(prospects, offers, realRevenue);
 
         return json({
           ok: true,
@@ -1162,6 +1166,41 @@ export default {
       }
     }
 
+    if (url.pathname === '/treasury/record-capital' && req.method === 'POST') {
+      // Human records money already allocated to Survivor's operating budget.
+      // This is accounting only: no bank/EcoCash/Finivex transfer is initiated.
+      let body: any;
+      try { body = await req.json(); } catch { return json({ ok: false, error: 'invalid JSON body' }, { status: 400 }); }
+      if (typeof body?.amount !== 'number' || !Number.isFinite(body.amount) || body.amount <= 0) {
+        return json({ ok: false, error: 'amount must be a positive number' }, { status: 400 });
+      }
+      try {
+        const { repo } = buildEngine(env);
+        const transactions = await repo.listTransactions();
+        const balanceBefore = transactions.reduce((sum, tx) => sum + tx.amount, 0);
+        const tx = {
+          id: `tx_${crypto.randomUUID()}`,
+          type: 'DEPOSIT' as const,
+          amount: body.amount,
+          description: `[TREASURY CAPITAL] ${typeof body.description === 'string' && body.description.trim() ? body.description.trim() : 'Operating budget allocated to Survivor'}`,
+          balanceAfter: balanceBefore + body.amount,
+          createdAt: Date.now(),
+        };
+        await repo.appendTransaction(tx);
+        await repo.appendEvent({
+          id: `evt_${crypto.randomUUID()}`,
+          type: 'WALLET',
+          message: `Treasury capital recorded: ${body.amount.toFixed(2)}. No transfer was initiated by Survivor.`,
+          createdAt: Date.now(),
+        });
+        const rawPolicy = await repo.getKV('treasury:policy');
+        const policy: TreasuryPolicy = rawPolicy ? { ...DEFAULT_TREASURY_POLICY, ...JSON.parse(rawPolicy) } : DEFAULT_TREASURY_POLICY;
+        return json({ ok: true, transaction: tx, treasury: calculateTreasurySnapshot(await repo.listTransactions(), policy) });
+      } catch (e) {
+        return json({ ok: false, error: (e as Error).message }, { status: 500 });
+      }
+    }
+
     if (url.pathname === '/treasury/policy' && req.method === 'POST') {
       let body: any;
       try { body = await req.json(); } catch { return json({ ok: false, error: 'invalid JSON body' }, { status: 400 }); }
@@ -1230,6 +1269,62 @@ export default {
       }
     }
 
+    if (url.pathname === '/treasury/spend-request/approve' && req.method === 'POST') {
+      let body: any;
+      try { body = await req.json(); } catch { return json({ ok: false, error: 'invalid JSON body' }, { status: 400 }); }
+      if (typeof body?.requestId !== 'string' || !body.requestId) return json({ ok: false, error: 'requestId is required' }, { status: 400 });
+      try {
+        const { repo } = buildEngine(env);
+        const raw = await repo.getKV('treasury:spend-requests');
+        const requests: SpendRequest[] = raw ? JSON.parse(raw) : [];
+        const request = requests.find((r) => r.id === body.requestId);
+        if (!request) return json({ ok: false, error: 'spend request not found' }, { status: 404 });
+        if (request.status === 'RECORDED') return json({ ok: false, error: 'spend request is already recorded' }, { status: 409 });
+        if (request.status === 'REJECTED' || request.decision === 'BLOCKED') return json({ ok: false, error: 'blocked/rejected spend cannot be approved' }, { status: 403 });
+        if (request.status !== 'PENDING') return json({ ok: false, error: `spend request is already ${request.status}` }, { status: 409 });
+        request.status = 'APPROVED';
+        request.reviewedAt = Date.now();
+        request.note = typeof body.note === 'string' ? body.note : request.note;
+        await repo.setKV('treasury:spend-requests', JSON.stringify(requests));
+        await repo.appendEvent({
+          id: `evt_${crypto.randomUUID()}`,
+          type: 'WALLET',
+          message: `Treasury spend approved for human payment: ${request.amount.toFixed(2)} to ${request.vendor}. Survivor will not execute the payment.`,
+          createdAt: Date.now(),
+        });
+        return json({ ok: true, request });
+      } catch (e) {
+        return json({ ok: false, error: (e as Error).message }, { status: 500 });
+      }
+    }
+
+    if (url.pathname === '/treasury/spend-request/reject' && req.method === 'POST') {
+      let body: any;
+      try { body = await req.json(); } catch { return json({ ok: false, error: 'invalid JSON body' }, { status: 400 }); }
+      if (typeof body?.requestId !== 'string' || !body.requestId) return json({ ok: false, error: 'requestId is required' }, { status: 400 });
+      try {
+        const { repo } = buildEngine(env);
+        const raw = await repo.getKV('treasury:spend-requests');
+        const requests: SpendRequest[] = raw ? JSON.parse(raw) : [];
+        const request = requests.find((r) => r.id === body.requestId);
+        if (!request) return json({ ok: false, error: 'spend request not found' }, { status: 404 });
+        if (request.status === 'RECORDED') return json({ ok: false, error: 'recorded spend cannot be rejected' }, { status: 409 });
+        request.status = 'REJECTED';
+        request.reviewedAt = Date.now();
+        request.note = typeof body.note === 'string' ? body.note : request.note;
+        await repo.setKV('treasury:spend-requests', JSON.stringify(requests));
+        await repo.appendEvent({
+          id: `evt_${crypto.randomUUID()}`,
+          type: 'WALLET',
+          message: `Treasury spend rejected: ${request.amount.toFixed(2)} to ${request.vendor}.`,
+          createdAt: Date.now(),
+        });
+        return json({ ok: true, request });
+      } catch (e) {
+        return json({ ok: false, error: (e as Error).message }, { status: 500 });
+      }
+    }
+
     if (url.pathname === '/treasury/record-confirmed-expense' && req.method === 'POST') {
       let body: any;
       try { body = await req.json(); } catch { return json({ ok: false, error: 'invalid JSON body' }, { status: 400 }); }
@@ -1241,8 +1336,8 @@ export default {
         const request = requests.find((r) => r.id === body.requestId);
         if (!request) return json({ ok: false, error: 'spend request not found' }, { status: 404 });
         if (request.decision === 'BLOCKED' || request.status === 'REJECTED') return json({ ok: false, error: 'blocked/rejected spend cannot be recorded' }, { status: 403 });
-        request.status = 'APPROVED';
-        request.reviewedAt = Date.now();
+        if (request.status === 'RECORDED') return json({ ok: false, error: 'spend request is already recorded' }, { status: 409 });
+        if (request.status !== 'APPROVED') return json({ ok: false, error: 'spend request must be approved before recording payment' }, { status: 403 });
         const tx = createConfirmedExpense(request, await repo.listTransactions());
         await repo.appendTransaction(tx);
         request.status = 'RECORDED';

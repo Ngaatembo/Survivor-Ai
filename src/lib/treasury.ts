@@ -116,28 +116,24 @@ export function authorizeSpend(
   const vendor = request.vendor.trim().toLowerCase();
   const category = request.category.trim().toLowerCase();
 
-  if (snapshot.policy.emergencyFrozen || !snapshot.policy.realMoneyExecutionEnabled) return 'BLOCKED';
+  // Treasury v1 never authorizes autonomous real-money execution. A request
+  // may be approved for human payment, but Survivor never sends the money.
+  if (snapshot.policy.emergencyFrozen) return 'BLOCKED';
   if (snapshot.balance - request.amount < snapshot.protectedReserve) return 'BLOCKED';
   if (snapshot.policy.blockedCategories.some((x) => category.includes(x))) return 'BLOCKED';
   if (request.amount <= 0 || !Number.isFinite(request.amount)) return 'BLOCKED';
 
   const vendorAllowed = snapshot.policy.allowedVendors.some((x) => vendor === x || vendor.includes(x));
-  if (
-    vendorAllowed &&
-    request.amount <= snapshot.policy.autonomousPerTransactionLimit &&
-    request.amount <= snapshot.autonomousRemainingToday
-  ) {
-    return 'AUTO';
-  }
+  if (!vendorAllowed) return 'BLOCKED';
+  if (request.amount > snapshot.policy.approvalPerTransactionLimit) return 'BLOCKED';
 
-  if (request.amount <= snapshot.policy.approvalPerTransactionLimit) return 'APPROVAL';
-  return 'BLOCKED';
+  return 'APPROVAL';
 }
 
 /**
  * During Treasury v1, no code path sends money. This helper only creates an
- * auditable EXPENSE ledger entry after an already-authorized real-world payment
- * has been confirmed by the operator/provider.
+ * auditable EXPENSE ledger entry after the operator has approved the request
+ * and separately completed the real-world payment.
  */
 export function createConfirmedExpense(
   request: SpendRequest,
