@@ -54,7 +54,8 @@ import {
 } from './paymentProvider';
 import { finivexStatus, createFinivexPaymentLink, getFinivexPaymentStatus } from './finivexProvider';
 import { getWindsorIncomeSummary } from './windsorProvider';
-import { INCOME_CHANNEL_STRATEGIES } from '../../src/lib/incomeChannelBrain';
+import { INCOME_CHANNEL_STRATEGIES, decideIncomeChannel } from '../../src/lib/incomeChannelBrain';
+import { buildEconomicMemory } from '../../src/lib/economicMemory';
 import { buildForexResearchPackage, classifyForexSource, type ForexResearchFinding } from '../../src/lib/forexResearch';
 
 
@@ -1017,6 +1018,7 @@ export default {
         const strategies = requested
           ? INCOME_CHANNEL_STRATEGIES.filter(s => s.kind === requested)
           : INCOME_CHANNEL_STRATEGIES;
+        const realRevenue = await repo.listRealRevenue();
         const findings: ForexResearchFinding[] = [];
         const results: Array<{ channel: string; title: string; description: string; sourceUrls: string[] }> = [];
         for (const strategy of strategies) {
@@ -1035,10 +1037,16 @@ export default {
         }
         await saveEconomyState(repo, ctx.state);
         const forex = buildForexResearchPackage(findings);
+        const economicMemory = buildEconomicMemory(realRevenue);
+        const decisions = new Map(strategies.map((s) => [s.kind, decideIncomeChannel(s, economicMemory, realRevenue)]));
         return json({
           ok:true,
           generatedAt:new Date().toISOString(),
-          strategies: strategies.map(s => ({ ...s, searchResultCount: results.filter(r => r.channel === s.kind).length })),
+          strategies: strategies.map(s => ({
+            ...s,
+            searchResultCount: results.filter(r => r.channel === s.kind).length,
+            decision: decisions.get(s.kind),
+          })),
           evidence: results.slice(0,120),
           forex,
           guardrails: {
