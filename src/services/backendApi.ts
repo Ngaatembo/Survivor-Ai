@@ -364,6 +364,11 @@ export function researchProspectNow(prospectId: string): Promise<{ ok: true; int
   return postJson('/prospects/research', { prospectId });
 }
 
+/** Verify and consolidate a prospect's public identity, contact, website and location evidence now. */
+export function verifyProspectNow(prospectId: string): Promise<{ ok: true; prospect: Prospect }> {
+  return postJson('/prospects/verify', { prospectId });
+}
+
 /** Phase 3 (deepened): regenerate a prospect's real, working demo page —
  *  e.g. after fresh deep research or an updated offer. Requires an
  *  existing offer for this prospect. Returns the metadata plus the
