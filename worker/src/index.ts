@@ -459,6 +459,9 @@ export default {
         ready: schemaReady,
         schema: { ready: schemaReady, missingTables },
         service: 'survive-ai',
+        deployment: {
+          commit: env.BUILD_SHA ?? null,
+        },
         time: new Date().toISOString(),
         runtime: {
           cronConfigured: true,
