@@ -493,6 +493,10 @@ export function reviewActionApproval(approvalId: string, decision: 'APPROVED' | 
   return postJson('/actions/approvals/review', { approvalId, decision, note });
 }
 
+export function markActionExecuted(approvalId: string): Promise<{ ok: true; approval: ActionApproval }> {
+  return postJson('/actions/approvals/execute', { approvalId });
+}
+
 export function fetchContentState(): Promise<{ ok: true; state: ContentEngineState }> {
   return getJson('/content/state');
 }
