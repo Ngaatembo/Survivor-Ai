@@ -19,6 +19,8 @@ jobs:
           node-version: 20
       - run: npm ci
       - run: npm run production:guard
+      - name: Build dashboard
+        run: npm run build
       - run: npm run worker:dry-run -- --var BUILD_SHA:${{ github.sha }}
       - run: npm run worker:deploy -- --var BUILD_SHA:${{ github.sha }}
         env:
