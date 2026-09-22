@@ -144,6 +144,8 @@ export function IncomeHub() {
             ['Google Analytics', windsor.data.analytics.length],
             ['Facebook', windsor.data.facebook.length],
             ['Instagram', windsor.data.instagram.length],
+            ['YouTube', windsor.data.youtube.length],
+            ['LinkedIn', windsor.data.linkedin.length],
           ].map(([name, count]) => <div key={String(name)} className="event"><strong>{name}</strong><div className="stat-value" style={{ fontSize: 20 }}>{String(count)}</div><div className="faint small">rows / last 30d</div></div>)}
         </div>
         <div className="grid cols-2" style={{ marginTop: 10 }}>
@@ -154,7 +156,7 @@ export function IncomeHub() {
           </div>
           <div className="event" style={{ display: 'block' }}>
             <strong>Traffic / social signals</strong>
-            <div className="faint small" style={{ marginTop: 6 }}>GA4 rows: {windsor.data.analytics.length} · Instagram: {windsor.data.instagram.length} · TikTok: {windsor.data.tiktok.length}</div>
+            <div className="faint small" style={{ marginTop: 6 }}>GA4 rows: {windsor.data.analytics.length} · Instagram: {windsor.data.instagram.length} · TikTok: {windsor.data.tiktok.length} · YouTube: {windsor.data.youtube.length} · LinkedIn: {windsor.data.linkedin.length}</div>
             {Object.entries(windsor.errors).map(([k, v]) => <div key={k} className="faint small" style={{ marginTop: 5 }}>{k}: {v}</div>)}
           </div>
         </div>
@@ -256,14 +258,14 @@ export function IncomeHub() {
       <div className="grid cols-3">{[
         ['Facebook / Instagram', Boolean(windsor?.data.facebook.length || windsor?.data.instagram.length)],
         ['TikTok', Boolean(windsor?.data.tiktok.length)],
-        ['YouTube', false],
-        ['LinkedIn', false],
+        ['YouTube', Boolean(windsor?.data.youtube.length)],
+        ['LinkedIn', Boolean(windsor?.data.linkedin.length)],
         ['Freelance platforms', false],
         ['Analytics / Search', Boolean(windsor?.data.analytics.length || windsor?.data.searchConsole.length)],
       ].map(([name, connected]) =>
         <div key={String(name)} className="event" style={{ display: 'block' }}><div style={{ fontWeight: 600 }}>{String(name)}</div><div className="faint small" style={{ marginTop: 4 }}>Live data → opportunity detection → human approval before publishing or submitting.</div><Badge tone={connected ? 'green' : 'gray'}>{connected ? 'LIVE DATA' : 'NOT CONNECTED'}</Badge></div>
       )}</div>
-      <div className="faint small" style={{ marginTop: 10 }}>Survivor only marks a provider live when its backend successfully receives data. Write actions remain outside the automatic research path.</div>
+      <div className="faint small" style={{ marginTop: 10 }}>Survivor only marks a provider live when its backend successfully receives data. If LinkedIn is rate-limited or unavailable, the other connected sources continue syncing independently. Write actions remain outside the automatic research path.</div>
     </Panel>
 
     <Panel title="REVENUE BY RECORDED ACQUISITION CHANNEL" style={{ marginTop: 14 }}>
