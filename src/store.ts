@@ -334,6 +334,7 @@ export const useStore = create<SurviveState>()(
               economicEfficiency: state.economicEfficiency ?? null,
               incomeIntelligence: state.incomeIntelligence ?? [],
               survivalScore: state.survivalScore ?? null,
+              actionApprovals: state.actionApprovals ?? [],
               backend: {
                 connected: true,
                 syncing: false,
