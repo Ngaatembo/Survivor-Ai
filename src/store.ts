@@ -59,6 +59,9 @@ import {
   BackendError,
   updateProspectStatus as apiUpdateProspectStatus,
   updateOfferStatus as apiUpdateOfferStatus,
+  generateOfferNow as apiGenerateOfferNow,
+  generateOutreachNow as apiGenerateOutreachNow,
+  requestProspectActionApproval as apiRequestProspectActionApproval,
   advanceProjectMilestone as apiAdvanceProjectMilestone,
   addRealRevenueEntry as apiAddRealRevenueEntry,
   updateProjectOutcome as apiUpdateProjectOutcome,
@@ -189,6 +192,9 @@ interface SurviveState {
    *  straight through the local StoreRepository. */
   updateProspectStatus: (prospectId: string, status: ProspectStatus, reasonLost?: string) => Promise<void>;
   updateOfferStatus: (offerId: string, status: Offer['status']) => Promise<void>;
+  generateOfferNow: (prospectId: string) => Promise<void>;
+  generateOutreachNow: (prospectId: string) => Promise<void>;
+  requestProspectActionApproval: (input: { actionId: string; actionKind: RecommendedAction['kind']; title: string; prospectId: string; opportunityId?: string }) => Promise<void>;
   advanceProjectMilestone: (projectId: string, milestone: ProjectMilestoneKey) => Promise<void>;
   /** Real-money write path (Phase 4) — always human-entered, never
    *  autonomous. Same backend/demo-mode split as the actions above. */
@@ -372,6 +378,71 @@ export const useStore = create<SurviveState>()(
           }
           await repo.updateProspectStatus(prospectId, status, reasonLost);
           set({ prospects: await repo.listProspects() } as any);
+        },
+
+        generateOfferNow: async (prospectId: string) => {
+          if (featureFlags.backend) {
+            try {
+              await apiGenerateOfferNow(prospectId);
+              set({ actionError: null, actionSuccess: 'Offer and design brief generated.' } as any);
+              await get().syncFromBackend();
+            } catch (e) {
+              const message = e instanceof BackendError ? e.message : (e as Error).message;
+              set({ actionError: `Failed to generate offer: ${message}`, actionSuccess: null } as any);
+            }
+            return;
+          }
+          const [prospects, models, intelligence, pricing] = await Promise.all([
+            repo.listProspects(), repo.listBusinessModels(), repo.listProspectIntelligence(), repo.listMarketPriceResearch(),
+          ]);
+          const prospect = prospects.find((p) => p.id === prospectId);
+          if (!prospect || !['VERIFIED', 'PROVISIONAL'].includes(prospect.verification?.status ?? '')) throw new Error('Offer generation requires a verified prospect.');
+          if ((await repo.listOffers()).some((o) => o.prospectId === prospectId)) throw new Error('An offer already exists for this prospect.');
+          const model = models.find((m) => m.opportunityId === prospect.opportunityId);
+          const intel = intelligence.find((i) => i.prospectId === prospectId);
+          const market = pricing.find((p) => p.opportunityId === prospect.opportunityId);
+          const { generateOffer } = await import('./lib/offerGenerator');
+          const { generateDesignBrief } = await import('./lib/designBriefGenerator');
+          const offer = generateOffer(prospect, model, intel, market);
+          await repo.upsertOffer(offer);
+          await repo.upsertDesignBrief(generateDesignBrief(offer, prospect));
+          set({ offers: await repo.listOffers(), designBriefs: await repo.listDesignBriefs() } as any);
+        },
+
+        generateOutreachNow: async (prospectId: string) => {
+          if (featureFlags.backend) {
+            try {
+              await apiGenerateOutreachNow(prospectId);
+              set({ actionError: null, actionSuccess: 'Outreach draft generated.' } as any);
+              await get().syncFromBackend();
+            } catch (e) {
+              const message = e instanceof BackendError ? e.message : (e as Error).message;
+              set({ actionError: `Failed to generate outreach: ${message}`, actionSuccess: null } as any);
+            }
+            return;
+          }
+          const [prospects, models, intelligence] = await Promise.all([repo.listProspects(), repo.listBusinessModels(), repo.listProspectIntelligence()]);
+          const prospect = prospects.find((p) => p.id === prospectId);
+          if (!prospect || !['VERIFIED', 'PROVISIONAL'].includes(prospect.verification?.status ?? '')) throw new Error('Outreach generation requires a verified prospect.');
+          if ((await repo.listOutreachMessages()).some((o) => o.prospectId === prospectId)) throw new Error('Outreach already exists for this prospect.');
+          const { generateOutreachMessages } = await import('./lib/outreachGenerator');
+          await repo.upsertOutreachMessages(generateOutreachMessages(prospect, models.find((m) => m.opportunityId === prospect.opportunityId), intelligence.find((i) => i.prospectId === prospectId)));
+          set({ outreachMessages: await repo.listOutreachMessages() } as any);
+        },
+
+        requestProspectActionApproval: async (input) => {
+          if (featureFlags.backend) {
+            try {
+              await apiRequestProspectActionApproval(input);
+              set({ actionError: null, actionSuccess: 'Human approval requested.' } as any);
+              await get().syncFromBackend();
+            } catch (e) {
+              const message = e instanceof BackendError ? e.message : (e as Error).message;
+              set({ actionError: `Failed to request approval: ${message}`, actionSuccess: null } as any);
+            }
+            return;
+          }
+          set({ actionSuccess: 'Approval requests are available in live backend mode.' } as any);
         },
 
         updateOfferStatus: async (offerId: string, status: Offer['status']) => {
