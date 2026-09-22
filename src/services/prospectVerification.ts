@@ -184,6 +184,16 @@ export async function verifyProspect(
   const sourceKeys = new Set(identityResults.map((x) => independentKey(x.r.url)).filter(Boolean));
   const canonical = chooseCanonicalName(prospect, results);
 
+  const socialLinks = new Set<string>(prospect.socialLinks ?? []);
+  for (const { r, score } of identityResults) {
+    if (score < 0.55) continue;
+    const domain = domainOf(r.url);
+    if (/facebook\.com|instagram\.com|linkedin\.com/i.test(domain)) {
+      const social = cleanUrl(r.url);
+      if (social) socialLinks.add(social);
+    }
+  }
+
   const emails = new Map<string, { keys: Set<string>; bestScore: number }>();
   const websites = new Map<string, { keys: Set<string>; bestScore: number }>();
   const locations = new Map<string, { raw: string; keys: Set<string>; bestScore: number }>();
