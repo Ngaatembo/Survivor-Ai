@@ -2,7 +2,7 @@ import { useStore, backendConfigured } from '../store';
 import { Badge, Bar, DataSourceBadge, EvidenceBadge, KV, RecommendationBadge } from './ui';
 import { capRange, dayRange, dateTime } from '../lib/format';
 import { FACTOR_LABELS } from '../lib/scoring';
-import type { Opportunity, ScoreFactorKey } from '../types';
+import type { Opportunity, ProspectStatus, ScoreFactorKey } from '../types';
 
 function FactorBar({ factor }: { factor: { key: ScoreFactorKey; raw: number; weight: number } }) {
   const tone = factor.raw >= 70 ? 'green' : factor.raw >= 45 ? 'amber' : 'red';
@@ -23,6 +23,11 @@ export function OpportunityDrawer({ opp, onClose }: { opp: Opportunity; onClose:
   const dead = useStore((s) => s.agent.status === 'DEAD');
   const memory = useStore((s) => s.memory.find((m) => m.kind === 'opportunity' && m.refId === opp.id));
   const businessModel = useStore((s) => s.businessModels.find((m) => m.opportunityId === opp.id));
+  const prospects = useStore((s) => s.prospects.filter((p) => p.opportunityId === opp.id));
+  const offers = useStore((s) => s.offers.filter((o) => o.opportunityId === opp.id));
+  const projects = useStore((s) => s.projects.filter((p) => p.opportunityId === opp.id));
+  const realRevenue = useStore((s) => s.realRevenue.filter((r) => r.opportunityId === opp.id));
+  const updateProspectStatus = useStore((s) => s.updateProspectStatus);
   const hasReport = reports.some((r) => r.opportunityId === opp.id);
 
   return (
@@ -107,6 +112,57 @@ export function OpportunityDrawer({ opp, onClose }: { opp: Opportunity; onClose:
           )}
         </div>
 
+        <div className="drawer-section">
+          <h3>Sales execution</h3>
+          {prospects.length === 0 ? (
+            <div className="empty">No real prospects are linked to this opportunity yet.</div>
+          ) : (
+            prospects.map((prospect) => {
+              const offer = offers.find((o) => o.prospectId === prospect.id);
+              const project = projects.find((p) => p.prospectId === prospect.id);
+              const revenue = realRevenue.filter((r) => r.prospectId === prospect.id).reduce((sum, r) => sum + r.amountReceived, 0);
+              const nextStatus: ProspectStatus | null = prospect.status === 'DISCOVERED'
+                ? 'QUALIFIED'
+                : prospect.status === 'QUALIFIED'
+                  ? 'CONTACTED'
+                  : prospect.status === 'CONTACTED'
+                    ? 'REPLIED'
+                    : prospect.status === 'REPLIED'
+                      ? 'INTERESTED'
+                      : prospect.status === 'INTERESTED'
+                        ? 'PROPOSAL_SENT'
+                        : prospect.status === 'PROPOSAL_SENT'
+                          ? 'NEGOTIATING'
+                          : null;
+              return (
+                <div key={prospect.id} className="source-item" style={{ alignItems: 'flex-start' }}>
+                  <span className="src-kind">{prospect.status}</span>
+                  <div style={{ flex: 1 }}>
+                    <strong>{prospect.businessName}</strong>
+                    <div className="faint small">{prospect.location}</div>
+                    <div className="small" style={{ marginTop: 5 }}>
+                      {offer ? 'Offer: ' + offer.price.toFixed(2) + ' · ' + offer.status : 'Offer not drafted'}
+                      {project ? ' · Project: ' + project.status : ''}
+                      {revenue > 0 ? ' · Received: ' + revenue.toFixed(2) : ''}
+                    </div>
+                    {nextStatus && (
+                      <button
+                        className="btn small"
+                        style={{ marginTop: 7 }}
+                        onClick={() => void updateProspectStatus(prospect.id, nextStatus)}
+                      >
+                        Mark {nextStatus.replace('_', ' ').toLowerCase()}
+                      </button>
+                    )}
+                  </div>
+                </div>
+              );
+            })
+          )}
+          <div className="faint small mono" style={{ marginTop: 8 }}>
+            Human-controlled pipeline. Survivor prepares and records the next step; it never contacts a prospect automatically.
+          </div>
+        </div>
         <div className="drawer-section">
           <h3>Economics</h3>
           <div className="kv">
