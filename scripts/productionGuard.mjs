@@ -90,6 +90,15 @@ const checks = [
       has(worker, 'async scheduled(') &&
       has(worker, "await engine.runCycle({ useLive: true, stepDelay: 0 });"),
   },
+  {
+    name: 'health endpoint reports critical D1 schema readiness',
+    ok:
+      has(worker, 'const requiredTables = [') &&
+      has(worker, "'kv_store'") &&
+      has(worker, "'payment_intents'") &&
+      has(worker, "'payment_provider_events'") &&
+      has(worker, 'ready: schemaReady'),
+  },
 ];
 
 const failed = checks.filter((c) => !c.ok);
