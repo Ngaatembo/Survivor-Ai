@@ -1400,6 +1400,8 @@ export default {
     }
 
     if (url.pathname === '/prospects/discover' && req.method === 'POST') {
+      const operatorError = await requireOperator(req, env);
+      if (operatorError) return operatorError;
       // Immediate operator-triggered real business discovery.
       let body: any;
       try { body = await req.json(); } catch { return json({ ok: false, error: 'invalid JSON body' }, { status: 400 }); }
