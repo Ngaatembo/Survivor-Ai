@@ -2292,6 +2292,17 @@ export default {
       return runCycle(env);
     }
 
+    // Serve the Vite dashboard from the same Worker after API routes are handled.
+    // Unknown browser paths fall back to index.html so the SPA remains navigable.
+    if (req.method === 'GET' && env.ASSETS) {
+      const assetResponse = await env.ASSETS.fetch(req);
+      if (assetResponse.status !== 404) return assetResponse;
+      if (req.headers.get('accept')?.includes('text/html')) {
+        const indexRequest = new Request(new URL('/index.html', req.url), req);
+        return env.ASSETS.fetch(indexRequest);
+      }
+    }
+
     return json({ ok: false, error: 'not found' }, { status: 404 });
   },
 
