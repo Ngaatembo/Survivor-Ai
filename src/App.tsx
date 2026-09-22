@@ -268,7 +268,7 @@ export function App() {
         </main>
       </div>
 
-      {drawerOpp && <OpportunityDrawer opp={drawerOpp} onClose={() => setDrawerId(null)} />}
+      {drawerOpp && <OpportunityDrawer opp={drawerOpp} onClose={() => setDrawerId(null)} onOpenProspects={() => { setDrawerId(null); setView('prospects'); }} />}
     </div>
   );
 }
