@@ -41,6 +41,22 @@ await check('/state', (body) => {
   if (!body.agent || typeof body.agent.id !== 'string') throw new Error('/state missing agent');
 });
 
+await check('/payments/requests', (body) => {
+  if (body.ok !== true) throw new Error('/payments/requests ok=false');
+  if (!Array.isArray(body.requests)) throw new Error('/payments/requests requests is not an array');
+});
+
+await check('/payments/finivex/status', (body) => {
+  if (body.ok !== true) throw new Error('/payments/finivex/status ok=false');
+  if (!body.payment || typeof body.payment.configured !== 'boolean') throw new Error('/payments/finivex/status invalid payload');
+});
+
+await check('/treasury', (body) => {
+  if (body.ok !== true) throw new Error('/treasury ok=false');
+  if (!body.treasury || typeof body.treasury.balance !== 'number') throw new Error('/treasury missing balance');
+  if (!Array.isArray(body.spendRequests)) throw new Error('/treasury spendRequests is not an array');
+});
+
 await check('/content/state', (body) => {
   if (body.ok !== true) throw new Error('/content/state ok=false');
   if (!body.state || body.state.version !== 1) throw new Error('/content/state invalid version');
