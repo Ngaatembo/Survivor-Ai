@@ -59,7 +59,8 @@ const checks = [
     ok:
       has(worker, "event_type = 'SANDBOX_PAYMENT_CONFIRMED'") &&
       has(worker, "INSERT OR IGNORE INTO payment_provider_events") &&
-      lacks(paymentProvider, "production execution enabled"),
+      has(paymentProvider, "if (!/sandbox|test|developers\\.ecocash\\.co\\.zw/i.test(baseUrl))") &&
+      has(paymentProvider, "EcoCash payment execution is restricted to the sandbox endpoint"),
   },
   {
     name: 'manual cycle execution requires the trigger secret',
