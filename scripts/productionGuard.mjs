@@ -68,10 +68,11 @@ const checks = [
     ok:
       has(worker, "req.headers.get('x-trigger-secret')") &&
       has(worker, "if (!env.TRIGGER_SECRET || secret !== env.TRIGGER_SECRET)") &&
-      has(worker, "if (url.pathname === '/cycles/run' && req.method === 'POST')"),
-      has(worker, "if (url.pathname === '/auth/login' && req.method === 'POST')"),
-      has(worker, "requireOperator(req, env)"),
-      has(worker, "url.pathname === '/actions/approvals/review' && req.method === 'POST'") && has(worker, "operator authentication required"),
+      has(worker, "if (url.pathname === '/cycles/run' && req.method === 'POST')") &&
+      has(worker, "if (url.pathname === '/auth/login' && req.method === 'POST')") &&
+      has(worker, "requireOperator(req, env)") &&
+      has(worker, "url.pathname === '/actions/approvals/review' && req.method === 'POST'") &&
+      has(worker, "operator authentication required"),
   },
   {
     name: 'deployment does not expose frontend provider secrets',
