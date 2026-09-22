@@ -881,6 +881,58 @@ export interface LearningEvent {
   createdAt: number;
 }
 
+/* -------------------------- market context / economic memory ------------- */
+
+/**
+ * Market is a first-class research dimension. Survivor is not Zimbabwe-only:
+ * Zimbabwe is simply the initial operating market. Research, pricing and
+ * future experiments can be scoped to any country/region without changing the
+ * core intelligence engine.
+ */
+export interface MarketContext {
+  id: string;
+  countryCode: string;
+  countryName: string;
+  region?: string;
+  city?: string;
+  currency: string;
+  languages: string[];
+  paymentMethods: string[];
+  active: boolean;
+}
+
+/**
+ * Evidence summary derived only from recorded real-world revenue and CRM
+ * outcomes. It deliberately avoids invented probabilities when the sample is
+ * too small. This is the foundation for Survivor's Economic Memory.
+ */
+export interface EconomicMemorySnapshot {
+  generatedAt: number;
+  sampleSize: number;
+  totalRevenue: number;
+  totalCosts: number;
+  totalProfit: number;
+  averageRevenuePerSale: number | null;
+  averageProfitPerSale: number | null;
+  averageDaysToPayment: number | null;
+  byOpportunity: Array<{
+    opportunityId: string;
+    opportunityName: string;
+    sales: number;
+    revenue: number;
+    profit: number;
+    averageDaysToPayment: number | null;
+  }>;
+  byAcquisitionChannel: Array<{
+    channel: string;
+    sales: number;
+    revenue: number;
+    profit: number;
+  }>;
+  observedLessons: string[];
+  dataQuality: 'NONE' | 'EARLY' | 'ESTABLISHED';
+}
+
 /* ------------------------------ service wiring ---------------------------- */
 
 export interface ConnectorStatus {

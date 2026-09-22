@@ -14,6 +14,7 @@ import type { RecommendedAction } from '../types';
 import { salesReadiness } from '../lib/salesReadiness';
 import type { View } from '../App';
 import { DataStateBadge, type DataState } from './ui2';
+import { buildEconomicMemory } from '../lib/economicMemory';
 
 const DAY = 24 * 60 * 60 * 1000;
 
@@ -448,6 +449,51 @@ function BusinessPulse() {
   );
 }
 
+function EconomicMemory() {
+  const revenue = useStore((s) => s.realRevenue);
+  const memory = buildEconomicMemory(revenue);
+  const live = useLiveState();
+  const top = [...memory.byOpportunity].sort((a, b) => b.revenue - a.revenue).slice(0, 3);
+
+  return (
+    <section className="block">
+      <div className="card-head">
+        <div>
+          <h2>Economic memory</h2>
+          <span className="faint small">Learns from recorded money, not forecasts.</span>
+        </div>
+        <DataStateBadge state={live} />
+      </div>
+      {memory.sampleSize === 0 ? (
+        <p className="muted">No real payments are recorded yet. Survivor will start learning from the first verified revenue entry.</p>
+      ) : (
+        <>
+          <div className="pulse-grid">
+            <Pulse label="Recorded revenue" value={usd(memory.totalRevenue)} sub={`${memory.sampleSize} paid sale${memory.sampleSize === 1 ? '' : 's'}`} />
+            <Pulse label="Recorded profit" value={usd(memory.totalProfit)} />
+            <Pulse label="Avg. sale" value={usd(memory.averageRevenuePerSale ?? 0)} />
+            <Pulse label="Avg. time to payment" value={memory.averageDaysToPayment === null ? '—' : `${memory.averageDaysToPayment.toFixed(1)} days`} />
+          </div>
+          {top.length > 0 && (
+            <div className="action-list" style={{ marginTop: 12 }}>
+              {top.map((row) => (
+                <div className="action-card" key={row.opportunityId}>
+                  <div className="action-top">
+                    <div className="action-title">{row.opportunityName}</div>
+                    <div className="action-ev">{usd(row.revenue)}</div>
+                  </div>
+                  <div className="muted small">{row.sales} sale{row.sales === 1 ? '' : 's'} · {usd(row.profit)} recorded profit · {row.averageDaysToPayment === null ? 'payment timing not recorded' : `${row.averageDaysToPayment.toFixed(1)} day average to payment`}</div>
+                </div>
+              ))}
+            </div>
+          )}
+          <p className="faint small" style={{ marginTop: 10 }}>{memory.observedLessons[0]}</p>
+        </>
+      )}
+    </section>
+  );
+}
+
 function Header() {
   const backend = useStore((s) => s.backend);
   const agent = useStore((s) => s.agent);
@@ -494,6 +540,7 @@ export function HumanHome({ go }: { go: (v: View) => void }) {
       <SalesReady go={go} />
       <SinceAway />
       <BusinessPulse />
+      <EconomicMemory />
     </div>
   );
 }
