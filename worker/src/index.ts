@@ -168,7 +168,6 @@ const INCOME_CHANNEL_QUERIES: Record<string, string[]> = {
 
 async function researchIncomeChannels(env: Env): Promise<IncomeChannelOpportunity[]> {
   const { repo, tavily, brave } = buildEngine(env);
-  const agent = await repo.getAgent();
   const balance = balanceFrom(await repo.listTransactions());
   const survivalStatus = computeSurvivalStatus(balance);
   const state = await loadEconomyState(repo);
