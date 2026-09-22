@@ -107,9 +107,17 @@ await checkPost('/treasury/spend-request', {}, 400, (body) => {
   if (body.ok !== false || typeof body.error !== 'string') throw new Error('/treasury/spend-request invalid validation response');
 });
 
-await check('/actions/approvals', (body) => {
-  if (body.ok !== true || !Array.isArray(body.approvals)) throw new Error('/actions/approvals invalid response');
+await check('/actions/approvals', (body, response) => {
+  if (response.status !== 401 || body.ok !== false || body.error !== 'operator authentication required') {
+    throw new Error('/actions/approvals should require operator authentication');
+  }
 });
+
+await check('/actions/approvals/review', (body, response) => {
+  if (response.status !== 401 || body.ok !== false || body.error !== 'operator authentication required') {
+    throw new Error('/actions/approvals/review should require operator authentication');
+  }
+}, { method: 'POST', body: { approvalId: 'smoke_fake_approval', decision: 'REJECTED' } });
 
 await checkPost('/actions/approvals', {}, 400, (body) => {
   if (body.ok !== false || typeof body.error !== 'string') throw new Error('/actions/approvals invalid validation response');
