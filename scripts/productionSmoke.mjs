@@ -21,6 +21,18 @@ async function check(path, validate, attempts = 8) {
   throw lastError;
 }
 
+async function checkDashboard() {
+  const response = await fetch(base + '/', { headers: { accept: 'text/html' }, cache: 'no-store' });
+  const text = await response.text();
+  if (!response.ok) throw new Error(`dashboard returned HTTP ${response.status}: ${text.slice(0, 300)}`);
+  if (!/<!doctype html>|<div id=["']root["']>/i.test(text)) {
+    throw new Error('dashboard did not return the production Vite HTML shell');
+  }
+  if (!/SURVIVE AI/i.test(text)) throw new Error('dashboard HTML shell is not the Survivor AI app');
+  console.log('SMOKE PASS / dashboard HTML');
+}
+await checkDashboard();
+
 const health = await check('/health', (body) => {
   if (body.ok !== true) throw new Error('/health ok=false');
   if (process.env.SURVIVOR_EXPECTED_BUILD_SHA && body.deployment?.commit !== process.env.SURVIVOR_EXPECTED_BUILD_SHA) {
