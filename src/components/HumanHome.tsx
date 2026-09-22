@@ -8,7 +8,7 @@
  * ========================================================================== */
 import { useState } from 'react';
 import { useStore, useWalletTotals, backendConfigured } from '../store';
-import { demoUrl, requestActionApproval, reviewActionApproval, BackendError } from '../services/backendApi';
+import { demoUrl, requestActionApproval, reviewActionApproval, markActionExecuted, BackendError } from '../services/backendApi';
 import { usd, usdWhole, timeAgo } from '../lib/format';
 import type { RecommendedAction } from '../types';
 import { salesReadiness } from '../lib/salesReadiness';
@@ -70,6 +70,9 @@ function ActionButtons({ a, go, compact }: { a: RecommendedAction; go: (v: View)
   const updateOfferStatus = useStore((s) => s.updateOfferStatus);
   const prep = usePrepared()(a.prospectId);
   const syncFromBackend = useStore((s) => s.syncFromBackend);
+  const approvals = useStore((s) => s.actionApprovals ?? []);
+  const approval = approvals.find((x) => x.actionId === a.id);
+  const approved = approval?.status === 'APPROVED';
   const [confirm, setConfirm] = useState<null | 'contacted' | 'sent'>(null);
   const [copied, setCopied] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -98,8 +101,10 @@ function ActionButtons({ a, go, compact }: { a: RecommendedAction; go: (v: View)
   const doConfirm = async () => {
     setBusy(true);
     try {
-      if (confirm === 'contacted' && prospect) await updateProspectStatus(prospect.id, 'CONTACTED');
-      if (confirm === 'sent' && prep?.offer) await updateOfferStatus(prep.offer.id, 'SENT');
+      if (!approved || !approval) return;
+      if (confirm === 'contacted' && prospect) { await updateProspectStatus(prospect.id, 'CONTACTED'); await markActionExecuted(approval.id); }
+      if (confirm === 'sent' && prep?.offer) { await updateOfferStatus(prep.offer.id, 'SENT'); await markActionExecuted(approval.id); }
+      await syncFromBackend();
     } finally {
       setBusy(false);
       setConfirm(null);
@@ -136,19 +141,19 @@ function ActionButtons({ a, go, compact }: { a: RecommendedAction; go: (v: View)
           View demo
         </a>
       )}
-      <button className="btn big" disabled={approvalBusy} onClick={async () => { setApprovalBusy(true); setApprovalError(null); try { await requestActionApproval(a); await syncFromBackend(); } catch (e) { const message = e instanceof BackendError ? e.message : (e as Error).message; setApprovalError(message || 'Could not create approval request.'); } finally { setApprovalBusy(false); } }}>{approvalBusy ? 'Requesting…' : 'Request approval'}</button>
+      <button className="btn big" disabled={approvalBusy} onClick={async () => { setApprovalBusy(true); setApprovalError(null); try { await requestActionApproval(a); await syncFromBackend(); } catch (e) { const message = e instanceof BackendError ? e.message : (e as Error).message; setApprovalError(message || 'Could not create approval request.'); } finally { setApprovalBusy(false); } }}>{approvalBusy ? 'Requesting…' : approval?.status === 'APPROVED' ? 'Approved' : approval?.status === 'EXECUTED' ? 'Executed' : 'Request approval'}</button>
       {prep?.outreach && (
         <button className="btn big" onClick={copyMessage}>
           {copied ? 'Copied' : 'Copy message'}
         </button>
       )}
       {canMarkContacted && (
-        <button className="btn primary big" onClick={() => setConfirm('contacted')}>
+        <button className="btn primary big" disabled={!approved} onClick={() => setConfirm('contacted')}>
           Mark contacted
         </button>
       )}
       {canMarkSent && (
-        <button className="btn primary big" onClick={() => setConfirm('sent')}>
+        <button className="btn primary big" disabled={!approved} onClick={() => setConfirm('sent')}>
           Mark offer sent
         </button>
       )}
