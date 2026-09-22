@@ -24,7 +24,7 @@ const CATEGORIES: (Category | 'All')[] = [
   'Local / Real-World',
 ];
 
-export function OpportunityExplorer() {
+export function OpportunityExplorer({ onOpenProspects }: { onOpenProspects?: () => void } = {}) {
   const opportunities = useStore((s) => s.opportunities);
   const [drawerId, setDrawerId] = useState<string | null>(null);
 
@@ -229,7 +229,7 @@ export function OpportunityExplorer() {
         </div>
       )}
 
-      {drawerOpp && <OpportunityDrawer opp={drawerOpp} onClose={() => setDrawerId(null)} />}
+      {drawerOpp && <OpportunityDrawer opp={drawerOpp} onClose={() => setDrawerId(null)} onOpenProspects={() => { setDrawerId(null); onOpenProspects?.(); }} />}
     </div>
   );
 }
