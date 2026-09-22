@@ -18,7 +18,7 @@ import { AgentEngine } from '../../src/engine/agentEngine';
 import { SupabaseRepository } from '../../src/engine/supabaseRepository';
 import { D1Repository } from '../../src/engine/d1Repository';
 import type { EngineRepository } from '../../src/engine/repository';
-import type { ProspectStatus, OfferStatus, ProjectMilestoneKey, RealRevenueEntry } from '../../src/types';
+import type { ProspectStatus, OfferStatus, ProjectMilestoneKey, RealRevenueEntry, Opportunity, BusinessModel } from '../../src/types';
 import { computeProfit, generateLearningEvent, foldRealRevenueIntoMemory, computeCategoryRealWorldStats, statsForCategory } from '../../src/lib/realRevenue';
 import { researchProspect } from '../../src/services/prospectIntelligence';
 import { verifyProspect } from '../../src/services/prospectVerification';
@@ -1343,7 +1343,7 @@ export default {
         const { repo, tavily, brave } = buildEngine(env);
         if (!tavily?.connected && !brave?.connected) return json({ ok: false, error: 'no live search provider connected — connect Tavily or Brave before discovering real businesses' }, { status: 503 });
         const opportunities = (await repo.listOpportunities()).filter((o) => o.researchStage !== 'UNDISCOVERED');
-        const directAcquisitionOpportunity = {
+        const directAcquisitionOpportunity: Opportunity = {
           id: 'nwt-dev-local-business-acquisition',
           name: 'NWT Dev — Local Business Website & Digital Services',
           category: 'Services',
@@ -1364,7 +1364,7 @@ export default {
           riskLevel: 'Low',
           geographicRelevance: ['Zimbabwe'],
           evidenceTier: 'VERIFIED',
-          evidenceNotes: 'Operator-defined acquisition campaign based on NWT Dev services; individual businesses and contacts must still be verified from public sources.',
+          evidenceNotes: 'Operator-defined acquisition campaign. Individual businesses and contacts must still be verified from public sources.',
           successProbability: 0,
           revenuePotentialMonthlyMin: 0,
           revenuePotentialMonthlyMax: 0,
@@ -1376,11 +1376,44 @@ export default {
           dateResearched: null,
           executionBlocked: false,
           lifecycleState: 'VALIDATING',
-        } as any;
-        const selectedExisting = requestedOpportunityId ? opportunities.find((o) => o.id === requestedOpportunityId) : undefined;
-        const opportunity = selectedExisting || (opportunities.length
-          ? opportunities.sort((x,y) => (y.score?.total ?? 0) - (x.score?.total ?? 0))[0]
-          : directAcquisitionOpportunity);
+        };
+        const directAcquisitionModel: BusinessModel = {
+          id: 'nwt-dev-local-business-acquisition-model',
+          opportunityId: directAcquisitionOpportunity.id,
+          opportunityName: directAcquisitionOpportunity.name,
+          targetCustomer: 'Zimbabwean local businesses that need a stronger website or digital presence',
+          problem: 'Potential customers may have limited, outdated, or fragmented online presence.',
+          offer: 'a professional, mobile-friendly business website and digital presence setup',
+          whyTheyBuy: 'A clear online presence can make business information easier for prospective customers to find and contact.',
+          suggestedPrice: 150,
+          priceRationale: 'Starting price for a small first website engagement; final price depends on agreed scope.',
+          deliveryCostEstimate: 0,
+          expectedGrossMarginPct: 100,
+          acquisitionChannel: 'Verified public business contacts found through live web research',
+          salesMessage: 'Offer a concise, evidence-based website improvement proposal after reviewing the business presence.',
+          followUpSequence: ['Initial human-reviewed outreach', 'Follow up after a few days if appropriate', 'Stop if the business declines'],
+          objectionHandling: [{ objection: 'Price is too high', response: 'Offer a smaller first scope rather than inventing a discount or changing the facts.' }],
+          deliveryWorkflow: 'Verify business → research presence → prepare offer/demo → human outreach → agree scope → deliver → record real payment.',
+          timeToFirstSaleDaysEstimate: 14,
+          upsells: ['Maintenance and support', 'Content updates', 'Booking/contact integrations'],
+          recurringRevenueNote: 'Optional maintenance/support can be discussed after the initial project.',
+          expectedProfitFirstDeal: 150,
+          canScale: true,
+          scaleNote: 'Repeatable prospect research and standardized website delivery can support more clients.',
+          nextAction: 'Find and verify local businesses matching the operator-selected search query.',
+          confidence: 1,
+          generator: 'local-rule-engine',
+          generatedAt: Date.now(),
+          updatedAt: Date.now(),
+        };
+        const opportunity = requestedOpportunityId
+          ? opportunities.find((o) => o.id === requestedOpportunityId)
+          : directAcquisitionOpportunity;
+        if (!opportunity) return json({ ok: false, error: 'selected opportunity not found' }, { status: 404 });
+        if (opportunity.id === directAcquisitionOpportunity.id) {
+          await repo.upsertOpportunities([directAcquisitionOpportunity]);
+          await repo.upsertBusinessModels([directAcquisitionModel]);
+        }
         const models = await repo.listBusinessModels();
         const model = models.find((m) => m.opportunityId === opportunity.id);
         const existing = await repo.listProspects();
