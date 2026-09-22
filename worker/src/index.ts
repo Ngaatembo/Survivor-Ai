@@ -1196,6 +1196,40 @@ export default {
       }
     }
 
+    if (url.pathname === '/content/state' && req.method === 'GET') {
+      try {
+        const { repo } = buildEngine(env);
+        const raw = await repo.getKV('content_engine_state');
+        const state = raw ? JSON.parse(raw) : { version: 1, researchedAt: null, research: [], drafts: [] };
+        return json({ ok: true, state });
+      } catch (e) {
+        return json({ ok: false, error: (e as Error).message }, { status: 500 });
+      }
+    }
+
+    if (url.pathname === '/content/state' && req.method === 'POST') {
+      try {
+        const body: any = await req.json();
+        if (!body || typeof body !== 'object') {
+          return json({ ok: false, error: 'invalid content state' }, { status: 400 });
+        }
+        const research = Array.isArray(body.research) ? body.research.slice(0, 100) : [];
+        const drafts = Array.isArray(body.drafts) ? body.drafts.slice(0, 100) : [];
+        const state = {
+          version: 1,
+          researchedAt: typeof body.researchedAt === 'number' ? body.researchedAt : null,
+          research,
+          drafts,
+          updatedAt: Date.now(),
+        };
+        const { repo } = buildEngine(env);
+        await repo.setKV('content_engine_state', JSON.stringify(state));
+        return json({ ok: true, state });
+      } catch (e) {
+        return json({ ok: false, error: (e as Error).message }, { status: 500 });
+      }
+    }
+
     if (url.pathname === '/income/research' && req.method === 'POST') {
       try {
         let body: any = {};
