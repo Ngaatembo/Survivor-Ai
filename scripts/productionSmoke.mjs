@@ -99,6 +99,8 @@ await checkUnauthenticatedPost('/prospects/status', { prospectId: 'smoke_fake_pr
 
 await checkUnauthenticatedPost('/offers/status', { offerId: 'smoke_fake_offer', status: 'SENT' });
 
+await checkUnauthenticatedPost('/prospects/discover', { region: 'Harare', searchQuery: 'hotel' });
+
 await checkPost('/real-revenue', {}, 400, (body) => {
   if (body.ok !== false || typeof body.error !== 'string') throw new Error('/real-revenue invalid validation response');
 });
