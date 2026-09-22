@@ -8,7 +8,7 @@
  * ========================================================================== */
 import { useState } from 'react';
 import { useStore, useWalletTotals, backendConfigured } from '../store';
-import { demoUrl, requestActionApproval, reviewActionApproval } from '../services/backendApi';
+import { demoUrl, requestActionApproval, reviewActionApproval, BackendError } from '../services/backendApi';
 import { usd, usdWhole, timeAgo } from '../lib/format';
 import type { RecommendedAction } from '../types';
 import { salesReadiness } from '../lib/salesReadiness';
@@ -74,6 +74,7 @@ function ActionButtons({ a, go, compact }: { a: RecommendedAction; go: (v: View)
   const [copied, setCopied] = useState(false);
   const [busy, setBusy] = useState(false);
   const [approvalBusy, setApprovalBusy] = useState(false);
+  const [approvalError, setApprovalError] = useState<string | null>(null);
 
   const prospect = a.prospectId ? prospects.find((p) => p.id === a.prospectId) : undefined;
   const canMarkContacted = !compact && !!prospect && (prospect.status === 'DISCOVERED' || prospect.status === 'QUALIFIED');
@@ -126,6 +127,7 @@ function ActionButtons({ a, go, compact }: { a: RecommendedAction; go: (v: View)
 
   return (
     <div className="act-row">
+      {approvalError && <span className="muted small" role="alert">Approval failed: {approvalError}</span>}
       <button className="btn big" onClick={() => go(target)}>
         {openLabel}
       </button>
@@ -134,7 +136,7 @@ function ActionButtons({ a, go, compact }: { a: RecommendedAction; go: (v: View)
           View demo
         </a>
       )}
-      <button className="btn big" disabled={approvalBusy} onClick={async () => { setApprovalBusy(true); try { await requestActionApproval(a); await syncFromBackend(); } finally { setApprovalBusy(false); } }}>{approvalBusy ? 'Requesting…' : 'Request approval'}</button>
+      <button className="btn big" disabled={approvalBusy} onClick={async () => { setApprovalBusy(true); setApprovalError(null); try { await requestActionApproval(a); await syncFromBackend(); } catch (e) { const message = e instanceof BackendError ? e.message : (e as Error).message; setApprovalError(message || 'Could not create approval request.'); } finally { setApprovalBusy(false); } }}>{approvalBusy ? 'Requesting…' : 'Request approval'}</button>
       {prep?.outreach && (
         <button className="btn big" onClick={copyMessage}>
           {copied ? 'Copied' : 'Copy message'}
@@ -371,7 +373,7 @@ function ApprovalQueue() {
   if (!pending.length) return null;
   const review = async (id: string, decision: 'APPROVED' | 'REJECTED') => {
     setBusy(id);
-    try { await reviewActionApproval(id, decision); await useStore.getState().syncFromBackend(); } finally { setBusy(null); }
+    try { await reviewActionApproval(id, decision); await useStore.getState().syncFromBackend(); } catch (e) { const message = e instanceof BackendError ? e.message : (e as Error).message; useStore.setState({ actionError: `Approval review failed: ${message}`, actionSuccess: null }); } finally { setBusy(null); }
   };
   return (
     <section className="block">
