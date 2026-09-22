@@ -278,6 +278,184 @@ export default {
       return json({ ok: true, payment: finivexStatus(finivexConfig(env)) });
     }
 
+    if (url.pathname === '/payments/requests' && req.method === 'GET') {
+      try {
+        const { results } = await env.DB.prepare(
+          'SELECT * FROM payment_requests WHERE agent_id = ? ORDER BY created_at DESC LIMIT 100'
+        ).bind(env.AGENT_ID ?? 'agent-survive-01').all();
+        return json({ ok: true, requests: results });
+      } catch (e) {
+        return json({ ok: false, error: (e as Error).message }, { status: 500 });
+      }
+    }
+
+    if (url.pathname === '/payments/requests' && req.method === 'POST') {
+      let body: any;
+      try { body = await req.json(); } catch { return json({ ok: false, error: 'invalid JSON body' }, { status: 400 }); }
+      const clientName = typeof body?.clientName === 'string' ? body.clientName.trim() : '';
+      const description = typeof body?.description === 'string' ? body.description.trim() : '';
+      const amount = body?.amount;
+      const currency = body?.currency === 'ZWG' ? 'ZWG' : body?.currency === 'USD' ? 'USD' : null;
+      const paymentMethod = ['FINIVEX','ECOCASH','BANK','CASH','OTHER'].includes(body?.paymentMethod) ? body.paymentMethod : 'OTHER';
+      if (!clientName || !description) return json({ ok: false, error: 'clientName and description are required' }, { status: 400 });
+      if (typeof amount !== 'number' || !Number.isFinite(amount) || amount <= 0) return json({ ok: false, error: 'amount must be a positive number' }, { status: 400 });
+      if (!currency) return json({ ok: false, error: 'currency must be USD or ZWG' }, { status: 400 });
+      const now = new Date().toISOString();
+      const id = 'payreq_' + crypto.randomUUID();
+      try {
+        await env.DB.prepare(
+          `INSERT INTO payment_requests
+            (id, agent_id, client_name, amount, currency, description, payment_method, prospect_id, project_id, opportunity_id, status, created_at, updated_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'PENDING', ?, ?)`
+        ).bind(
+          id, env.AGENT_ID ?? 'agent-survive-01', clientName, amount, currency, description, paymentMethod,
+          typeof body.prospectId === 'string' ? body.prospectId : null,
+          typeof body.projectId === 'string' ? body.projectId : null,
+          typeof body.opportunityId === 'string' ? body.opportunityId : null,
+          now, now,
+        ).run();
+        return json({ ok: true, request: { id, clientName, amount, currency, description, paymentMethod, status: 'PENDING', createdAt: now, updatedAt: now } });
+      } catch (e) {
+        return json({ ok: false, error: (e as Error).message }, { status: 500 });
+      }
+    }
+
+    if (url.pathname === '/payments/requests/approve' && req.method === 'POST') {
+      let body: any;
+      try { body = await req.json(); } catch { return json({ ok: false, error: 'invalid JSON body' }, { status: 400 }); }
+      const id = typeof body?.requestId === 'string' ? body.requestId : '';
+      if (!id) return json({ ok: false, error: 'requestId is required' }, { status: 400 });
+      try {
+        const request = await env.DB.prepare('SELECT * FROM payment_requests WHERE id = ?').bind(id).first<any>();
+        if (!request) return json({ ok: false, error: 'payment request not found' }, { status: 404 });
+        if (request.status !== 'PENDING') return json({ ok: false, error: `payment request is already ${request.status}` }, { status: 409 });
+        const now = new Date().toISOString();
+        await env.DB.prepare('UPDATE payment_requests SET status = \'APPROVED\', approved_at = ?, updated_at = ? WHERE id = ?').bind(now, now, id).run();
+        return json({ ok: true, request: { ...request, status: 'APPROVED', approved_at: now, updated_at: now } });
+      } catch (e) {
+        return json({ ok: false, error: (e as Error).message }, { status: 500 });
+      }
+    }
+
+    if (url.pathname === '/payments/requests/cancel' && req.method === 'POST') {
+      let body: any;
+      try { body = await req.json(); } catch { return json({ ok: false, error: 'invalid JSON body' }, { status: 400 }); }
+      const id = typeof body?.requestId === 'string' ? body.requestId : '';
+      if (!id) return json({ ok: false, error: 'requestId is required' }, { status: 400 });
+      try {
+        const request = await env.DB.prepare('SELECT * FROM payment_requests WHERE id = ?').bind(id).first<any>();
+        if (!request) return json({ ok: false, error: 'payment request not found' }, { status: 404 });
+        if (request.status === 'PAID') return json({ ok: false, error: 'paid payment request cannot be cancelled' }, { status: 409 });
+        const now = new Date().toISOString();
+        await env.DB.prepare('UPDATE payment_requests SET status = \'CANCELLED\', updated_at = ? WHERE id = ?').bind(now, id).run();
+        return json({ ok: true });
+      } catch (e) {
+        return json({ ok: false, error: (e as Error).message }, { status: 500 });
+      }
+    }
+
+    if (url.pathname === '/payments/finivex/create-approved-link' && req.method === 'POST') {
+      let body: any;
+      try { body = await req.json(); } catch { return json({ ok: false, error: 'invalid JSON body' }, { status: 400 }); }
+      const id = typeof body?.requestId === 'string' ? body.requestId : '';
+      if (!id) return json({ ok: false, error: 'requestId is required' }, { status: 400 });
+      try {
+        const request = await env.DB.prepare('SELECT * FROM payment_requests WHERE id = ?').bind(id).first<any>();
+        if (!request) return json({ ok: false, error: 'payment request not found' }, { status: 404 });
+        if (request.payment_method !== 'FINIVEX') return json({ ok: false, error: 'payment request is not configured for Finivex' }, { status: 400 });
+        if (!['APPROVED','LINK_CREATED'].includes(request.status)) return json({ ok: false, error: 'payment request must be approved before creating a payment link' }, { status: 403 });
+        if (request.status === 'LINK_CREATED' && request.payment_link) return json({ ok: true, request, paymentLink: request.payment_link, note: 'Existing active payment link returned.' });
+        const config = finivexConfig(env);
+        if (!finivexStatus(config).configured) return json({ ok: false, error: 'Finivex credentials are not configured' }, { status: 503 });
+        const result = await createFinivexPaymentLink(config, {
+          amount: Number(request.amount),
+          currency: request.currency,
+          description: request.description,
+          customerEmail: typeof body.customerEmail === 'string' ? body.customerEmail.trim() : undefined,
+          customerPhone: typeof body.customerPhone === 'string' ? body.customerPhone.trim() : undefined,
+          expiresInMinutes: typeof body.expiresInMinutes === 'number' ? Math.max(5, Math.min(10080, Math.floor(body.expiresInMinutes))) : undefined,
+        });
+        const provider = result.body as any;
+        const data = provider?.data ?? {};
+        if (!result.ok || !data.paymentLink) {
+          await env.DB.prepare('UPDATE payment_requests SET status = \'FAILED\', updated_at = ? WHERE id = ?').bind(new Date().toISOString(), id).run();
+          return json({ ok: false, error: 'Finivex payment-link creation failed', provider, httpStatus: result.httpStatus }, { status: 502 });
+        }
+        const now = new Date().toISOString();
+        const linkId = 'fl_' + crypto.randomUUID();
+        const reference = data.reference ?? null;
+        await env.DB.prepare(
+          `INSERT INTO finivex_payment_links
+           (id, agent_id, transaction_id, provider_reference, amount, currency, description, customer_email, customer_phone, payment_link, status, provider_response, created_at, updated_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'ACTIVE', ?, ?, ?)`
+        ).bind(
+          linkId, env.AGENT_ID ?? 'agent-survive-01', reference ?? linkId, reference, request.amount, request.currency, request.description,
+          typeof body.customerEmail === 'string' ? body.customerEmail.trim() : null,
+          typeof body.customerPhone === 'string' ? body.customerPhone.trim() : null,
+          data.paymentLink, JSON.stringify(provider), now, now,
+        ).run();
+        await env.DB.prepare(
+          'UPDATE payment_requests SET status = \'LINK_CREATED\', finivex_link_id = ?, finivex_reference = ?, payment_link = ?, updated_at = ? WHERE id = ?'
+        ).bind(linkId, reference, data.paymentLink, now, id).run();
+        return json({ ok: true, requestId: id, paymentLink: data.paymentLink, reference, provider, note: 'Customer payment link created. Survivor has not moved money.' });
+      } catch (e) {
+        return json({ ok: false, error: (e as Error).message }, { status: 500 });
+      }
+    }
+
+    if (url.pathname === '/payments/requests/mark-paid' && req.method === 'POST') {
+      let body: any;
+      try { body = await req.json(); } catch { return json({ ok: false, error: 'invalid JSON body' }, { status: 400 }); }
+      const id = typeof body?.requestId === 'string' ? body.requestId : '';
+      if (!id) return json({ ok: false, error: 'requestId is required' }, { status: 400 });
+      try {
+        const request = await env.DB.prepare('SELECT * FROM payment_requests WHERE id = ?').bind(id).first<any>();
+        if (!request) return json({ ok: false, error: 'payment request not found' }, { status: 404 });
+        if (request.status === 'PAID') return json({ ok: true, alreadyPaid: true });
+        if (request.payment_method === 'FINIVEX') return json({ ok: false, error: 'Finivex payments are marked paid only after server-side provider verification' }, { status: 403 });
+        const now = new Date().toISOString();
+        await env.DB.prepare('UPDATE payment_requests SET status = \'PAID\', paid_at = ?, updated_at = ? WHERE id = ?').bind(now, now, id).run();
+        return json({ ok: true });
+      } catch (e) {
+        return json({ ok: false, error: (e as Error).message }, { status: 500 });
+      }
+    }
+
+    if (url.pathname === '/payments/finivex/webhook' && req.method === 'POST') {
+      let body: any;
+      try { body = await req.json(); } catch { return json({ ok: false, error: 'invalid JSON body' }, { status: 400 }); }
+      const transactionId = typeof body?.transactionId === 'string' ? body.transactionId.trim() : '';
+      if (!transactionId) return json({ ok: false, error: 'transactionId is required' }, { status: 400 });
+      try {
+        const config = finivexConfig(env);
+        if (!finivexStatus(config).configured) return json({ ok: false, error: 'Finivex credentials are not configured' }, { status: 503 });
+        const verified = await getFinivexPaymentStatus(config, transactionId);
+        const provider = verified.body as any;
+        const status = String(provider?.data?.status ?? body.status ?? '').toUpperCase();
+        const terminal = ['COMPLETED','FAILED','CANCELLED','EXPIRED','REFUNDED'].includes(status);
+        if (!verified.ok || !terminal) return json({ ok: true, accepted: true, verified: false, status }, { status: 202 });
+        const mapped = status === 'COMPLETED' ? 'PAID' : status;
+        const now = new Date().toISOString();
+        const link = await env.DB.prepare(
+          'SELECT * FROM finivex_payment_links WHERE transaction_id = ? OR provider_reference = ? LIMIT 1'
+        ).bind(transactionId, transactionId).first<any>();
+        if (link) {
+          await env.DB.prepare(
+            'UPDATE finivex_payment_links SET status = ?, provider_response = ?, updated_at = ?, paid_at = CASE WHEN ? = \'PAID\' THEN COALESCE(paid_at, ?) ELSE paid_at END WHERE id = ?'
+          ).bind(mapped, JSON.stringify(provider), now, mapped, now, link.id).run();
+          const reqRow = await env.DB.prepare('SELECT id FROM payment_requests WHERE finivex_link_id = ?').bind(link.id).first<any>();
+          if (reqRow) {
+            await env.DB.prepare(
+              'UPDATE payment_requests SET status = ?, paid_at = CASE WHEN ? = \'PAID\' THEN COALESCE(paid_at, ?) ELSE paid_at END, updated_at = ? WHERE id = ?'
+            ).bind(mapped, mapped, now, now, reqRow.id).run();
+          }
+        }
+        return json({ ok: true, accepted: true, verified: true, status: mapped });
+      } catch (e) {
+        return json({ ok: false, error: (e as Error).message }, { status: 500 });
+      }
+    }
+
     if (url.pathname === '/payments/finivex/payment-link' && req.method === 'POST') {
       const secret = req.headers.get('x-trigger-secret');
       if (!env.TRIGGER_SECRET || secret !== env.TRIGGER_SECRET) return json({ ok: false, error: 'unauthorized' }, { status: 401 });
@@ -290,7 +468,6 @@ export default {
       const config = finivexConfig(env);
       if (!finivexStatus(config).configured) return json({ ok: false, error: 'Finivex credentials are not configured' }, { status: 503 });
       try {
-        const transactionId = 'NWT-' + Date.now() + '-' + crypto.randomUUID().slice(0, 8);
         const description = typeof body.description === 'string' && body.description.trim() ? body.description.trim() : 'NWT Dev payment';
         const result = await createFinivexPaymentLink(config, {
           amount, currency, description,
@@ -303,8 +480,8 @@ export default {
         const data = provider?.data ?? {};
         const now = new Date().toISOString();
         await env.DB.prepare("INSERT INTO finivex_payment_links (id, agent_id, transaction_id, provider_reference, amount, currency, description, customer_email, customer_phone, payment_link, status, provider_response, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
-          .bind('fl_' + crypto.randomUUID(), env.AGENT_ID ?? 'agent-survive-01', transactionId, data.reference ?? data.orderId ?? null, amount, currency, description, typeof body.customerEmail === 'string' ? body.customerEmail.trim() : null, typeof body.customerPhone === 'string' ? body.customerPhone.trim() : null, data.paymentLink ?? null, result.ok ? 'ACTIVE' : 'FAILED', JSON.stringify(provider), now, now).run();
-        return json({ ok: result.ok, transactionId, paymentLink: data.paymentLink ?? null, provider, httpStatus: result.httpStatus, note: 'Payment-link creation does not move money. The customer must complete payment.' }, { status: result.ok ? 200 : 502 });
+          .bind('fl_' + crypto.randomUUID(), env.AGENT_ID ?? 'agent-survive-01', data.reference ?? ('fl_' + Date.now()), data.reference ?? data.orderId ?? null, amount, currency, description, typeof body.customerEmail === 'string' ? body.customerEmail.trim() : null, typeof body.customerPhone === 'string' ? body.customerPhone.trim() : null, data.paymentLink ?? null, result.ok ? 'ACTIVE' : 'FAILED', JSON.stringify(provider), now, now).run();
+        return json({ ok: result.ok, transactionId: data.reference ?? null, paymentLink: data.paymentLink ?? null, provider, httpStatus: result.httpStatus, note: 'Payment-link creation does not move money. The customer must complete payment.' }, { status: result.ok ? 200 : 502 });
       } catch (e) { return json({ ok: false, error: (e as Error).message }, { status: 500 }); }
     }
 

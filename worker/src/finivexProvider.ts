@@ -63,7 +63,7 @@ export async function createFinivexPaymentLink(
 ): Promise<FinivexPaymentLinkResult> {
   if (!input.amount || !Number.isFinite(input.amount) || input.amount <= 0) throw new Error('amount must be greater than 0');
   const baseUrl = config.baseUrl || DEFAULT_BASE_URL;
-  const response = await fetch(`${baseUrl.replace(/\\/$/, '')}/v1/payments/payment-link`, {
+  const response = await fetch(`${baseUrl.replace(/\/$/, '')}/v1/payments/payment-link`, {
     method: 'POST',
     headers: headers(config),
     body: JSON.stringify(input),
@@ -77,7 +77,7 @@ export async function getFinivexPaymentStatus(
 ): Promise<FinivexPaymentLinkResult> {
   if (!transactionId.trim()) throw new Error('transactionId is required');
   const baseUrl = config.baseUrl || DEFAULT_BASE_URL;
-  const response = await fetch(`${baseUrl.replace(/\\/$/, '')}/v1/payments/status?transactionId=${encodeURIComponent(transactionId)}`, {
+  const response = await fetch(`${baseUrl.replace(/\/$/, '')}/v1/payments/status?transactionId=${encodeURIComponent(transactionId)}`, {
     method: 'GET',
     headers: headers(config),
   });
