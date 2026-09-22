@@ -360,7 +360,7 @@ export function updateProjectOutcome(
 
 /** Phase 6: manually trigger deep research on one specific prospect right
  *  now, rather than waiting for the capped per-cycle automatic pass. */
-export function researchProspectNow(prospectId: string): Promise<{ ok: true; intelligence: ProspectIntelligence }> {
+export function researchProspectNow(prospectId: string): Promise<{ ok: true; prospect?: Prospect; intelligence: ProspectIntelligence }> {
   return postJson('/prospects/research', { prospectId });
 }
 
