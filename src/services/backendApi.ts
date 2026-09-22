@@ -327,6 +327,18 @@ async function postJson<T>(path: string, body: unknown): Promise<T> {
 /** CRM write path (Phase 3): record a real-world status change for a
  *  prospect. This is the only way a prospect ever advances past QUALIFIED —
  *  SURVIVE AI never contacts anyone or observes real replies itself. */
+export function generateOfferNow(prospectId: string): Promise<{ ok: true; offer: Offer; designBrief: DesignBrief; approvalAction: { actionId: string; actionKind: RecommendedAction['kind']; title: string; prospectId: string } }> {
+  return postJson('/offers/generate', { prospectId });
+}
+
+export function generateOutreachNow(prospectId: string): Promise<{ ok: true; outreach: OutreachMessageSet; approvalAction: { actionId: string; actionKind: RecommendedAction['kind']; title: string; prospectId: string } }> {
+  return postJson('/outreach/generate', { prospectId });
+}
+
+export function requestProspectActionApproval(input: { actionId: string; actionKind: RecommendedAction['kind']; title: string; prospectId: string; opportunityId?: string }): Promise<{ ok: true; approval: ActionApproval }> {
+  return postJson('/actions/approvals', input);
+}
+
 export function updateProspectStatus(
   prospectId: string,
   status: ProspectStatus,
