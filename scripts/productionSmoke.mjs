@@ -107,28 +107,35 @@ await checkPost('/treasury/spend-request', {}, 400, (body) => {
   if (body.ok !== false || typeof body.error !== 'string') throw new Error('/treasury/spend-request invalid validation response');
 });
 
-await check('/actions/approvals', (body, response) => {
-  if (response.status !== 401 || body.ok !== false || body.error !== 'operator authentication required') {
-    throw new Error('/actions/approvals should require operator authentication');
+async function checkUnauthenticatedPost(path, body) {
+  const response = await fetch(base + path, {
+    method: 'POST',
+    headers: { accept: 'application/json', 'content-type': 'application/json' },
+    body: JSON.stringify(body),
+    cache: 'no-store',
+  });
+  const text = await response.text();
+  let payload;
+  try { payload = JSON.parse(text); } catch { payload = null; }
+  if (response.status !== 401 || payload?.ok !== false || payload?.error !== 'operator authentication required') {
+    throw new Error(`${path} should reject unauthenticated operators: HTTP ${response.status}: ${text.slice(0, 500)}`);
   }
+  console.log(`SMOKE PASS ${path} unauthenticated rejection`);
+}
+
+await checkUnauthenticatedPost('/actions/approvals', {
+  actionId: 'smoke_fake_action',
+  actionKind: 'CONTACT_PROSPECT',
+  title: 'Smoke test',
 });
 
-await check('/actions/approvals/review', (body, response) => {
-  if (response.status !== 401 || body.ok !== false || body.error !== 'operator authentication required') {
-    throw new Error('/actions/approvals/review should require operator authentication');
-  }
-}, { method: 'POST', body: { approvalId: 'smoke_fake_approval', decision: 'REJECTED' } });
-
-await checkPost('/actions/approvals', {}, 400, (body) => {
-  if (body.ok !== false || typeof body.error !== 'string') throw new Error('/actions/approvals invalid validation response');
+await checkUnauthenticatedPost('/actions/approvals/review', {
+  approvalId: 'smoke_fake_approval',
+  decision: 'REJECTED',
 });
 
-await checkPost('/actions/approvals/review', {}, 400, (body) => {
-  if (body.ok !== false || typeof body.error !== 'string') throw new Error('/actions/approvals/review invalid validation response');
-});
-
-await checkPost('/actions/approvals/execute', {}, 400, (body) => {
-  if (body.ok !== false || typeof body.error !== 'string') throw new Error('/actions/approvals/execute invalid validation response');
+await checkUnauthenticatedPost('/actions/approvals/execute', {
+  approvalId: 'smoke_fake_approval',
 });
 
 console.log(`PRODUCTION SMOKE PASSED: ${base}`);
