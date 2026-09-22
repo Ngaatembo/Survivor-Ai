@@ -21,6 +21,7 @@ import type { EngineRepository } from '../../src/engine/repository';
 import type { ProspectStatus, OfferStatus, ProjectMilestoneKey, RealRevenueEntry } from '../../src/types';
 import { computeProfit, generateLearningEvent, foldRealRevenueIntoMemory, computeCategoryRealWorldStats, statsForCategory } from '../../src/lib/realRevenue';
 import { researchProspect } from '../../src/services/prospectIntelligence';
+import { verifyProspect } from '../../src/services/prospectVerification';
 import { generateProspectDemo } from '../../src/lib/demoGenerator';
 import { createLLMProvider } from '../../src/services/providers/llm';
 import { createSearchProviders } from '../../src/services/providers/search';
@@ -1026,6 +1027,55 @@ export default {
           createdAt: Date.now(),
         });
         return json({ ok: true, prospectId, status });
+      } catch (e) {
+        return json({ ok: false, error: (e as Error).message }, { status: 500 });
+      }
+    }
+
+    if (url.pathname === '/prospects/verify' && req.method === 'POST') {
+      // Human-triggered identity/contact consolidation. Searches independent
+      // public sources and persists the result; ambiguous contacts are never
+      // promoted into the CRM contact field.
+      let body: any;
+      try {
+        body = await req.json();
+      } catch {
+        return json({ ok: false, error: 'invalid JSON body' }, { status: 400 });
+      }
+      const { prospectId } = body ?? {};
+      if (typeof prospectId !== 'string' || !prospectId) {
+        return json({ ok: false, error: 'prospectId is required' }, { status: 400 });
+      }
+      try {
+        const { repo, tavily, brave } = buildEngine(env);
+        if (!tavily?.connected && !brave?.connected) {
+          return json({ ok: false, error: 'no live search provider connected — nothing real to verify' }, { status: 503 });
+        }
+        const prospects = await repo.listProspects();
+        const prospect = prospects.find((p) => p.id === prospectId);
+        if (!prospect) return json({ ok: false, error: `no prospect found with id ${prospectId}` }, { status: 404 });
+
+        const now = Date.now();
+        const balance = balanceFrom(await repo.listTransactions());
+        const state = await loadEconomyState(repo);
+        const ctx = {
+          state,
+          providers: { tavily, brave },
+          survivalStatus: computeSurvivalStatus(balance),
+          now,
+          cycleStartedAt: now,
+        };
+        const verified = await verifyProspect(ctx, prospect, now);
+        await saveEconomyState(repo, ctx.state);
+        await repo.upsertProspects([verified]);
+        await repo.appendProspectInteraction({
+          id: `pint_${crypto.randomUUID()}`,
+          prospectId,
+          kind: 'NOTE',
+          summary: `Manual identity/contact verification: ${verified.verification?.status ?? 'UNVERIFIED'} (${verified.verification?.confidence ?? 0}% confidence), ${verified.verification?.independentSources ?? 0} independent source(s), ${verified.verification?.contactSources ?? 0} contact source(s).`,
+          createdAt: now,
+        });
+        return json({ ok: true, prospect: verified });
       } catch (e) {
         return json({ ok: false, error: (e as Error).message }, { status: 500 });
       }
