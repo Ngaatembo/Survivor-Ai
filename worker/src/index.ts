@@ -57,6 +57,7 @@ import { finivexStatus, createFinivexPaymentLink, getFinivexPaymentStatus } from
 import { getWindsorIncomeSummary } from './windsorProvider';
 import { INCOME_CHANNEL_STRATEGIES, decideIncomeChannel } from '../../src/lib/incomeChannelBrain';
 import { buildForexResearchPackage, classifyForexSource, type ForexResearchFinding } from '../../src/lib/forexResearch';
+import { runUnifiedProspectResearch } from '../../src/services/unifiedProspectResearch';
 
 
 function finivexConfig(env: Env) {
