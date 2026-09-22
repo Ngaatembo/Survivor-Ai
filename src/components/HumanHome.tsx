@@ -341,6 +341,31 @@ function SalesReady({ go }: { go: (v: View) => void }) {
   );
 }
 
+function SurvivalScoreCard() {
+  const s = useStore((x) => x.survivalScore);
+  const live = useLiveState();
+  if (!s) return null;
+  const tone = s.status === 'ALIVE' ? 'green' : s.status === 'AT_RISK' ? 'amber' : s.status === 'CRITICAL' ? 'red' : 'gray';
+  return (
+    <section className="block">
+      <div className="card-head">
+        <div><h2>Survival score</h2><span className="faint small">Current operating resilience, not a success prediction.</span></div>
+        <DataStateBadge state={live} />
+      </div>
+      <div className="pulse-grid">
+        <Pulse label="Score" value={s.score + '/100'} />
+        <Pulse label="Cash strength" value={s.components.cash + '/100'} />
+        <Pulse label="Realized revenue" value={s.components.revenue + '/100'} />
+        <Pulse label="Pipeline" value={s.components.pipeline + '/100'} />
+      </div>
+      <div className="muted small" style={{ marginTop: 10 }}>Status: <strong>{s.status.replace('_', ' ')}</strong></div>
+      <ul className="away-list" style={{ marginTop: 8 }}>
+        {s.explanation.slice(0, 4).map((x) => <li key={x}>{x}</li>)}
+      </ul>
+    </section>
+  );
+}
+
 function SinceAway() {
   const cycles = useStore((s) => s.cycles);
   const prospects = useStore((s) => s.prospects);
@@ -535,6 +560,7 @@ export function HumanHome({ go }: { go: (v: View) => void }) {
   return (
     <div className="human-home">
       <Header />
+      <SurvivalScoreCard />
       <NextMoneyAction go={go} />
       <ActionCards go={go} />
       <SalesReady go={go} />
