@@ -476,6 +476,25 @@ export interface ContentEngineState {
   updatedAt?: number;
 }
 
+export interface ProspectDiscoveryResponse {
+  ok: true;
+  opportunityId: string;
+  opportunityName: string;
+  region: string;
+  searchQuery: string | null;
+  discovered: number;
+  verified: number;
+  rejectedUnverifiedOrConflicting: number;
+  queriesRun: number;
+  sourcesCount: number;
+  cacheHits: number;
+  prospects: Prospect[];
+}
+
+export function discoverProspectsNow(input?: { opportunityId?: string; region?: string; searchQuery?: string }): Promise<ProspectDiscoveryResponse> {
+  return postJson('/prospects/discover', input ?? {});
+}
+
 export function fetchActionApprovals(): Promise<{ ok: true; approvals: ActionApproval[] }> {
   return getJson('/actions/approvals');
 }
