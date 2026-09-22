@@ -51,7 +51,12 @@ import {
   lookupEcoCashSandboxTransaction,
   verifyEcoCashWebhook,
 } from './paymentProvider';
+import { finivexStatus, createFinivexPaymentLink, getFinivexPaymentStatus } from './finivexProvider';
 
+
+function finivexConfig(env: Env) {
+  return { baseUrl: env.FINIVEX_BASE_URL ?? 'https://gateway.finivex.online/api/pg', apiKey: env.FINIVEX_API_KEY, apiSecret: env.FINIVEX_API_SECRET };
+}
 
 function ecoCashConfig(env: Env) {
   return {
@@ -542,6 +547,7 @@ export default {
           search: Boolean(env.TAVILY_API_KEY || env.BRAVE_API_KEY),
           payments: {
             sandboxConfigured: ecoCashStatus(ecoCashConfig(env)).configured,
+            finivexConfigured: finivexStatus(finivexConfig(env)).configured,
             productionExecutionEnabled: false,
           },
         },
