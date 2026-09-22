@@ -107,6 +107,10 @@ await checkPost('/treasury/spend-request', {}, 400, (body) => {
   if (body.ok !== false || typeof body.error !== 'string') throw new Error('/treasury/spend-request invalid validation response');
 });
 
+await check('/prospects/discover-status', (body) => {
+  if (body.ok !== true || typeof body.enabled !== 'boolean') throw new Error('/prospects/discover-status invalid response');
+});
+
 await check('/actions/approvals', (body) => {
   if (body.ok !== true || !Array.isArray(body.approvals)) throw new Error('/actions/approvals invalid response');
 });
