@@ -344,6 +344,26 @@ function SalesReady({ go }: { go: (v: View) => void }) {
   );
 }
 
+function SurvivalRunHistory() {
+  const cycles = useStore((s) => s.cycles).slice().reverse().slice(0, 10);
+  const live = useLiveState();
+  return (
+    <section className="block">
+      <div className="card-head"><div><h2>Survival run history</h2><span className="faint small">Recent autonomous cycles, kept as an audit trail rather than replacing history with the latest recommendation.</span></div><DataStateBadge state={live} /></div>
+      {!cycles.length ? <p className="muted">No completed cycles recorded yet.</p> : (
+        <div className="action-list">
+          {cycles.map((c) => (
+            <div className="action-card" key={c.id}>
+              <div className="action-top"><span className="rank">#{c.index}</span><div className="action-title">{c.summary ?? 'Cycle completed'}</div><div className="action-ev">{c.experimentId ? 'Experiment' : 'Research'}</div></div>
+              <div className="muted small">{c.completedAt ? timeAgo(c.completedAt) : 'incomplete'} · {c.steps.filter((s) => s.status === 'done').length}/{c.steps.length} steps completed</div>
+            </div>
+          ))}
+        </div>
+      )}
+    </section>
+  );
+}
+
 function ApprovalQueue() {
   const approvals = useStore((s) => s.actionApprovals ?? []);
   const pending = approvals.filter((a) => a.status === 'PENDING');
@@ -593,6 +613,7 @@ export function HumanHome({ go }: { go: (v: View) => void }) {
       <Header />
       <SurvivalScoreCard />
       <ApprovalQueue />
+      <SurvivalRunHistory />
       <NextMoneyAction go={go} />
       <ActionCards go={go} />
       <SalesReady go={go} />
