@@ -418,8 +418,8 @@ export function recordTreasuryCapital(input: { amount: number; description?: str
   return postJson('/treasury/record-capital', input);
 }
 
-export function researchIncomeChannels(): Promise<{ ok: true; opportunities: IncomeChannelOpportunity[]; researchedAt: string }> {
-  return postJson('/income/research', {});
+export function researchIncomeChannels(channel?: string): Promise<{ ok: true; opportunities: IncomeChannelOpportunity[]; researchedAt: string }> {
+  return postJson('/income/research', channel ? { channel } : {});
 }
 
 
