@@ -73,15 +73,16 @@ function ActionButtons({ a, go, compact }: { a: RecommendedAction; go: (v: View)
   const approvals = useStore((s) => s.actionApprovals ?? []);
   const approval = approvals.find((x) => x.actionId === a.id);
   const approved = approval?.status === 'APPROVED';
-  const [confirm, setConfirm] = useState<null | 'contacted' | 'sent'>(null);
+  const [confirm, setConfirm] = useState<null | 'contacted' | 'followup' | 'sent'>(null);
   const [copied, setCopied] = useState(false);
   const [busy, setBusy] = useState(false);
   const [approvalBusy, setApprovalBusy] = useState(false);
   const [approvalError, setApprovalError] = useState<string | null>(null);
 
   const prospect = a.prospectId ? prospects.find((p) => p.id === a.prospectId) : undefined;
-  const canMarkContacted = !compact && !!prospect && (prospect.status === 'DISCOVERED' || prospect.status === 'QUALIFIED');
-  const canMarkSent = !compact && !!prep?.offer && prep.offer.status === 'DRAFT';
+  const canMarkContacted = !!prospect && (prospect.status === 'DISCOVERED' || prospect.status === 'QUALIFIED');
+  const canMarkFollowUp = !!prospect && ['CONTACTED', 'REPLIED', 'INTERESTED', 'PROPOSAL_SENT', 'NEGOTIATING'].includes(prospect.status);
+  const canMarkSent = !!prep?.offer && prep.offer.status === 'DRAFT';
 
   // Safe navigation only: the prospect drawer lives inside the Prospects view.
   const target: View = a.prospectId ? 'prospects' : a.kind === 'ADVANCE_PROJECT' ? 'projects' : 'explorer';
@@ -103,6 +104,7 @@ function ActionButtons({ a, go, compact }: { a: RecommendedAction; go: (v: View)
     try {
       if (!approved || !approval) return;
       if (confirm === 'contacted' && prospect) { await updateProspectStatus(prospect.id, 'CONTACTED'); await markActionExecuted(approval.id); }
+      if (confirm === 'followup' && prospect) { await updateProspectStatus(prospect.id, 'FOLLOW_UP'); await markActionExecuted(approval.id); }
       if (confirm === 'sent' && prep?.offer) { await updateOfferStatus(prep.offer.id, 'SENT'); await markActionExecuted(approval.id); }
       await syncFromBackend();
     } finally {
@@ -115,7 +117,7 @@ function ActionButtons({ a, go, compact }: { a: RecommendedAction; go: (v: View)
     return (
       <div className="confirm-row">
         <span>
-          {confirm === 'contacted' ? `Mark ${prospect?.businessName ?? 'this prospect'} as contacted?` : 'Mark this offer as sent?'}{' '}
+          {confirm === 'contacted' ? `Mark ${prospect?.businessName ?? 'this prospect'} as contacted?` : confirm === 'followup' ? `Mark ${prospect?.businessName ?? 'this prospect'} for follow-up?` : 'Mark this offer as sent?'}{' '}
           This only updates your records. Nothing is sent for you.
         </span>
         <div className="act-row">
@@ -141,18 +143,23 @@ function ActionButtons({ a, go, compact }: { a: RecommendedAction; go: (v: View)
           View demo
         </a>
       )}
-      <button className="btn big" disabled={approvalBusy} onClick={async () => { setApprovalBusy(true); setApprovalError(null); try { await requestActionApproval(a); await syncFromBackend(); } catch (e) { const message = e instanceof BackendError ? e.message : (e as Error).message; setApprovalError(message || 'Could not create approval request.'); } finally { setApprovalBusy(false); } }}>{approvalBusy ? 'Requesting…' : approval?.status === 'APPROVED' ? 'Approved' : approval?.status === 'EXECUTED' ? 'Executed' : 'Request approval'}</button>
+      <button className="btn big" disabled={approvalBusy || approval?.status === 'APPROVED' || approval?.status === 'EXECUTED'} onClick={async () => { setApprovalBusy(true); setApprovalError(null); try { await requestActionApproval(a); await syncFromBackend(); } catch (e) { const message = e instanceof BackendError ? e.message : (e as Error).message; setApprovalError(message || 'Could not create approval request.'); } finally { setApprovalBusy(false); } }}>{approvalBusy ? 'Requesting…' : approval?.status === 'APPROVED' ? 'Approved' : approval?.status === 'EXECUTED' ? 'Executed' : 'Request approval'}</button>
       {prep?.outreach && (
         <button className="btn big" onClick={copyMessage}>
           {copied ? 'Copied' : 'Copy message'}
         </button>
       )}
-      {canMarkContacted && (
+      {canMarkFollowUp && a.kind === 'FOLLOW_UP_PROSPECT' && (
+        <button className="btn primary big" disabled={!approved} onClick={() => setConfirm('followup')}>
+          Mark follow-up
+        </button>
+      )}
+      {canMarkContacted && a.kind === 'CONTACT_PROSPECT' && (
         <button className="btn primary big" disabled={!approved} onClick={() => setConfirm('contacted')}>
           Mark contacted
         </button>
       )}
-      {canMarkSent && (
+      {canMarkSent && a.kind === 'SEND_OFFER' && (
         <button className="btn primary big" disabled={!approved} onClick={() => setConfirm('sent')}>
           Mark offer sent
         </button>
