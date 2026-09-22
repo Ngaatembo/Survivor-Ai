@@ -94,6 +94,8 @@ export function App() {
   const prospects = useStore((s) => s.prospects);
   const projects = useStore((s) => s.projects);
   const backend = useStore((s) => s.backend);
+  const actionError = useStore((s) => s.actionError);
+  const actionSuccess = useStore((s) => s.actionSuccess);
 
   const drawerOpp = drawerId ? opportunities.find((o) => o.id === drawerId) ?? null : null;
 
@@ -160,6 +162,25 @@ export function App() {
       </aside>
 
       <div className="main">
+        {(actionError || actionSuccess) && (
+          <div
+            role="status"
+            aria-live="polite"
+            style={{
+              margin: '10px 14px 0',
+              padding: '10px 12px',
+              border: '1px solid var(--border)',
+              borderRadius: 8,
+              background: actionError ? 'rgba(220, 38, 38, 0.10)' : 'rgba(34, 197, 94, 0.10)',
+              color: actionError ? 'var(--red)' : 'var(--green)',
+              fontSize: 13,
+              lineHeight: 1.4,
+            }}
+          >
+            <strong>{actionError ? 'Action failed' : 'Action completed'}</strong>
+            <span style={{ marginLeft: 8 }}>{actionError ?? actionSuccess}</span>
+          </div>
+        )}
         <header className="topbar">
           <button className="menu-toggle" onClick={() => setNavOpen(true)} aria-label="Open menu">
             ☰
