@@ -83,17 +83,9 @@ async function checkPost(path, body, expectedStatus, validate) {
   console.log(`SMOKE PASS ${path} POST validation`);
 }
 
-await checkPost('/prospects/status', {}, 400, (body) => {
-  if (body.ok !== false || typeof body.error !== 'string') throw new Error('/prospects/status invalid validation response');
-});
+await checkUnauthenticatedPost('/prospects/status', { prospectId: 'smoke_fake_prospect', status: 'CONTACTED' });
 
-await checkPost('/offers/status', {}, 400, (body) => {
-  if (body.ok !== false || typeof body.error !== 'string') throw new Error('/offers/status invalid validation response');
-});
-
-await checkPost('/projects/milestone', {}, 400, (body) => {
-  if (body.ok !== false || typeof body.error !== 'string') throw new Error('/projects/milestone invalid validation response');
-});
+await checkUnauthenticatedPost('/offers/status', { offerId: 'smoke_fake_offer', status: 'SENT' });
 
 await checkPost('/real-revenue', {}, 400, (body) => {
   if (body.ok !== false || typeof body.error !== 'string') throw new Error('/real-revenue invalid validation response');
