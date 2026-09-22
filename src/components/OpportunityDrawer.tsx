@@ -27,6 +27,9 @@ export function OpportunityDrawer({ opp, onClose }: { opp: Opportunity; onClose:
   const offers = useStore((s) => s.offers.filter((o) => o.opportunityId === opp.id));
   const projects = useStore((s) => s.projects.filter((p) => p.opportunityId === opp.id));
   const realRevenue = useStore((s) => s.realRevenue.filter((r) => r.opportunityId === opp.id));
+  const prospectIntelligence = useStore((s) => s.prospectIntelligence.filter((i) => prospects.some((p) => p.id === i.prospectId)));
+  const marketPriceResearch = useStore((s) => s.marketPriceResearch.find((m) => m.opportunityId === opp.id));
+  const prospectDemos = useStore((s) => s.prospectDemos.filter((d) => prospects.some((p) => p.id === d.prospectId)));
   const updateProspectStatus = useStore((s) => s.updateProspectStatus);
   const hasReport = reports.some((r) => r.opportunityId === opp.id);
 
@@ -112,6 +115,43 @@ export function OpportunityDrawer({ opp, onClose }: { opp: Opportunity; onClose:
           )}
         </div>
 
+        <div className="drawer-section">
+          <h3>Sales readiness</h3>
+          {prospects.length === 0 ? (
+            <div className="empty">Find and verify a real prospect before sales execution can begin.</div>
+          ) : (
+            <div className="small">
+              {prospects.map((prospect) => {
+                const verified = prospect.verification?.status === 'VERIFIED' || prospect.verification?.status === 'PROVISIONAL';
+                const intelligence = prospectIntelligence.some((i) => i.prospectId === prospect.id);
+                const offer = offers.find((o) => o.prospectId === prospect.id);
+                const demo = prospectDemos.some((d) => d.prospectId === prospect.id);
+                const checks = [
+                  ['Identity/contact checked', verified],
+                  ['Business research gathered', intelligence],
+                  ['Market pricing researched', Boolean(marketPriceResearch && marketPriceResearch.sources.length)],
+                  ['Commercial model exists', Boolean(businessModel)],
+                  ['Offer drafted', Boolean(offer)],
+                  ['Prospect demo exists', demo],
+                ] as const;
+                return (
+                  <div key={prospect.id} className="source-item" style={{ alignItems: 'flex-start', marginBottom: 8 }}>
+                    <span className="src-kind">{prospect.status}</span>
+                    <div style={{ flex: 1 }}>
+                      <strong>{prospect.businessName}</strong>
+                      <div className="faint small" style={{ marginTop: 5 }}>
+                        {checks.map(([label, done]) => <div key={label}>{done ? '✓' : '○'} {label}</div>)}
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+          <div className="faint small mono" style={{ marginTop: 8 }}>
+            Readiness is evidence-based. A missing check means Survivor does not yet have enough stored evidence for that step.
+          </div>
+        </div>
         <div className="drawer-section">
           <h3>Sales execution</h3>
           {prospects.length === 0 ? (
