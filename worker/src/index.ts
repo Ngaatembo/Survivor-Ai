@@ -412,18 +412,52 @@ export default {
     if (url.pathname === '/health') {
       const backend = env.DB_BACKEND ?? 'd1';
       let lastCycle: Record<string, unknown> | null = null;
+      let schemaReady = true;
+      let missingTables: string[] = [];
       try {
         const { repo } = buildEngine(env);
         const raw = await repo.getKV('runtime:last_cycle');
         if (raw) lastCycle = JSON.parse(raw) as Record<string, unknown>;
       } catch {
-        // Health is deliberately liveness-first: a missing optional heartbeat
-        // must not turn a healthy Worker into a 500 response.
+        // Health remains liveness-first: an unavailable heartbeat should not
+        // turn the Worker into a 500 response.
+      }
+      if (backend === 'd1' && env.DB) {
+        try {
+          const requiredTables = [
+            'agents',
+            'opportunities',
+            'experiments',
+            'transactions',
+            'events',
+            'strategies',
+            'memories',
+            'cycles',
+            'reports',
+            'missions',
+            'kv_store',
+            'payment_intents',
+            'payment_provider_events',
+          ];
+          const placeholders = requiredTables.map(() => '?').join(',');
+          const rows = await env.DB
+            .prepare(`SELECT name FROM sqlite_master WHERE type = 'table' AND name IN (${placeholders})`)
+            .bind(...requiredTables)
+            .all<{ name: string }>();
+          const found = new Set(rows.results.map((row) => row.name));
+          missingTables = requiredTables.filter((name) => !found.has(name));
+          schemaReady = missingTables.length === 0;
+        } catch {
+          schemaReady = false;
+          missingTables = ['schema-check-failed'];
+        }
       }
       const lastCycleAt = typeof lastCycle?.at === 'string' ? Date.parse(lastCycle.at) : NaN;
       const ageMinutes = Number.isFinite(lastCycleAt) ? Math.max(0, (Date.now() - lastCycleAt) / 60000) : null;
       return json({
         ok: true,
+        ready: schemaReady,
+        schema: { ready: schemaReady, missingTables },
         service: 'survive-ai',
         time: new Date().toISOString(),
         runtime: {
