@@ -26,4 +26,9 @@ export interface Env {
   BRAVE_API_KEY?: string;
 
   TRIGGER_SECRET?: string;
+
+  // Finivex merchant credentials are Worker-only. Never expose the API secret to the browser.
+  FINIVEX_BASE_URL?: string;
+  FINIVEX_API_KEY?: string;
+  FINIVEX_API_SECRET?: string;
 }
