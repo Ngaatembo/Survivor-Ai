@@ -107,4 +107,16 @@ await checkPost('/treasury/spend-request', {}, 400, (body) => {
   if (body.ok !== false || typeof body.error !== 'string') throw new Error('/treasury/spend-request invalid validation response');
 });
 
+await check(base + '/actions/approvals', (body) => {
+  if (body.ok !== true || !Array.isArray(body.approvals)) throw new Error('/actions/approvals invalid response');
+});
+
+await checkPost('/actions/approvals', {}, 400, (body) => {
+  if (body.ok !== false || typeof body.error !== 'string') throw new Error('/actions/approvals invalid validation response');
+});
+
+await checkPost('/actions/approvals/review', {}, 400, (body) => {
+  if (body.ok !== false || typeof body.error !== 'string') throw new Error('/actions/approvals/review invalid validation response');
+});
+
 console.log(`PRODUCTION SMOKE PASSED: ${base}`);
