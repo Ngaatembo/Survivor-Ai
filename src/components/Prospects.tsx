@@ -71,17 +71,12 @@ export function Prospects() {
   }, [prospects, statusFilter, priorityFilter, q]);
 
   const drawerProspect = drawerId ? prospects.find((p) => p.id === drawerId) ?? null : null;
-  const opportunities = useStore((s) => s.opportunities);
   const syncFromBackend = useStore((s) => s.syncFromBackend);
   const discoverNow = async () => {
     setDiscoverBusy(true);
     setDiscoverMessage(null);
     try {
-      const target = opportunities
-        .filter((o) => o.researchStage !== 'UNDISCOVERED')
-        .sort((a, b) => (b.score?.total ?? 0) - (a.score?.total ?? 0))[0];
       const result = await discoverProspectsNow({
-        ...(target ? { opportunityId: target.id } : {}),
         region: region.trim() || 'Zimbabwe',
         searchQuery: searchQuery.trim() || undefined,
       });
