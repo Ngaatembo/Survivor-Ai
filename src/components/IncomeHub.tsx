@@ -53,6 +53,7 @@ export function IncomeHub() {
   const [channelResults, setChannelResults] = useState<Record<string, typeof incomeIntelligence>>({});
   const [strategy, setStrategy] = useState<IncomeStrategyResponse | null>(null);
   const [strategyBusy, setStrategyBusy] = useState(false);
+  const [selectedPlanKind, setSelectedPlanKind] = useState<string | null>(null);
   const runChannelResearch = async (channel: string) => {
     if (!backendConnected || channelBusy) return;
     setChannelBusy(channel);
@@ -71,6 +72,7 @@ export function IncomeHub() {
     setStrategyBusy(true);
     try {
       const result = await fetchIncomeStrategy(kind);
+      setSelectedPlanKind(kind);
       setStrategy((current) => {
         if (!current) return result;
         const next = [...current.strategies];
@@ -79,7 +81,7 @@ export function IncomeHub() {
           if (index >= 0) next[index] = item;
           else next.push(item);
         }
-        return { ...current, generatedAt: result.generatedAt, strategies: next, evidence: [...current.evidence, ...result.evidence], forex: result.forex };
+        return { ...current, generatedAt: result.generatedAt, strategies: next, evidence: [...current.evidence, ...result.evidence], forex: result.forex, channelPlans: result.channelPlans };
       });
     } catch (e) { setPaymentError((e as Error).message); }
     finally { setStrategyBusy(false); }
@@ -273,6 +275,20 @@ export function IncomeHub() {
           <div className="muted small" style={{ marginTop:6 }}>{s.nextExperiment}</div>
         </div>)}
       </div>}
+      {strategy?.channelPlans?.length > 0 && <Panel title="EXECUTION PLANS" style={{ marginTop: 12 }}>
+        <div className="grid cols-2">
+          {strategy.channelPlans.map((item) => <div key={item.kind} className="event" style={{ display:'block' }}>
+            <div style={{ display:'flex', justifyContent:'space-between', gap:8 }}><strong>{strategy.strategies.find((s) => s.kind === item.kind)?.name ?? item.kind}</strong><Badge tone={item.decision.lifecycle === 'PROVEN' ? 'green' : item.kind === 'TRADING_RESEARCH' ? 'red' : 'blue'}>{item.decision.lifecycle}</Badge></div>
+            <div className="muted small" style={{ marginTop:6 }}>{item.plan.objective}</div>
+            <div className="faint small" style={{ marginTop:6 }}><strong>Steps:</strong> {item.plan.steps.join(' → ')}</div>
+            <div className="faint small" style={{ marginTop:6 }}><strong>Human:</strong> {item.plan.humanActions.join(' · ')}</div>
+            <div className="faint small" style={{ marginTop:6 }}><strong>Success:</strong> {item.plan.successMetrics.join(' · ')}</div>
+            <div className="faint small" style={{ marginTop:6 }}><strong>Stop:</strong> {item.plan.stopConditions.join(' · ')}</div>
+            <div className="faint small mono" style={{ marginTop:6 }}>Observed: {item.plan.currentEvidence.realSales} sale(s) · {item.plan.currentEvidence.realRevenue.toFixed(2)} USD · data {item.plan.currentEvidence.dataQuality}</div>
+          </div>)}
+        </div>
+      </Panel>}
+
       {strategy?.forex && <div className="event" style={{ display:'block', marginTop:12 }}>
         <div style={{ display:'flex', justifyContent:'space-between', gap:8 }}><strong>Forex research: {strategy.forex.target}</strong><Badge tone={strategy.forex.status === 'FOUND' ? 'blue' : 'amber'}>{strategy.forex.status}</Badge></div>
         <div className="muted small" style={{ marginTop:6 }}>{strategy.forex.verificationNotes[0]}</div>
@@ -280,6 +296,29 @@ export function IncomeHub() {
         {strategy.forex.findings.slice(0,5).map((f,i) => <div key={i} className="faint small" style={{ marginTop:5 }}><strong>{f.title}</strong> · {f.sourceType} · <a href={f.sourceUrl} target="_blank" rel="noreferrer">source ↗</a></div>)}
       </div>}
     </Panel>
+
+    {strategy && selectedPlanKind && (() => {
+      const selected = strategy.channelPlans.find((p) => p.kind === selectedPlanKind);
+      if (!selected) return null;
+      const strategyMeta = strategy.strategies.find((s) => s.kind === selectedPlanKind);
+      return <Panel title={`CHANNEL EXECUTION PLAN — ${strategyMeta?.name ?? selectedPlanKind}`} style={{ marginTop: 14 }}>
+        <div className="info-banner"><strong>Objective:</strong> {selected.plan.objective}</div>
+        <div className="grid cols-2" style={{ marginTop: 10 }}>
+          <div className="event" style={{ display: 'block' }}><strong>Execution steps</strong>{selected.plan.steps.map((step, i) => <div key={step} className="faint small" style={{ marginTop: 7 }}>{i + 1}. {step}</div>)}</div>
+          <div className="event" style={{ display: 'block' }}><strong>What you must do</strong>{selected.plan.humanActions.map((action) => <div key={action} className="faint small" style={{ marginTop: 7 }}>• {action}</div>)}</div>
+        </div>
+        <div className="grid cols-3" style={{ marginTop: 10 }}>
+          <div className="event"><strong>Real sales</strong><div className="stat-value" style={{ fontSize: 20 }}>{selected.decision.realSales}</div></div>
+          <div className="event"><strong>Real revenue</strong><div className="stat-value" style={{ fontSize: 20 }}>{selected.decision.realRevenue.toFixed(2)}</div></div>
+          <div className="event"><strong>Data quality</strong><div className="stat-value" style={{ fontSize: 20 }}>{selected.plan.currentEvidence.dataQuality}</div></div>
+        </div>
+        <div className="grid cols-2" style={{ marginTop: 10 }}>
+          <div className="event" style={{ display: 'block' }}><strong>Evidence required</strong>{selected.plan.evidenceToCollect.map((x) => <div key={x} className="faint small" style={{ marginTop: 6 }}>• {x}</div>)}</div>
+          <div className="event" style={{ display: 'block' }}><strong>Stop conditions</strong>{selected.plan.stopConditions.map((x) => <div key={x} className="faint small" style={{ marginTop: 6 }}>• {x}</div>)}</div>
+        </div>
+        <div className="faint small" style={{ marginTop: 10 }}>Success is measured from observed customer responses, actual payments, delivery cost and time-to-payment — not forecasts.</div>
+      </Panel>;
+    })()}
 
     <Panel title="INCOME CHANNELS" right={<span className="faint small mono">{backendConnected ? 'LIVE EVIDENCE READY' : 'BACKEND REQUIRED'}</span>}>
       <div className="grid cols-2">{CHANNELS.map(([id, icon, name, desc, status, next, kind]) => {
