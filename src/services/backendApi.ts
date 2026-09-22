@@ -502,6 +502,8 @@ export interface WindsorIncomeSummary {
     facebook: Record<string, unknown>[];
     instagram: Record<string, unknown>[];
     tiktok: Record<string, unknown>[];
+    youtube: Record<string, unknown>[];
+    linkedin: Record<string, unknown>[];
   };
   errors: Record<string, string>;
 }
