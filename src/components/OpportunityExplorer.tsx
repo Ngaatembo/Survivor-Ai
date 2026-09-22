@@ -2,11 +2,16 @@ import { useMemo, useState } from 'react';
 import { useStore } from '../store';
 import { Badge, DataSourceBadge, EvidenceBadge, RecommendationBadge, ScoreRing } from './ui';
 import { capRange, dayRange } from '../lib/format';
-import type { Category } from '../types';
+import type { Category, OpportunityLifecycleState } from '../types';
 import { OpportunityDrawer } from './OpportunityDrawer';
 import { featureFlags } from '../config/env';
 
 type SortKey = 'score' | 'capital' | 'speed' | 'risk' | 'potential' | 'evidence';
+
+const LIFECYCLE_STATES: (OpportunityLifecycleState | 'ALL')[] = ['ALL', 'DISCOVERED', 'VALIDATING', 'PROVEN', 'SCALING', 'FAILED', 'ARCHIVED'];
+const LIFECYCLE_TONE: Record<OpportunityLifecycleState, 'green' | 'blue' | 'amber' | 'red' | 'gray' | 'purple'> = {
+  DISCOVERED: 'gray', VALIDATING: 'blue', PROVEN: 'green', SCALING: 'purple', FAILED: 'red', ARCHIVED: 'gray',
+};
 
 const CATEGORIES: (Category | 'All')[] = [
   'All',
@@ -30,10 +35,12 @@ export function OpportunityExplorer() {
   const [aiSuitableOnly, setAiSuitableOnly] = useState(false);
   const [discoveredOnly, setDiscoveredOnly] = useState(false);
   const [sort, setSort] = useState<SortKey>('score');
+  const [lifecycle, setLifecycle] = useState<OpportunityLifecycleState | 'ALL'>('ALL');
 
   const filtered = useMemo(() => {
     let list = opportunities.filter((o) => {
       if (discoveredOnly && o.researchStage === 'UNDISCOVERED') return false;
+      if (lifecycle !== 'ALL' && o.lifecycleState !== lifecycle) return false;
       if (category !== 'All' && o.category !== category) return false;
       if (o.capitalRequiredMin > maxCapital) return false;
       if (riskOnly && o.risk <= 3) return false;
@@ -67,10 +74,14 @@ export function OpportunityExplorer() {
       }
     });
     return list;
-  }, [opportunities, q, category, maxCapital, riskOnly, evidence, aiSuitableOnly, discoveredOnly, sort]);
+  }, [opportunities, q, category, maxCapital, riskOnly, evidence, aiSuitableOnly, discoveredOnly, sort, lifecycle]);
 
   const drawerOpp = drawerId ? opportunities.find((o) => o.id === drawerId) ?? null : null;
   const liveCount = opportunities.filter((o) => o.dataSource === 'LIVE').length;
+  const lifecycleCounts = LIFECYCLE_STATES.slice(1).reduce((acc, state) => {
+    acc[state] = opportunities.filter((o) => o.lifecycleState === state).length;
+    return acc;
+  }, {} as Record<OpportunityLifecycleState, number>);
 
   return (
     <div className="view-enter">
@@ -108,6 +119,13 @@ export function OpportunityExplorer() {
         <select className="select" value={category} onChange={(e) => setCategory(e.target.value as typeof category)}>
           {CATEGORIES.map((c) => (
             <option key={c} value={c}>{c}</option>
+          ))}
+        </select>
+        <select className="select" value={lifecycle} onChange={(e) => setLifecycle(e.target.value as typeof lifecycle)}>
+          {LIFECYCLE_STATES.map((state) => (
+            <option key={state} value={state}>
+              {state === 'ALL' ? 'Portfolio: all states' : `Portfolio: ${state} (${lifecycleCounts[state]})`}
+            </option>
           ))}
         </select>
         <select className="select" value={sort} onChange={(e) => setSort(e.target.value as SortKey)}>
@@ -151,6 +169,19 @@ export function OpportunityExplorer() {
         </label>
       </div>
 
+      <div className="chip-list" style={{ marginBottom: 12 }}>
+        {LIFECYCLE_STATES.slice(1).map((state) => (
+          <button
+            key={state}
+            className="btn small"
+            onClick={() => setLifecycle(lifecycle === state ? 'ALL' : state)}
+            title={`Show ${state.toLowerCase()} opportunities`}
+          >
+            {state} {lifecycleCounts[state]}
+          </button>
+        ))}
+      </div>
+
       <div className="faint small mono" style={{ marginBottom: 12 }}>
         {filtered.length} of {opportunities.length} opportunities
       </div>
@@ -179,6 +210,7 @@ export function OpportunityExplorer() {
                 <DataSourceBadge source={o.dataSource} />
                 <EvidenceBadge tier={o.evidenceTier} />
                 {o.executionBlocked && <Badge tone="purple">RESEARCH ONLY</Badge>}
+                <Badge tone={LIFECYCLE_TONE[o.lifecycleState]}>{o.lifecycleState}</Badge>
                 {o.researchStage === 'UNDISCOVERED' && <Badge tone="gray">UNDISCOVERED</Badge>}
               </div>
               <div className="opp-foot">
