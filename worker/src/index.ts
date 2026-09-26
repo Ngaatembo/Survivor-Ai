@@ -63,6 +63,7 @@ import { getWindsorIncomeSummary } from './windsorProvider';
 import { INCOME_CHANNEL_STRATEGIES, decideIncomeChannel } from '../../src/lib/incomeChannelBrain';
 import { buildForexResearchPackage, classifyForexSource, type ForexResearchFinding } from '../../src/lib/forexResearch';
 import { runUnifiedProspectResearch } from '../../src/services/unifiedProspectResearch';
+import { decideFinivexVerification, extractFinivexFacts } from '../../src/lib/revenueVerification';
 
 
 function finivexConfig(env: Env) {
@@ -404,7 +405,22 @@ async function ensureProductionCoreTables(db: D1Database): Promise<void> {
       final_score INTEGER NOT NULL,
       data_source TEXT NOT NULL DEFAULT 'SAMPLE',
       created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
+    )`),    db.prepare(`CREATE TABLE IF NOT EXISTS revenue_verifications (
+      id TEXT PRIMARY KEY,
+      agent_id TEXT NOT NULL,
+      revenue_entry_id TEXT NOT NULL,
+      method TEXT NOT NULL,
+      provider TEXT NOT NULL,
+      external_reference TEXT NOT NULL,
+      status TEXT NOT NULL,
+      verified_amount REAL,
+      currency TEXT,
+      reason TEXT NOT NULL,
+      evidence TEXT NOT NULL DEFAULT '{}',
+      checked_at TEXT NOT NULL,
+      created_at TEXT NOT NULL
     )`),
+
   ]);
 
   productionCoreTablesReady = true;
@@ -1969,6 +1985,95 @@ export default {
       }
     }
 
+    if (url.pathname === '/real-revenue/verifications' && req.method === 'GET') {
+      if (!(await requireOperator(req, env))) return json({ ok: false, error: 'operator authentication required' }, { status: 401 });
+      try {
+        const { results } = await env.DB.prepare(
+          'SELECT * FROM revenue_verifications WHERE agent_id = ? ORDER BY checked_at DESC LIMIT 200'
+        ).bind(env.AGENT_ID ?? 'agent-survive-01').all();
+        return json({ ok: true, verifications: results });
+      } catch (e) {
+        return json({ ok: false, error: (e as Error).message }, { status: 500 });
+      }
+    }
+
+    if (url.pathname === '/real-revenue/verify-finivex' && req.method === 'POST') {
+      if (!(await requireOperator(req, env))) return json({ ok: false, error: 'operator authentication required' }, { status: 401 });
+
+      let body: any;
+      try { body = await req.json(); } catch { return json({ ok: false, error: 'invalid JSON body' }, { status: 400 }); }
+
+      const revenueEntryId = typeof body?.revenueEntryId === 'string' ? body.revenueEntryId.trim() : '';
+      const transactionId = typeof body?.transactionId === 'string' ? body.transactionId.trim() : '';
+      if (!revenueEntryId || !transactionId) {
+        return json({ ok: false, error: 'revenueEntryId and transactionId are required' }, { status: 400 });
+      }
+
+      try {
+        const { repo } = buildEngine(env);
+        const entries = await repo.listRealRevenue();
+        const entry = entries.find((candidate) => candidate.id === revenueEntryId);
+        if (!entry) return json({ ok: false, error: 'real revenue entry not found' }, { status: 404 });
+
+        const config = finivexConfig(env);
+        if (!finivexStatus(config).configured) {
+          return json({ ok: false, error: 'Finivex credentials are not configured' }, { status: 503 });
+        }
+
+        const providerResult = await getFinivexPaymentStatus(config, transactionId);
+        const facts = extractFinivexFacts(providerResult.body);
+        const decision = decideFinivexVerification({
+          claimedAmount: entry.amountReceived,
+          claimedCurrency: entry.currency,
+          providerStatus: facts.status,
+          providerAmount: facts.amount,
+          providerCurrency: facts.currency,
+        });
+
+        const now = new Date().toISOString();
+        const verification = {
+          id: 'rvv_' + crypto.randomUUID(),
+          agent_id: env.AGENT_ID ?? 'agent-survive-01',
+          revenue_entry_id: entry.id,
+          method: 'FINIVEX_PROVIDER',
+          provider: 'FINIVEX',
+          external_reference: transactionId,
+          status: decision.status,
+          verified_amount: decision.verifiedAmount ?? null,
+          currency: decision.verifiedCurrency ?? null,
+          reason: decision.reason,
+          evidence: JSON.stringify({
+            providerHttpStatus: providerResult.httpStatus,
+            providerOk: providerResult.ok,
+            status: facts.status,
+            amount: facts.amount ?? null,
+            currency: facts.currency ?? null,
+          }),
+          checked_at: now,
+          created_at: now,
+        };
+
+        await env.DB.prepare(
+          `INSERT INTO revenue_verifications
+            (id, agent_id, revenue_entry_id, method, provider, external_reference, status,
+             verified_amount, currency, reason, evidence, checked_at, created_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+        ).bind(
+          verification.id, verification.agent_id, verification.revenue_entry_id,
+          verification.method, verification.provider, verification.external_reference,
+          verification.status, verification.verified_amount, verification.currency,
+          verification.reason, verification.evidence, verification.checked_at, verification.created_at,
+        ).run();
+
+        return json({
+          ok: true,
+          verification,
+          countsAsVerifiedRevenue: decision.status === 'VERIFIED',
+        }, { status: decision.status === 'VERIFIED' ? 200 : decision.status === 'PENDING' ? 202 : 409 });
+      } catch (e) {
+        return json({ ok: false, error: (e as Error).message }, { status: 502 });
+      }
+    }
     if (url.pathname === '/real-revenue' && req.method === 'POST') {
       // Real revenue is the first-dollar challenge's ground truth. Only an
       // authenticated operator may append an entry; unauthenticated writes
