@@ -104,9 +104,7 @@ await checkUnauthenticatedPost('/offers/status', { offerId: 'smoke_fake_offer', 
 
 await checkUnauthenticatedPost('/prospects/discover', { region: 'Harare', searchQuery: 'hotel' });
 
-await checkPost('/real-revenue', {}, 400, (body) => {
-  if (body.ok !== false || typeof body.error !== 'string') throw new Error('/real-revenue invalid validation response');
-});
+await checkUnauthenticatedPost('/real-revenue', {});
 
 await checkPost('/payments/requests', {}, 400, (body) => {
   if (body.ok !== false || typeof body.error !== 'string') throw new Error('/payments/requests invalid validation response');
