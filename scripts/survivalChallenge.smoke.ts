@@ -33,7 +33,7 @@ assert(waiting.phase === 'AWAITING_RESULT', 'execution must move to result wait'
 const success = recordChallengeResult(waiting, 'SUCCESS', 'Prospect replied and requested a proposal.', 3);
 assert(success.phase === 'COMPLETED', 'success must complete the challenge');
 
-const failed = recordChallengeResult(approved, 'FAILED', 'No response after the agreed test window.', 4);
+const failed = recordChallengeResult(waiting, 'FAILED', 'No response after the agreed test window.', 4);
 assert(failed.phase === 'FAILED', 'failure must preserve a failed outcome');
 
 const cancelled = cancelChallenge(challenge, 'Operator stopped the test.', 5);
