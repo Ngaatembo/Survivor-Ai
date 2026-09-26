@@ -299,6 +299,7 @@ export function computeCategoryRealWorldStats(
   opportunities: Opportunity[],
   prospects: Prospect[],
   realRevenue: RealRevenueEntry[],
+  verifiedRevenueEntryIds?: ReadonlySet<string>,
 ): CategoryRealWorldStats[] {
   const categoryOf = new Map(opportunities.map((o) => [o.id, o.category]));
   const byCategory = new Map<string, { won: number; lost: number; days: number[]; deals: number[]; profits: number[] }>();
@@ -313,6 +314,10 @@ export function computeCategoryRealWorldStats(
     byCategory.set(category, bucket);
   }
   for (const r of realRevenue) {
+    // When an evidence set is supplied, only independently verified payments
+    // may influence autonomous economic scoring/learning. Omitted preserves
+    // the existing analytics behavior for human-facing comparisons.
+    if (verifiedRevenueEntryIds && !verifiedRevenueEntryIds.has(r.id)) continue;
     const category = categoryOf.get(r.opportunityId);
     if (!category) continue;
     const bucket = byCategory.get(category) ?? { won: 0, lost: 0, days: [], deals: [], profits: [] };

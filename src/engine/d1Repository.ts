@@ -1602,6 +1602,13 @@ export class D1Repository implements EngineRepository {
     return results.map((r: any) => this.mapRealRevenue(r));
   }
 
+  async listVerifiedRevenueEntryIds(): Promise<string[]> {
+    const { results } = await this.db
+      .prepare("SELECT DISTINCT rv.revenue_entry_id FROM revenue_verifications rv JOIN real_revenue rr ON rr.id = rv.revenue_entry_id JOIN opportunities o ON o.id = rr.opportunity_id WHERE rv.agent_id = ? AND rv.status = 'VERIFIED'")
+      .bind(this.agentId)
+      .all();
+    return [...new Set(results.map((r: any) => String(r.revenue_entry_id)).filter(Boolean))];
+  }
   async addRealRevenueEntry(entry: RealRevenueEntry): Promise<void> {
     // Append-only, per the design constraint — always an INSERT, never an
     // upsert/update. Auditable ledger of actual money received.

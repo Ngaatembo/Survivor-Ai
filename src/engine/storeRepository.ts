@@ -313,6 +313,10 @@ export function createStoreRepository(get: Get, set: Set, reseed: () => StateSha
       realRevenue = [entry, ...realRevenue];
     },
 
+    async listVerifiedRevenueEntryIds() {
+      // No provider evidence exists in browser/local mode; fail closed.
+      return [];
+    },
     async listLearningEvents() {
       return learningEvents;
     },

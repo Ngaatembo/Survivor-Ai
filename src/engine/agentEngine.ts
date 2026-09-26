@@ -326,10 +326,12 @@ export class AgentEngine {
       // Phase 5 §18 — blend in the real-world track record per category
       // (close rate, actual time-to-revenue) once enough real data exists;
       // see lib/realRevenue.ts for the exact, explainable blending rule.
+      const verifiedRevenueEntryIds = new Set(await this.repo.listVerifiedRevenueEntryIds());
       const categoryStats = computeCategoryRealWorldStats(
         opportunities,
         await this.repo.listProspects(),
         await this.repo.listRealRevenue(),
+        verifiedRevenueEntryIds,
       );
       const scored = scoreAll(opportunities, categoryStats);
       await this.repo.upsertOpportunities(scored);
@@ -349,10 +351,12 @@ export class AgentEngine {
     await hooks.setActivity?.('Ranking candidates by risk-adjusted return…', 'RANK');
     {
       opportunities = await this.repo.listOpportunities();
+      const verifiedRevenueEntryIds = new Set(await this.repo.listVerifiedRevenueEntryIds());
       const categoryStats = computeCategoryRealWorldStats(
         opportunities,
         await this.repo.listProspects(),
         await this.repo.listRealRevenue(),
+        verifiedRevenueEntryIds,
       );
       const ranked = rankOpportunities(opportunities, categoryStats).map((o) =>
         o.researchStage === 'UNDISCOVERED' || o.researchStage === 'DISCOVERED'
@@ -568,11 +572,15 @@ export class AgentEngine {
           (o) => o.researchStage !== 'UNDISCOVERED',
         );
         const allExperiments = await this.repo.listExperiments();
-        const learningEvents = await this.repo.listLearningEvents();
+        const verifiedRevenueEntryIdsForLearning = new Set(await this.repo.listVerifiedRevenueEntryIds());
+        const learningEvents = (await this.repo.listLearningEvents()).filter((event) =>
+          verifiedRevenueEntryIdsForLearning.has(event.refId),
+        );
         const categoryStatsForDecisions = computeCategoryRealWorldStats(
           researched,
           await this.repo.listProspects(),
           await this.repo.listRealRevenue(),
+          verifiedRevenueEntryIdsForLearning,
         );
         const changedOpps: Opportunity[] = [];
         let promotions = 0;
@@ -633,6 +641,7 @@ export class AgentEngine {
           const existingProspects = await this.repo.listProspects();
           const allOppsForStats = await this.repo.listOpportunities();
           const realRevenueForStats = await this.repo.listRealRevenue();
+          const verifiedRevenueEntryIdsForProspects = new Set(await this.repo.listVerifiedRevenueEntryIds());
           let newProspectsCount = 0;
           let highPriorityCount = 0;
           for (const opp of pursuable) {
@@ -644,7 +653,12 @@ export class AgentEngine {
             // rate into new prospects' probabilityOfClose from the moment
             // they're discovered, once enough real data exists.
             const categoryStats = statsForCategory(
-              computeCategoryRealWorldStats(allOppsForStats, existingProspects, realRevenueForStats),
+              computeCategoryRealWorldStats(
+                allOppsForStats,
+                existingProspects,
+                realRevenueForStats,
+                verifiedRevenueEntryIdsForProspects,
+              ),
               opp.category,
             );
             const { prospects: discoveredProspects, sourcesCount } = await discoverProspects(searchCtx, opp, model, existingNames, categoryStats);

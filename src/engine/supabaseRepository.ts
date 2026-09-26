@@ -1282,6 +1282,15 @@ export class SupabaseRepository implements EngineRepository {
     return (data ?? []).map((r: any) => this.mapRealRevenue(r));
   }
 
+  async listVerifiedRevenueEntryIds(): Promise<string[]> {
+    const { data, error } = await this.db
+      .from('revenue_verifications')
+      .select('revenue_entry_id')
+      .eq('agent_id', this.agentId)
+      .eq('status', 'VERIFIED');
+    if (error) throw new Error(error.message);
+    return [...new Set((data ?? []).map((r: any) => String(r.revenue_entry_id)).filter(Boolean))];
+  }
   async addRealRevenueEntry(entry: RealRevenueEntry): Promise<void> {
     // Append-only: always an insert, never an upsert/update.
     const row = {
