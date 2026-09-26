@@ -57,6 +57,7 @@ const checks = [
     ok:
       has(worker, "url.pathname === '/real-revenue/verify-finivex' && req.method === 'POST'") &&
       has(worker, "url.pathname === '/real-revenue/verifications' && req.method === 'GET'") &&
+      has(worker, "url.pathname === '/real-revenue/first-dollar' && req.method === 'GET'") &&
       has(worker, "extractFinivexFacts") &&
       has(worker, "decideFinivexVerification"),
   },
