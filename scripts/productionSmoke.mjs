@@ -56,7 +56,8 @@ await check('/state', (body) => {
   if (!body.agent || typeof body.agent.id !== 'string') throw new Error('/state missing agent');
 });
 
-await checkUnauthenticatedPost('/payments/requests', {}); throw new Error('/payments/requests ok=false');
+await check('/payments/requests', (body) => {
+  if (body.ok !== true) throw new Error('/payments/requests ok=false');
   if (!Array.isArray(body.requests)) throw new Error('/payments/requests requests is not an array');
 });
 
