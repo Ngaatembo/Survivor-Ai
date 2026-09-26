@@ -89,7 +89,7 @@ export function SurvivalMeter() {
     </div>
   );
 }
-}{firstDollar.recordedRevenue.toFixed(2)} / {'
+ + firstDollar.recordedRevenue.toFixed(2)} / {'
         <div className={`meter-fill ${tone}`} style={{ width: `${pct}%` }} />
         <div className="meter-marker" style={{ left: `${markerPct}%` }} title={`Survival threshold $${threshold}`} />
       </div>
@@ -121,14 +121,46 @@ export function SurvivalMeter() {
     </div>
   );
 }
-}{firstDollar.target.toFixed(2)}
+ + firstDollar.target.toFixed(2)}
           </div>
         </div>
         <div className="small muted" style={{ marginTop: 5 }}>
           {firstDollar.reached
             ? 'Recorded in the authenticated real-revenue ledger. Simulation money does not count.'
             : firstDollar.remaining > 0
-              ? `${firstDollar.remaining.toFixed(2)} remaining. Only recorded real transactions count.`
+              ? '
+        <div className={`meter-fill ${tone}`} style={{ width: `${pct}%` }} />
+        <div className="meter-marker" style={{ left: `${markerPct}%` }} title={`Survival threshold $${threshold}`} />
+      </div>
+      <div className="meter-labels">
+        <span>$0.00</span>
+        <span style={{ color: 'var(--amber)' }}>threshold {usd(threshold)}</span>
+        <span>{usd(balance)}</span>
+      </div>
+      <div style={{ marginTop: 10, display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
+        <div>
+          <div className="mono-label">Estimated runway</div>
+          <div className="num" style={{ fontSize: 15, marginTop: 2 }}>
+            {balance <= 0
+              ? '—'
+              : runwayDays === null
+                ? 'no burn yet'
+                : runwayDays < 7
+                  ? `< 7 days`
+                  : `~${runwayDays} days`}
+          </div>
+        </div>
+        <div style={{ textAlign: 'right' }}>
+          <div className="mono-label">Burn / cycle (avg)</div>
+          <div className="num" style={{ fontSize: 15, marginTop: 2 }}>
+            {avgBurn > 0 ? usd(avgBurn) : '—'}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+ + firstDollar.remaining.toFixed(2) + ' remaining. Only recorded real transactions count.'
               : 'Ready for the first recorded transaction.'}
         </div>
       </div>
