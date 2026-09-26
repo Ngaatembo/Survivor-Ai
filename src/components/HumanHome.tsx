@@ -14,6 +14,7 @@ import type { RecommendedAction } from '../types';
 import { salesReadiness } from '../lib/salesReadiness';
 import type { View } from '../App';
 import { DataStateBadge, type DataState } from './ui2';
+import { SurvivalChallengePanel } from './SurvivalChallengePanel';
 import { buildEconomicMemory } from '../lib/economicMemory';
 
 const DAY = 24 * 60 * 60 * 1000;
@@ -629,6 +630,7 @@ export function HumanHome({ go }: { go: (v: View) => void }) {
       <ApprovalQueue />
       <SurvivalRunHistory />
       <NextMoneyAction go={go} />
+      <SurvivalChallengePanel />
       <ActionCards go={go} />
       <SalesReady go={go} />
       <SinceAway />
