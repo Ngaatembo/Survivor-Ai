@@ -64,6 +64,7 @@ import { INCOME_CHANNEL_STRATEGIES, decideIncomeChannel } from '../../src/lib/in
 import { buildForexResearchPackage, classifyForexSource, type ForexResearchFinding } from '../../src/lib/forexResearch';
 import { runUnifiedProspectResearch } from '../../src/services/unifiedProspectResearch';
 import { decideFinivexVerification, extractFinivexFacts } from '../../src/lib/revenueVerification';
+import { evaluateVerifiedFirstDollarChallenge } from '../../src/lib/firstDollar';
 
 
 function finivexConfig(env: Env) {
@@ -1986,6 +1987,23 @@ export default {
       }
     }
 
+    if (url.pathname === '/real-revenue/first-dollar' && req.method === 'GET') {
+      if (!(await requireOperator(req, env))) return json({ ok: false, error: 'operator authentication required' }, { status: 401 });
+      try {
+        const { repo } = buildEngine(env);
+        const [entries, verifiedRows] = await Promise.all([
+          repo.listRealRevenue(),
+          env.DB.prepare(
+            "SELECT revenue_entry_id FROM revenue_verifications WHERE agent_id = ? AND status = 'VERIFIED'"
+          ).bind(env.AGENT_ID ?? 'agent-survive-01').all<{ revenue_entry_id: string }>(),
+        ]);
+        const verifiedIds = new Set(verifiedRows.results.map((row) => row.revenue_entry_id));
+        const challenge = evaluateVerifiedFirstDollarChallenge(entries, verifiedIds);
+        return json({ ok: true, ...challenge, verifiedEntryCount: verifiedIds.size });
+      } catch (e) {
+        return json({ ok: false, error: (e as Error).message }, { status: 500 });
+      }
+    }
     if (url.pathname === '/real-revenue/verifications' && req.method === 'GET') {
       if (!(await requireOperator(req, env))) return json({ ok: false, error: 'operator authentication required' }, { status: 401 });
       try {
