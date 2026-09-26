@@ -641,6 +641,7 @@ export class AgentEngine {
           const existingProspects = await this.repo.listProspects();
           const allOppsForStats = await this.repo.listOpportunities();
           const realRevenueForStats = await this.repo.listRealRevenue();
+          const verifiedRevenueEntryIdsForProspects = new Set(await this.repo.listVerifiedRevenueEntryIds());
           let newProspectsCount = 0;
           let highPriorityCount = 0;
           for (const opp of pursuable) {
@@ -652,7 +653,12 @@ export class AgentEngine {
             // rate into new prospects' probabilityOfClose from the moment
             // they're discovered, once enough real data exists.
             const categoryStats = statsForCategory(
-              computeCategoryRealWorldStats(allOppsForStats, existingProspects, realRevenueForStats),
+              computeCategoryRealWorldStats(
+                allOppsForStats,
+                existingProspects,
+                realRevenueForStats,
+                verifiedRevenueEntryIdsForProspects,
+              ),
               opp.category,
             );
             const { prospects: discoveredProspects, sourcesCount } = await discoverProspects(searchCtx, opp, model, existingNames, categoryStats);
