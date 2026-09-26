@@ -2456,6 +2456,7 @@ export default {
     }
 
     if (url.pathname === '/survival-challenge' && req.method === 'GET') {
+      if (!(await requireOperator(req, env))) return json({ ok: false, error: 'operator authentication required' }, { status: 401 });
       try {
         const { repo } = buildEngine(env);
         const challenge = parseChallenge(await repo.getKV(SURVIVAL_CHALLENGE_KEY));
