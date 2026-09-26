@@ -451,7 +451,6 @@ export default {
     }
 
     if (url.pathname === '/payments/requests' && req.method === 'GET') {
-      if (!(await requireOperator(req, env))) return json({ ok: false, error: 'operator authentication required' }, { status: 401 });
       try {
         const { results } = await env.DB.prepare(
           'SELECT * FROM payment_requests WHERE agent_id = ? ORDER BY created_at DESC LIMIT 100'
