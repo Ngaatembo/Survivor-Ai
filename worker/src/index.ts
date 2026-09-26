@@ -462,6 +462,7 @@ export default {
     }
 
     if (url.pathname === '/payments/requests' && req.method === 'POST') {
+      if (!(await requireOperator(req, env))) return json({ ok: false, error: 'operator authentication required' }, { status: 401 });
       let body: any;
       try { body = await req.json(); } catch { return json({ ok: false, error: 'invalid JSON body' }, { status: 400 }); }
       const clientName = typeof body?.clientName === 'string' ? body.clientName.trim() : '';
@@ -493,6 +494,7 @@ export default {
     }
 
     if (url.pathname === '/payments/requests/approve' && req.method === 'POST') {
+      if (!(await requireOperator(req, env))) return json({ ok: false, error: 'operator authentication required' }, { status: 401 });
       let body: any;
       try { body = await req.json(); } catch { return json({ ok: false, error: 'invalid JSON body' }, { status: 400 }); }
       const id = typeof body?.requestId === 'string' ? body.requestId : '';
@@ -510,6 +512,7 @@ export default {
     }
 
     if (url.pathname === '/payments/requests/cancel' && req.method === 'POST') {
+      if (!(await requireOperator(req, env))) return json({ ok: false, error: 'operator authentication required' }, { status: 401 });
       let body: any;
       try { body = await req.json(); } catch { return json({ ok: false, error: 'invalid JSON body' }, { status: 400 }); }
       const id = typeof body?.requestId === 'string' ? body.requestId : '';
@@ -527,6 +530,7 @@ export default {
     }
 
     if (url.pathname === '/payments/finivex/create-approved-link' && req.method === 'POST') {
+      if (!(await requireOperator(req, env))) return json({ ok: false, error: 'operator authentication required' }, { status: 401 });
       let body: any;
       try { body = await req.json(); } catch { return json({ ok: false, error: 'invalid JSON body' }, { status: 400 }); }
       const id = typeof body?.requestId === 'string' ? body.requestId : '';
@@ -576,6 +580,7 @@ export default {
     }
 
     if (url.pathname === '/payments/requests/mark-paid' && req.method === 'POST') {
+      if (!(await requireOperator(req, env))) return json({ ok: false, error: 'operator authentication required' }, { status: 401 });
       let body: any;
       try { body = await req.json(); } catch { return json({ ok: false, error: 'invalid JSON body' }, { status: 400 }); }
       const id = typeof body?.requestId === 'string' ? body.requestId : '';
