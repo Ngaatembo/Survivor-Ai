@@ -1519,6 +1519,7 @@ export default {
       } catch (e) { return json({ ok: false, error: (e as Error).message }, { status: 500 }); }
     }
     if (url.pathname === '/offers/generate' && req.method === 'POST') {
+      if (!(await requireOperator(req, env))) return json({ ok: false, error: 'operator authentication required' }, { status: 401 });
       let body: any;
       try { body = await req.json(); } catch { return json({ ok: false, error: 'invalid JSON body' }, { status: 400 }); }
       const prospectId = typeof body?.prospectId === 'string' ? body.prospectId : '';
@@ -1552,6 +1553,7 @@ export default {
     }
 
     if (url.pathname === '/outreach/generate' && req.method === 'POST') {
+      if (!(await requireOperator(req, env))) return json({ ok: false, error: 'operator authentication required' }, { status: 401 });
       let body: any;
       try { body = await req.json(); } catch { return json({ ok: false, error: 'invalid JSON body' }, { status: 400 }); }
       const prospectId = typeof body?.prospectId === 'string' ? body.prospectId : '';
@@ -1942,6 +1944,7 @@ export default {
     }
 
     if (url.pathname === '/projects/milestone' && req.method === 'POST') {
+      if (!(await requireOperator(req, env))) return json({ ok: false, error: 'operator authentication required' }, { status: 401 });
       // Same pattern — a human advances a delivery project's milestone.
       let body: any;
       try {
@@ -2072,6 +2075,7 @@ export default {
     }
 
     if (url.pathname === '/projects/outcome' && req.method === 'POST') {
+      if (!(await requireOperator(req, env))) return json({ ok: false, error: 'operator authentication required' }, { status: 401 });
       // Real-world outcome tracking (Phase 4, §15) — satisfaction, repeat
       // purchase, referral. Optional fields, filled in whenever known.
       let body: any;
@@ -2115,6 +2119,7 @@ export default {
     }
 
     if (url.pathname === '/treasury/record-capital' && req.method === 'POST') {
+      if (!(await requireOperator(req, env))) return json({ ok: false, error: 'operator authentication required' }, { status: 401 });
       // Human records money already allocated to Survivor's operating budget.
       // This is accounting only: no bank/EcoCash/Finivex transfer is initiated.
       let body: any;
@@ -2150,6 +2155,7 @@ export default {
     }
 
     if (url.pathname === '/treasury/policy' && req.method === 'POST') {
+      if (!(await requireOperator(req, env))) return json({ ok: false, error: 'operator authentication required' }, { status: 401 });
       let body: any;
       try { body = await req.json(); } catch { return json({ ok: false, error: 'invalid JSON body' }, { status: 400 }); }
       try {
@@ -2175,6 +2181,7 @@ export default {
     }
 
     if (url.pathname === '/treasury/spend-request' && req.method === 'POST') {
+      if (!(await requireOperator(req, env))) return json({ ok: false, error: 'operator authentication required' }, { status: 401 });
       let body: any;
       try { body = await req.json(); } catch { return json({ ok: false, error: 'invalid JSON body' }, { status: 400 }); }
       if (typeof body?.vendor !== 'string' || typeof body?.purpose !== 'string' || typeof body?.category !== 'string' || typeof body?.amount !== 'number') {
@@ -2218,6 +2225,7 @@ export default {
     }
 
     if (url.pathname === '/treasury/spend-request/approve' && req.method === 'POST') {
+      if (!(await requireOperator(req, env))) return json({ ok: false, error: 'operator authentication required' }, { status: 401 });
       let body: any;
       try { body = await req.json(); } catch { return json({ ok: false, error: 'invalid JSON body' }, { status: 400 }); }
       if (typeof body?.requestId !== 'string' || !body.requestId) return json({ ok: false, error: 'requestId is required' }, { status: 400 });
@@ -2247,6 +2255,7 @@ export default {
     }
 
     if (url.pathname === '/treasury/spend-request/reject' && req.method === 'POST') {
+      if (!(await requireOperator(req, env))) return json({ ok: false, error: 'operator authentication required' }, { status: 401 });
       let body: any;
       try { body = await req.json(); } catch { return json({ ok: false, error: 'invalid JSON body' }, { status: 400 }); }
       if (typeof body?.requestId !== 'string' || !body.requestId) return json({ ok: false, error: 'requestId is required' }, { status: 400 });
@@ -2274,6 +2283,7 @@ export default {
     }
 
     if (url.pathname === '/treasury/record-confirmed-expense' && req.method === 'POST') {
+      if (!(await requireOperator(req, env))) return json({ ok: false, error: 'operator authentication required' }, { status: 401 });
       let body: any;
       try { body = await req.json(); } catch { return json({ ok: false, error: 'invalid JSON body' }, { status: 400 }); }
       if (typeof body?.requestId !== 'string') return json({ ok: false, error: 'requestId is required' }, { status: 400 });
