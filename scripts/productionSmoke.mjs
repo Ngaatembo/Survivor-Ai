@@ -34,8 +34,6 @@ async function checkDashboard() {
 }
 await checkDashboard();
 
-
-
 const health = await check('/health', (body) => {
   if (body.ok !== true) throw new Error('/health ok=false');
   if (process.env.SURVIVOR_EXPECTED_BUILD_SHA && body.deployment?.commit !== process.env.SURVIVOR_EXPECTED_BUILD_SHA) {
@@ -79,7 +77,6 @@ await check('/content/state', (body) => {
   if (!Array.isArray(body.state.drafts)) throw new Error('/content/state drafts is not an array');
 });
 
-
 async function checkPost(path, body, expectedStatus, validate) {
   const response = await fetch(base + path, {
     method: 'POST',
@@ -99,16 +96,12 @@ async function checkPost(path, body, expectedStatus, validate) {
 }
 
 await checkUnauthenticatedPost('/prospects/status', { prospectId: 'smoke_fake_prospect', status: 'CONTACTED' });
-
 await checkUnauthenticatedPost('/offers/status', { offerId: 'smoke_fake_offer', status: 'SENT' });
-
 await checkUnauthenticatedPost('/prospects/discover', { region: 'Harare', searchQuery: 'hotel' });
-
 await checkUnauthenticatedPost('/real-revenue', {});
 
-await checkPost('/payments/requests', {}, 400, (body) => {
-  if (body.ok !== false || typeof body.error !== 'string') throw new Error('/payments/requests invalid validation response');
-});
+// Payment-management mutations are operator-only; keep the read endpoint above public.
+await checkUnauthenticatedPost('/payments/requests', {});
 
 await checkUnauthenticatedPost('/treasury/spend-request', {});
 await checkUnauthenticatedPost('/treasury/record-capital', {});
