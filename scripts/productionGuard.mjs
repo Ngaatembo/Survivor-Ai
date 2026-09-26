@@ -69,7 +69,11 @@ const checks = [
       has(agentEngine, 'listVerifiedRevenueEntryIds()') &&
       has(agentEngine, 'verifiedRevenueEntryIdsForLearning.has(event.refId)') &&
       has(agentEngine, 'verifiedRevenueEntryIdsForProspects') &&
-      has(agentEngine, 'verifiedRevenueEntryIds'),
+      has(agentEngine, 'verifiedRevenueEntryIds') &&
+      has(agentEngine, 'verifiedRevenueEntryIdsForActions') &&
+      has(worker, 'learningPendingVerification: true') &&
+      has(worker, 'decision.status === \'VERIFIED\'') &&
+      has(worker, 'repo.appendLearningEvent(learningEvent)'),
   },
   {
     name: 'Survival Challenge is exposed only as a human-controlled execution bridge',
