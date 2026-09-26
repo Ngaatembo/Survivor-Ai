@@ -17,8 +17,5 @@ CREATE TABLE IF NOT EXISTS revenue_verifications (
   created_at TEXT NOT NULL
 );
 
-CREATE UNIQUE INDEX IF NOT EXISTS idx_revenue_verifications_unique
-  ON revenue_verifications(agent_id, revenue_entry_id, method, external_reference);
-
 CREATE INDEX IF NOT EXISTS idx_revenue_verifications_entry
   ON revenue_verifications(agent_id, revenue_entry_id, checked_at DESC);
