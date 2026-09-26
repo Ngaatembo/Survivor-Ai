@@ -99,6 +99,20 @@ await checkUnauthenticatedPost('/prospects/status', { prospectId: 'smoke_fake_pr
 await checkUnauthenticatedPost('/offers/status', { offerId: 'smoke_fake_offer', status: 'SENT' });
 await checkUnauthenticatedPost('/prospects/discover', { region: 'Harare', searchQuery: 'hotel' });
 await checkUnauthenticatedPost('/real-revenue', {});
+await checkUnauthenticatedPost('/real-revenue/verify-finivex', {});
+
+async function checkUnauthenticatedGet(path) {
+  const response = await fetch(base + path, { headers: { accept: 'application/json' }, cache: 'no-store' });
+  const text = await response.text();
+  let payload;
+  try { payload = JSON.parse(text); } catch { payload = null; }
+  if (response.status !== 401 || payload?.ok !== false || payload?.error !== 'operator authentication required') {
+    throw new Error(`${path} should reject unauthenticated operators: HTTP ${response.status}: ${text.slice(0, 500)}`);
+  }
+  console.log(`SMOKE PASS ${path} unauthenticated rejection`);
+}
+
+await checkUnauthenticatedGet('/real-revenue/verifications');
 
 // Payment-management mutations are operator-only; keep the read endpoint above public.
 await checkUnauthenticatedPost('/payments/requests', {});
