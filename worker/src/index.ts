@@ -1406,8 +1406,9 @@ export default {
     }
 
     if (url.pathname === '/prospects/discover' && req.method === 'POST') {
-      const operatorError = await requireOperator(req, env);
-      if (operatorError) return operatorError;
+      if (!(await requireOperator(req, env))) {
+        return json({ ok: false, error: 'operator authentication required' }, { status: 401 });
+      }
       // Immediate operator-triggered real business discovery.
       let body: any;
       try { body = await req.json(); } catch { return json({ ok: false, error: 'invalid JSON body' }, { status: 400 }); }
