@@ -325,7 +325,12 @@ async function getJson<T>(path: string): Promise<T> {
     } catch {
       // fall through — body stays null, handled below
     }
-    if (res.status === 401 && path.startsWith('/actions/approvals')) {
+    if (res.status === 401 && (
+      path.startsWith('/actions/approvals') ||
+      path === '/survival-challenge' ||
+      path === '/real-revenue/first-dollar' ||
+      path === '/real-revenue/verifications'
+    )) {
       await loginOperator();
       return getJson<T>(path);
     }
@@ -393,6 +398,22 @@ async function postJson<T>(path: string, body: unknown): Promise<T> {
   } finally {
     clearTimeout(timer);
   }
+}
+
+export interface FirstDollarStatus {
+  ok: true;
+  target: number;
+  recordedRevenue: number;
+  remaining: number;
+  reached: boolean;
+  entryCount: number;
+  firstEntryId?: string;
+  firstEntryAmount?: number;
+  verifiedEntryCount: number;
+}
+
+export function getFirstDollarStatus(): Promise<FirstDollarStatus> {
+  return getJson('/real-revenue/first-dollar');
 }
 
 /** Human-controlled Survival Challenge bridge. Creating/approving/reporting a
