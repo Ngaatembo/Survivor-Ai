@@ -8,7 +8,6 @@
  * ========================================================================== */
 
 export type ChallengePhase =
-  | 'READY'
   | 'AWAITING_APPROVAL'
   | 'READY_FOR_HUMAN_EXECUTION'
   | 'AWAITING_RESULT'
@@ -99,7 +98,7 @@ export function recordChallengeResult(
   note: string,
   now = Date.now(),
 ): SurvivalChallenge {
-  if (challenge.phase !== 'READY_FOR_HUMAN_EXECUTION' && challenge.phase !== 'AWAITING_RESULT') {
+  if (challenge.phase !== 'AWAITING_RESULT') {
     throw new Error(`challenge cannot record a result from phase ${challenge.phase}`);
   }
   if (!note.trim()) throw new Error('result note is required');
@@ -129,9 +128,10 @@ export function cancelChallenge(challenge: SurvivalChallenge, reason: string, no
 export function parseChallenge(raw: string | null): SurvivalChallenge | null {
   if (!raw) return null;
   try {
-    const value = JSON.parse(raw) as SurvivalChallenge;
-    if (!value || typeof value.id !== 'string' || typeof value.phase !== 'string') return null;
-    return value;
+    const value = JSON.parse(raw) as Partial<SurvivalChallenge>;
+    const phases = new Set<ChallengePhase>(['AWAITING_APPROVAL', 'READY_FOR_HUMAN_EXECUTION', 'AWAITING_RESULT', 'COMPLETED', 'FAILED', 'CANCELLED']);
+    if (!value || typeof value.id !== 'string' || typeof value.actionId !== 'string' || typeof value.actionKind !== 'string' || typeof value.objective !== 'string' || typeof value.action !== 'string' || !phases.has(value.phase as ChallengePhase) || !Array.isArray(value.guardrails) || typeof value.startedAt !== 'number') return null;
+    return value as SurvivalChallenge;
   } catch {
     return null;
   }
