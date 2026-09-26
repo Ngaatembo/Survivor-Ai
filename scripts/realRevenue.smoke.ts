@@ -19,6 +19,7 @@ import {
   realWorldScoreAdjustment,
   comparePredictionToActual,
   aggregateRealityComparison,
+  computeCategoryRealWorldStats,
 } from '../src/lib/realRevenue';
 import { InMemoryRepository } from '../src/engine/inMemoryRepository';
 import type { LearningEvent, MemoryEntry, Opportunity, RealRevenueEntry } from '../src/types';
@@ -137,6 +138,35 @@ console.log('--- Real-world score adjustment: v1 rule-based, explainable, requir
   assert(realWorldScoreAdjustment(category, mixedEvents).multiplier === 1, 'roughly-accurate predictions get no adjustment');
 }
 
+console.log('--- Verified revenue boundary: unverified payments never influence autonomous category stats ---');
+{
+  const opp = baseOpp();
+  const wonProspect = {
+    id: 'prospect-won',
+    opportunityId: opp.id,
+    businessName: 'Verified Test Business',
+    category: opp.category,
+    status: 'WON' as const,
+    score: 80,
+    priority: 'HIGH' as const,
+    probabilityOfClose: 0.5,
+    discoveredAt: Date.now(),
+    updatedAt: Date.now(),
+  };
+  const verifiedEntry = baseEntry(opp, { id: 'rr-verified', amountReceived: 120 });
+  const unverifiedEntry = baseEntry(opp, { id: 'rr-unverified', amountReceived: 9999 });
+  const allStats = computeCategoryRealWorldStats(
+    [opp],
+    [wonProspect],
+    [verifiedEntry, unverifiedEntry],
+    new Set(['rr-verified']),
+  );
+  const stats = allStats.find((s) => s.category === opp.category)!;
+  assert(stats.entryCount === 1, 'only independently verified revenue counts as autonomous evidence');
+  assert(stats.totalRevenue === 120, 'unverified revenue cannot inflate autonomous revenue totals');
+  assert(stats.avgDealValue === 120, 'unverified revenue cannot influence autonomous deal value');
+}
+ 
 console.log('--- realRevenueScore / evaluateOpportunity: backward compatible, and apply the adjustment when wired ---');
 {
   const opp = baseOpp();
