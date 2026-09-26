@@ -113,6 +113,7 @@ async function checkUnauthenticatedGet(path) {
 }
 
 await checkUnauthenticatedGet('/real-revenue/verifications');
+await checkUnauthenticatedGet('/real-revenue/first-dollar');
 
 // Payment-management mutations are operator-only; keep the read endpoint above public.
 await checkUnauthenticatedPost('/payments/requests', {});
