@@ -497,7 +497,7 @@ export const useStore = create<SurviveState>()(
           if (featureFlags.backend) {
             try {
               await apiAddRealRevenueEntry(input);
-              set({ actionError: null, actionSuccess: 'Real revenue recorded and learning updated.' } as any);
+              set({ actionError: null, actionSuccess: 'Real revenue recorded. Autonomous learning is pending independent verification.' } as any);
               await get().syncFromBackend();
             } catch (e) {
               const message = e instanceof BackendError ? e.message : (e as Error).message;
