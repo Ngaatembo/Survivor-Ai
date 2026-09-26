@@ -1962,6 +1962,10 @@ export default {
     }
 
     if (url.pathname === '/real-revenue' && req.method === 'POST') {
+      // Real revenue is the first-dollar challenge's ground truth. Only an
+      // authenticated operator may append an entry; unauthenticated writes
+      // would let a caller manufacture revenue and invalidate the experiment.
+      if (!(await requireOperator(req, env))) return json({ ok: false, error: 'operator authentication required' }, { status: 401 });
       // The real-money write path (Phase 4, §13): a human records what
       // actually happened after a real transaction. Append-only — this
       // handler only ever inserts, never updates or deletes an entry, and
