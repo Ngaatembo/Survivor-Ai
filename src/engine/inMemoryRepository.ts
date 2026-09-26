@@ -335,6 +335,10 @@ export class InMemoryRepository implements EngineRepository {
     this.state.realRevenue = [entry, ...this.state.realRevenue];
   }
 
+  async listVerifiedRevenueEntryIds() {
+    // No provider evidence exists in the in-memory/browser repository; fail closed.
+    return [];
+  }
   async listLearningEvents() {
     return this.state.learningEvents;
   }
