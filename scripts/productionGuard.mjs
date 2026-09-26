@@ -47,6 +47,12 @@ const checks = [
       lacks(worker, 'SAMPLE_OPPORTUNITIES'),
   },
   {
+    name: 'real revenue ledger writes require operator authentication',
+    ok:
+      has(worker, "url.pathname === '/real-revenue' && req.method === 'POST'") &&
+      has(worker, "if (!(await requireOperator(req, env))) return json({ ok: false, error: 'operator authentication required' }, { status: 401 });"),
+  },
+  {
     name: 'real-money treasury execution is hard-disabled',
     ok:
       has(treasury, 'realMoneyExecutionEnabled: false') &&
