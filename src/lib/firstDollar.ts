@@ -46,3 +46,20 @@ export function evaluateFirstDollarChallenge(
     firstEntryAmount: first?.amountReceived,
   };
 }
+
+
+/**
+ * Evaluate the first-dollar milestone using only revenue entries that have
+ * independent verification evidence. Unverified operator-entered entries are
+ * intentionally excluded.
+ */
+export function evaluateVerifiedFirstDollarChallenge(
+  entries: RealRevenueEntry[],
+  verifiedEntryIds: ReadonlySet<string>,
+  target: number = FIRST_DOLLAR_TARGET,
+): FirstDollarChallenge {
+  return evaluateFirstDollarChallenge(
+    entries.filter((entry) => verifiedEntryIds.has(entry.id)),
+    target,
+  );
+}
