@@ -3,6 +3,7 @@ import {
   beginResultWait,
   cancelChallenge,
   createChallenge,
+  parseChallenge,
   recordChallengeResult,
 } from '../src/lib/survivalChallenge';
 
@@ -23,6 +24,8 @@ const challenge = createChallenge({
 
 assert(challenge.phase === 'AWAITING_APPROVAL', 'new challenge must await approval');
 assert(challenge.guardrails.length >= 4, 'challenge must carry safety guardrails');
+assert(parseChallenge(JSON.stringify(challenge))?.id === challenge.id, 'valid challenge must parse');
+assert(parseChallenge('{"id":"bad","phase":"NOPE"}') === null, 'invalid persisted challenge must be rejected');
 
 const approved = approveChallenge(challenge, 2);
 assert(approved.phase === 'READY_FOR_HUMAN_EXECUTION', 'approval must not auto-execute');
