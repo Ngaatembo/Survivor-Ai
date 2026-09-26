@@ -2084,6 +2084,45 @@ export default {
           verification.reason, verification.evidence, verification.checked_at, verification.created_at,
         ).run();
 
+        // IMPORTANT: a real-revenue entry is not autonomous evidence merely
+        // because an operator recorded it. Only an independently VERIFIED
+        // payment may create the learning event / memory that the autonomous
+        // engine can consume. This keeps the verification boundary intact.
+        if (decision.status === 'VERIFIED') {
+          const [learningEvents, opportunities, businessModels, memory, prospects] = await Promise.all([
+            repo.listLearningEvents(),
+            repo.listOpportunities(),
+            repo.listBusinessModels(),
+            repo.listMemory(),
+            repo.listProspects(),
+          ]);
+          const alreadyLearned = learningEvents.some((event) => event.refId === entry.id);
+          if (!alreadyLearned) {
+            const opp = opportunities.find((candidate) => candidate.id === entry.opportunityId);
+            if (opp) {
+              const model = businessModels.find((candidate) => candidate.opportunityId === entry.opportunityId);
+              const learningEvent = generateLearningEvent(entry, opp, model, Date.now());
+              await repo.appendLearningEvent(learningEvent);
+
+              const verifiedRevenueEntryIds = new Set(await repo.listVerifiedRevenueEntryIds());
+              const categoryStats = statsForCategory(
+                computeCategoryRealWorldStats(
+                  opportunities,
+                  prospects,
+                  await repo.listRealRevenue(),
+                  verifiedRevenueEntryIds,
+                ),
+                opp.category,
+              );
+              const updatedMemory = foldRealRevenueIntoMemory(memory, entry, opp, categoryStats, Date.now());
+              for (const kind of ['opportunity', 'category'] as const) {
+                const updated = updatedMemory.find((m) => m.kind === kind && m.refId === (kind === 'opportunity' ? opp.id : opp.category));
+                if (updated) await repo.upsertMemory(updated);
+              }
+            }
+          }
+        }
+
         return json({
           ok: true,
           verification,
