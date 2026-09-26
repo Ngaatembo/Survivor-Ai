@@ -110,9 +110,16 @@ await checkPost('/payments/requests', {}, 400, (body) => {
   if (body.ok !== false || typeof body.error !== 'string') throw new Error('/payments/requests invalid validation response');
 });
 
-await checkPost('/treasury/spend-request', {}, 400, (body) => {
-  if (body.ok !== false || typeof body.error !== 'string') throw new Error('/treasury/spend-request invalid validation response');
-});
+await checkUnauthenticatedPost('/treasury/spend-request', {});
+await checkUnauthenticatedPost('/treasury/record-capital', {});
+await checkUnauthenticatedPost('/treasury/policy', {});
+await checkUnauthenticatedPost('/treasury/spend-request/approve', {});
+await checkUnauthenticatedPost('/treasury/spend-request/reject', {});
+await checkUnauthenticatedPost('/treasury/record-confirmed-expense', {});
+await checkUnauthenticatedPost('/projects/milestone', {});
+await checkUnauthenticatedPost('/projects/outcome', {});
+await checkUnauthenticatedPost('/offers/generate', {});
+await checkUnauthenticatedPost('/outreach/generate', {});
 
 async function checkUnauthenticatedPost(path, body) {
   const response = await fetch(base + path, {
