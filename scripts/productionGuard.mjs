@@ -22,6 +22,8 @@ const worker = read('worker/src/index.ts');
 const treasury = read('src/lib/treasury.ts');
 const paymentProvider = read('worker/src/paymentProvider.ts');
 const workflow = read('.github/workflows/deploy.yml');
+const backendApi = read('src/services/backendApi.ts');
+const challengePanel = read('src/components/SurvivalChallengePanel.tsx');
 
 const checks = [
   {
@@ -68,6 +70,18 @@ const checks = [
       has(agentEngine, 'verifiedRevenueEntryIdsForLearning.has(event.refId)') &&
       has(agentEngine, 'verifiedRevenueEntryIdsForProspects') &&
       has(agentEngine, 'verifiedRevenueEntryIds'),
+  },
+  {
+    name: 'Survival Challenge is exposed only as a human-controlled execution bridge',
+    ok:
+      has(worker, "url.pathname === '/survival-challenge' && req.method === 'GET'") &&
+      has(worker, "url.pathname === '/survival-challenge/start' && req.method === 'POST'") &&
+      has(worker, "url.pathname === '/survival-challenge/approve' && req.method === 'POST'") &&
+      has(worker, "url.pathname === '/survival-challenge/started' && req.method === 'POST'") &&
+      has(worker, "url.pathname === '/survival-challenge/result' && req.method === 'POST'") &&
+      has(backendApi, "startSurvivalChallenge") &&
+      has(challengePanel, 'HUMAN CONTROLLED') &&
+      has(challengePanel, 'does not create revenue by itself'),
   },
   {
     name: 'real-money treasury execution is hard-disabled',
