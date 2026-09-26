@@ -2140,10 +2140,9 @@ export default {
       // The real-money write path (Phase 4, §13): a human records what
       // actually happened after a real transaction. Append-only — this
       // handler only ever inserts, never updates or deletes an entry, and
-      // never touches the simulated wallet/experiment tables. Immediately
-      // generates one learning event (§17) comparing prediction to actual
-      // and folds a note into agent_memory — feedback happens the moment
-      // the entry is recorded, not on the next cron cycle.
+      // never touches the simulated wallet/experiment tables. The entry is
+      // deliberately NOT fed into autonomous learning until independent
+      // verification succeeds; the verification route performs that step.
       let body: any;
       try {
         body = await req.json();
@@ -2182,16 +2181,9 @@ export default {
 
       try {
         const { repo } = buildEngine(env);
-        const [opportunities, businessModels, memory, prospects] = await Promise.all([
-          repo.listOpportunities(),
-          repo.listBusinessModels(),
-          repo.listMemory(),
-          repo.listProspects(),
-        ]);
+        const opportunities = await repo.listOpportunities();
         const opp = opportunities.find((o) => o.id === opportunityId);
         if (!opp) return json({ ok: false, error: `no opportunity found with id ${opportunityId}` }, { status: 404 });
-        const model = businessModels.find((m) => m.opportunityId === opportunityId);
-
         const now = Date.now();
         const profit = computeProfit(amountReceived, typeof costs === 'number' ? costs : 0);
         const entry: RealRevenueEntry = {
@@ -2216,22 +2208,10 @@ export default {
         };
         await repo.addRealRevenueEntry(entry);
 
-        const learningEvent = generateLearningEvent(entry, opp, model, now);
-        await repo.appendLearningEvent(learningEvent);
-
-        // Phase 5 §19 — include this real entry when computing the
-        // category's running conversion-rate stats, so the memory note
-        // reflects it immediately rather than lagging one entry behind.
-        const categoryStats = statsForCategory(
-          computeCategoryRealWorldStats(opportunities, prospects, [...(await repo.listRealRevenue())]),
-          opp.category,
-        );
-        const updatedMemory = foldRealRevenueIntoMemory(memory, entry, opp, categoryStats, now);
-        for (const m of updatedMemory) {
-          if (!memory.includes(m)) await repo.upsertMemory(m);
-        }
-
-        return json({ ok: true, entry, learningEvent });
+        // Autonomous learning is intentionally deferred until an
+        // independent verification record exists. The verification route
+        // will create the learning event and memory note after confirmation.
+        return json({ ok: true, entry, learningPendingVerification: true });
       } catch (e) {
         return json({ ok: false, error: (e as Error).message }, { status: 500 });
       }
