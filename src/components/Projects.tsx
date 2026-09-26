@@ -3,6 +3,7 @@ import { useStore } from '../store';
 import { Badge, Panel } from './ui';
 import type { PaymentMethod, Project, ProjectMilestoneKey } from '../types';
 import { isOverdue, nextIncompleteMilestone } from '../lib/projectTracker';
+import { verifyRevenueWithFinivex, BackendError } from '../services/backendApi';
 
 const STATUS_TONE: Record<Project['status'], 'green' | 'blue' | 'gray'> = {
   ACTIVE: 'blue',
@@ -125,6 +126,71 @@ function RecordPaymentForm({ project, onClose }: { project: Project; onClose: ()
   );
 }
 
+function VerifyPaymentForm({
+  revenueEntryId,
+  onVerified,
+  onClose,
+}: {
+  revenueEntryId: string;
+  onVerified: () => void;
+  onClose: () => void;
+}) {
+  const syncFromBackend = useStore((s) => s.syncFromBackend);
+  const [transactionId, setTransactionId] = useState('');
+  const [saving, setSaving] = useState(false);
+  const [message, setMessage] = useState('');
+  const [error, setError] = useState('');
+
+  const submit = async () => {
+    if (!transactionId.trim()) {
+      setError('Finivex transaction ID is required.');
+      return;
+    }
+    setSaving(true);
+    setError('');
+    setMessage('');
+    try {
+      const result = await verifyRevenueWithFinivex(revenueEntryId, transactionId.trim());
+      setMessage(
+        result.countsAsVerifiedRevenue
+          ? 'Payment independently verified. Survivor can now learn from this revenue.'
+          : `Verification status: ${result.verification.status}. ${result.verification.reason}`,
+      );
+      if (result.countsAsVerifiedRevenue) {
+        await syncFromBackend();
+        onVerified();
+      }
+    } catch (e) {
+      const detail = e instanceof BackendError ? e.message : (e as Error).message;
+      setError(detail || 'Payment verification failed.');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div style={{ marginTop: 8, padding: 10, border: '1px solid var(--panel-3, #2a3340)', borderRadius: 8 }}>
+      {error && <div className="warn-banner" role="alert" style={{ marginBottom: 8 }}>Verification failed: {error}</div>}
+      {message && <div className="small" role="status" style={{ marginBottom: 8 }}>{message}</div>}
+      <label className="small" style={{ display: 'block', marginBottom: 8 }}>
+        Finivex transaction ID
+        <input
+          className="text-input"
+          value={transactionId}
+          onChange={(e) => setTransactionId(e.target.value)}
+          placeholder="e.g. FIN-12345"
+        />
+      </label>
+      <div style={{ display: 'flex', gap: 8 }}>
+        <button className="btn primary small" disabled={saving} onClick={() => void submit()}>
+          {saving ? 'Checking provider…' : 'Verify payment'}
+        </button>
+        <button className="btn small" disabled={saving} onClick={onClose}>Cancel</button>
+      </div>
+    </div>
+  );
+}
+
 function OutcomeControls({ project }: { project: Project }) {
   const updateProjectOutcome = useStore((s) => s.updateProjectOutcome);
   return (
@@ -167,6 +233,8 @@ export function Projects() {
   const actionError = useStore((s) => s.actionError);
   const realRevenue = useStore((s) => s.realRevenue);
   const [paymentFormFor, setPaymentFormFor] = useState<string | null>(null);
+  const [verifyFormFor, setVerifyFormFor] = useState<string | null>(null);
+  const [verifiedPayments, setVerifiedPayments] = useState<Record<string, boolean>>({});
 
   const { active, delivered, overdueCount } = useMemo(() => {
     const active = projects.filter((p) => p.status === 'ACTIVE');
@@ -220,7 +288,9 @@ export function Projects() {
             .map((project) => {
               const next = nextIncompleteMilestone(project);
               const overdue = isOverdue(project);
-              const paid = realRevenue.some((r) => r.projectId === project.id);
+              const payment = realRevenue.find((r) => r.projectId === project.id);
+              const paid = !!payment;
+              const verified = !!payment && !!verifiedPayments[payment.id];
               return (
                 <Panel key={project.id} tight>
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: 8 }}>
@@ -232,7 +302,7 @@ export function Projects() {
                     </div>
                     <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
                       {overdue && <Badge tone="amber">OVERDUE</Badge>}
-                      {paid && <Badge tone="green">PAID</Badge>}
+                      {paid && <Badge tone={verified ? 'green' : 'amber'}>{verified ? 'VERIFIED PAYMENT' : 'PAYMENT RECORDED'}</Badge>}
                       <Badge tone={STATUS_TONE[project.status]}>{project.status}</Badge>
                     </div>
                   </div>
@@ -253,7 +323,20 @@ export function Projects() {
                     )
                   )}
 
-                  {paid && <OutcomeControls project={project} />}
+                  {paid && payment && !verified && (
+                    verifyFormFor === payment.id ? (
+                      <VerifyPaymentForm
+                        revenueEntryId={payment.id}
+                        onVerified={() => setVerifiedPayments((current) => ({ ...current, [payment.id]: true }))}
+                        onClose={() => setVerifyFormFor(null)}
+                      />
+                    ) : (
+                      <button className="btn small" style={{ marginTop: 8 }} onClick={() => setVerifyFormFor(payment.id)}>
+                        Verify Finivex payment
+                      </button>
+                    )
+                  )}
+                  {paid && verified && <OutcomeControls project={project} />}
                 </Panel>
               );
             })}
