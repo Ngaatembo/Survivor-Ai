@@ -65,6 +65,15 @@ import { buildForexResearchPackage, classifyForexSource, type ForexResearchFindi
 import { runUnifiedProspectResearch } from '../../src/services/unifiedProspectResearch';
 import { decideFinivexVerification, extractFinivexFacts } from '../../src/lib/revenueVerification';
 import { evaluateVerifiedFirstDollarChallenge } from '../../src/lib/firstDollar';
+import {
+  SURVIVAL_CHALLENGE_KEY,
+  createChallenge,
+  parseChallenge,
+  approveChallenge,
+  beginResultWait,
+  recordChallengeResult,
+  cancelChallenge,
+} from '../../src/lib/survivalChallenge';
 
 
 function finivexConfig(env: Env) {
