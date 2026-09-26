@@ -53,6 +53,14 @@ const checks = [
       has(worker, "if (!(await requireOperator(req, env))) return json({ ok: false, error: 'operator authentication required' }, { status: 401 });"),
   },
   {
+    name: 'independent revenue verification requires operator authentication',
+    ok:
+      has(worker, "url.pathname === '/real-revenue/verify-finivex' && req.method === 'POST'") &&
+      has(worker, "url.pathname === '/real-revenue/verifications' && req.method === 'GET'") &&
+      has(worker, "extractFinivexFacts") &&
+      has(worker, "decideFinivexVerification"),
+  },
+  {
     name: 'real-money treasury execution is hard-disabled',
     ok:
       has(treasury, 'realMoneyExecutionEnabled: false') &&
