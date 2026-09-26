@@ -62,6 +62,14 @@ const checks = [
       has(worker, "decideFinivexVerification"),
   },
   {
+    name: 'autonomous learning uses independently verified revenue only',
+    ok:
+      has(agentEngine, 'listVerifiedRevenueEntryIds()') &&
+      has(agentEngine, 'verifiedRevenueEntryIdsForLearning.has(event.refId)') &&
+      has(agentEngine, 'verifiedRevenueEntryIdsForProspects') &&
+      has(agentEngine, 'verifiedRevenueEntryIds'),
+  },
+  {
     name: 'real-money treasury execution is hard-disabled',
     ok:
       has(treasury, 'realMoneyExecutionEnabled: false') &&
