@@ -487,6 +487,25 @@ export function addRealRevenueEntry(input: {
   return postJson('/real-revenue', input);
 }
 
+/** Independently verify a recorded payment against the Finivex provider.
+ *  A VERIFIED result is what allows the autonomous engine to learn from the
+ *  revenue entry. */
+export function verifyRevenueWithFinivex(
+  revenueEntryId: string,
+  transactionId: string,
+): Promise<{
+  ok: true;
+  verification: {
+    id: string;
+    revenue_entry_id: string;
+    status: 'VERIFIED' | 'PENDING' | 'REJECTED';
+    reason: string;
+  };
+  countsAsVerifiedRevenue: boolean;
+}> {
+  return postJson('/real-revenue/verify-finivex', { revenueEntryId, transactionId });
+}
+
 /** Real-world outcome tracking (Phase 4): satisfaction/repeat/referral on
  *  a delivery project. */
 export function updateProjectOutcome(
