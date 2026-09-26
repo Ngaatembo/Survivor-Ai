@@ -466,8 +466,8 @@ export function advanceProjectMilestone(
 
 /** Real-money write path (Phase 4): record what actually happened after a
  *  real transaction. Append-only on the backend — this always creates a
- *  new entry, never edits one. Returns the stored entry plus the learning
- *  event it generated. */
+ *  new entry, never edits one. The entry remains outside autonomous learning
+ *  until an independent verification succeeds. */
 export function addRealRevenueEntry(input: {
   opportunityId: string;
   prospectId: string;
@@ -483,7 +483,7 @@ export function addRealRevenueEntry(input: {
   daysFromDiscoveryToPayment?: number;
   notes?: string;
   date?: number;
-}): Promise<{ ok: true; entry: RealRevenueEntry; learningEvent: LearningEvent }> {
+}): Promise<{ ok: true; entry: RealRevenueEntry; learningPendingVerification: true }> {
   return postJson('/real-revenue', input);
 }
 
