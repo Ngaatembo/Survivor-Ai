@@ -6,6 +6,8 @@ import {
   markSurvivalChallengeStarted,
   recordSurvivalChallengeResult,
   startSurvivalChallenge,
+  getFirstDollarStatus,
+  type FirstDollarStatus,
   type SurvivalChallenge,
   type SurvivalChallengeResponse,
   type SurvivalChallengeResult,
@@ -34,11 +36,17 @@ export function SurvivalChallengePanel() {
   const [note, setNote] = useState('');
   const [error, setError] = useState('');
   const [selectedResult, setSelectedResult] = useState<SurvivalChallengeResult>('SUCCESS');
+  const [firstDollar, setFirstDollar] = useState<FirstDollarStatus | null>(null);
 
   const refresh = async () => {
     if (!backendConfigured) return;
     try {
-      setState(await getSurvivalChallenge());
+      const [challengeState, dollarState] = await Promise.all([
+        getSurvivalChallenge(),
+        getFirstDollarStatus(),
+      ]);
+      setState(challengeState);
+      setFirstDollar(dollarState);
       setError('');
     } catch (e) {
       setError((e as Error).message || 'Could not load the Survival Challenge.');
@@ -78,6 +86,21 @@ export function SurvivalChallengePanel() {
       </div>
 
       {error && <p className="muted small" role="alert">{error}</p>}
+
+      {firstDollar && (
+        <div className="action-card" style={{ marginBottom: 12 }}>
+          <div className="action-title">
+            {firstDollar.reached ? '✓ Verified first dollar reached' : 'Verified first-dollar challenge'}
+          </div>
+          <div className="muted small">
+            Verified revenue: ${firstDollar.recordedRevenue.toFixed(2)} ·{' '}
+            {firstDollar.reached ? 'milestone reached' : `${firstDollar.remaining.toFixed(2)} remaining`}
+          </div>
+          <div className="muted small">
+            Independently verified payments: {firstDollar.verifiedEntryCount}
+          </div>
+        </div>
+      )}
 
       {!challenge || terminal ? (
         <div>
