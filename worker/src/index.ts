@@ -2297,6 +2297,141 @@ export default {
       }
     }
 
+    if (url.pathname === '/survival-challenge' && req.method === 'GET') {
+      try {
+        const { repo } = buildEngine(env);
+        const challenge = parseChallenge(await repo.getKV(SURVIVAL_CHALLENGE_KEY));
+        const actions = await repo.listActions();
+        return json({
+          ok: true,
+          challenge,
+          nextAction: actions[0] ?? null,
+          instructions: challenge
+            ? 'Complete or cancel the current challenge before starting another.'
+            : 'Review the proposed action, then start a challenge explicitly.',
+        });
+      } catch (e) {
+        return json({ ok: false, error: (e as Error).message }, { status: 500 });
+      }
+    }
+
+    if (url.pathname === '/survival-challenge/start' && req.method === 'POST') {
+      if (!(await requireOperator(req, env))) return json({ ok: false, error: 'operator authentication required' }, { status: 401 });
+      try {
+        const { repo } = buildEngine(env);
+        const existing = parseChallenge(await repo.getKV(SURVIVAL_CHALLENGE_KEY));
+        if (existing && !['COMPLETED', 'FAILED', 'CANCELLED'].includes(existing.phase)) {
+          return json({ ok: false, error: 'an active survival challenge already exists', challenge: existing }, { status: 409 });
+        }
+        const body: any = await req.json();
+        const actions = await repo.listActions();
+        const action = actions.find((a) => a.id === body?.actionId);
+        if (!action) return json({ ok: false, error: 'actionId must reference a current recommended action' }, { status: 400 });
+
+        const challenge = createChallenge({
+          actionId: action.id,
+          actionKind: action.kind,
+          opportunityId: action.opportunityId,
+          opportunityName: action.opportunityName,
+          prospectId: action.prospectId,
+          prospectName: action.prospectName,
+          objective: action.description,
+          action: action.title,
+        }, `challenge_${crypto.randomUUID()}`);
+
+        await repo.setKV(SURVIVAL_CHALLENGE_KEY, JSON.stringify(challenge));
+        await repo.appendEvent({
+          id: `evt_${crypto.randomUUID()}`,
+          type: 'EXPERIMENT',
+          message: `Survival Challenge created: ${challenge.action} — awaiting human approval.`,
+          createdAt: Date.now(),
+        });
+        return json({ ok: true, challenge });
+      } catch (e) {
+        return json({ ok: false, error: (e as Error).message }, { status: 400 });
+      }
+    }
+
+    if (url.pathname === '/survival-challenge/approve' && req.method === 'POST') {
+      if (!(await requireOperator(req, env))) return json({ ok: false, error: 'operator authentication required' }, { status: 401 });
+      try {
+        const { repo } = buildEngine(env);
+        const challenge = parseChallenge(await repo.getKV(SURVIVAL_CHALLENGE_KEY));
+        if (!challenge) return json({ ok: false, error: 'no active survival challenge' }, { status: 404 });
+        const approved = approveChallenge(challenge);
+        await repo.setKV(SURVIVAL_CHALLENGE_KEY, JSON.stringify(approved));
+        await repo.appendEvent({
+          id: `evt_${crypto.randomUUID()}`,
+          type: 'EXPERIMENT',
+          message: `Survival Challenge approved for human execution: ${approved.action}.`,
+          createdAt: Date.now(),
+        });
+        return json({ ok: true, challenge: approved, executed: false });
+      } catch (e) {
+        return json({ ok: false, error: (e as Error).message }, { status: 400 });
+      }
+    }
+
+    if (url.pathname === '/survival-challenge/started' && req.method === 'POST') {
+      if (!(await requireOperator(req, env))) return json({ ok: false, error: 'operator authentication required' }, { status: 401 });
+      try {
+        const { repo } = buildEngine(env);
+        const challenge = parseChallenge(await repo.getKV(SURVIVAL_CHALLENGE_KEY));
+        if (!challenge) return json({ ok: false, error: 'no active survival challenge' }, { status: 404 });
+        const waiting = beginResultWait(challenge);
+        await repo.setKV(SURVIVAL_CHALLENGE_KEY, JSON.stringify(waiting));
+        return json({ ok: true, challenge: waiting });
+      } catch (e) {
+        return json({ ok: false, error: (e as Error).message }, { status: 400 });
+      }
+    }
+
+    if (url.pathname === '/survival-challenge/result' && req.method === 'POST') {
+      if (!(await requireOperator(req, env))) return json({ ok: false, error: 'operator authentication required' }, { status: 401 });
+      try {
+        const { repo } = buildEngine(env);
+        const challenge = parseChallenge(await repo.getKV(SURVIVAL_CHALLENGE_KEY));
+        if (!challenge) return json({ ok: false, error: 'no active survival challenge' }, { status: 404 });
+        const body: any = await req.json();
+        const result = body?.result;
+        if (!['SUCCESS', 'PARTIAL_SUCCESS', 'FAILED', 'INCONCLUSIVE'].includes(result)) {
+          return json({ ok: false, error: 'result must be SUCCESS, PARTIAL_SUCCESS, FAILED, or INCONCLUSIVE' }, { status: 400 });
+        }
+        const completed = recordChallengeResult(challenge, result, typeof body?.note === 'string' ? body.note : '');
+        await repo.setKV(SURVIVAL_CHALLENGE_KEY, JSON.stringify(completed));
+        await repo.appendEvent({
+          id: `evt_${crypto.randomUUID()}`,
+          type: 'EXPERIMENT',
+          message: `Survival Challenge result: ${result} — ${completed.resultNote}.`,
+          createdAt: Date.now(),
+        });
+        return json({ ok: true, challenge: completed });
+      } catch (e) {
+        return json({ ok: false, error: (e as Error).message }, { status: 400 });
+      }
+    }
+
+    if (url.pathname === '/survival-challenge/cancel' && req.method === 'POST') {
+      if (!(await requireOperator(req, env))) return json({ ok: false, error: 'operator authentication required' }, { status: 401 });
+      try {
+        const { repo } = buildEngine(env);
+        const challenge = parseChallenge(await repo.getKV(SURVIVAL_CHALLENGE_KEY));
+        if (!challenge) return json({ ok: false, error: 'no active survival challenge' }, { status: 404 });
+        const body: any = await req.json();
+        const cancelled = cancelChallenge(challenge, typeof body?.reason === 'string' ? body.reason : '');
+        await repo.setKV(SURVIVAL_CHALLENGE_KEY, JSON.stringify(cancelled));
+        await repo.appendEvent({
+          id: `evt_${crypto.randomUUID()}`,
+          type: 'WARNING',
+          message: `Survival Challenge cancelled: ${cancelled.resultNote}.`,
+          createdAt: Date.now(),
+        });
+        return json({ ok: true, challenge: cancelled });
+      } catch (e) {
+        return json({ ok: false, error: (e as Error).message }, { status: 400 });
+      }
+    }
+
     if (url.pathname === '/cycles/run' && req.method === 'POST') {
       const secret = req.headers.get('x-trigger-secret');
       if (!env.TRIGGER_SECRET || secret !== env.TRIGGER_SECRET) {
