@@ -159,6 +159,8 @@ export interface EngineRepository {
   // money. Never mixed with the simulated wallet/experiment economics.
   listRealRevenue(): Promise<RealRevenueEntry[]>;
   addRealRevenueEntry(entry: RealRevenueEntry): Promise<void>;
+  /** Independently verified revenue evidence only. This set gates autonomous economic learning. */
+  listVerifiedRevenueEntryIds(): Promise<string[]>;
 
   // learning events (Phase 4, §17) — append-only feed of real-world data
   // points that changed or reinforced a conclusion.
