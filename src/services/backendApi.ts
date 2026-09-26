@@ -130,6 +130,43 @@ export interface ActionApproval {
   executedAt?: number;
 }
 
+export type SurvivalChallengePhase =
+  | 'AWAITING_APPROVAL'
+  | 'READY_FOR_HUMAN_EXECUTION'
+  | 'AWAITING_RESULT'
+  | 'COMPLETED'
+  | 'FAILED'
+  | 'CANCELLED';
+
+export type SurvivalChallengeResult = 'SUCCESS' | 'PARTIAL_SUCCESS' | 'FAILED' | 'INCONCLUSIVE';
+
+export interface SurvivalChallenge {
+  id: string;
+  actionId: string;
+  actionKind: string;
+  opportunityId?: string;
+  opportunityName?: string;
+  prospectId?: string;
+  prospectName?: string;
+  objective: string;
+  action: string;
+  guardrails: string[];
+  phase: SurvivalChallengePhase;
+  createdAt: number;
+  approvedAt?: number;
+  startedAt?: number;
+  completedAt?: number;
+  result?: SurvivalChallengeResult;
+  resultNote?: string;
+}
+
+export interface SurvivalChallengeResponse {
+  ok: true;
+  challenge: SurvivalChallenge | null;
+  nextAction: RecommendedAction | null;
+  instructions: string;
+}
+
 export interface SurvivalScore {
   score: number;
   status: 'ALIVE' | 'AT_RISK' | 'CRITICAL' | 'DEAD';
@@ -356,6 +393,35 @@ async function postJson<T>(path: string, body: unknown): Promise<T> {
   } finally {
     clearTimeout(timer);
   }
+}
+
+/** Human-controlled Survival Challenge bridge. Creating/approving/reporting a
+ * challenge never sends messages, spends money, or records revenue. */
+export function getSurvivalChallenge(): Promise<SurvivalChallengeResponse> {
+  return getJson('/survival-challenge');
+}
+
+export function startSurvivalChallenge(actionId: string): Promise<{ ok: true; challenge: SurvivalChallenge }> {
+  return postJson('/survival-challenge/start', { actionId });
+}
+
+export function approveSurvivalChallenge(): Promise<{ ok: true; challenge: SurvivalChallenge; executed: false }> {
+  return postJson('/survival-challenge/approve', {});
+}
+
+export function markSurvivalChallengeStarted(): Promise<{ ok: true; challenge: SurvivalChallenge }> {
+  return postJson('/survival-challenge/started', {});
+}
+
+export function recordSurvivalChallengeResult(
+  result: SurvivalChallengeResult,
+  note?: string,
+): Promise<{ ok: true; challenge: SurvivalChallenge }> {
+  return postJson('/survival-challenge/result', { result, note });
+}
+
+export function cancelSurvivalChallenge(reason?: string): Promise<{ ok: true; challenge: SurvivalChallenge }> {
+  return postJson('/survival-challenge/cancel', { reason });
 }
 
 /** CRM write path (Phase 3): record a real-world status change for a
