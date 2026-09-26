@@ -931,6 +931,7 @@ export default {
             'kv_store',
             'payment_intents',
             'payment_provider_events',
+            'revenue_verifications',
           ];
           const placeholders = requiredTables.map(() => '?').join(',');
           const rows = await env.DB
