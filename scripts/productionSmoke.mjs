@@ -114,6 +114,8 @@ async function checkUnauthenticatedGet(path) {
 
 await checkUnauthenticatedGet('/real-revenue/verifications');
 await checkUnauthenticatedGet('/real-revenue/first-dollar');
+await checkUnauthenticatedGet('/survival-challenge');
+
 
 // Payment-management mutations are operator-only; keep the read endpoint above public.
 await checkUnauthenticatedPost('/payments/requests', {});
@@ -128,6 +130,11 @@ await checkUnauthenticatedPost('/projects/milestone', {});
 await checkUnauthenticatedPost('/projects/outcome', {});
 await checkUnauthenticatedPost('/offers/generate', {});
 await checkUnauthenticatedPost('/outreach/generate', {});
+await checkUnauthenticatedPost('/survival-challenge/start', {});
+await checkUnauthenticatedPost('/survival-challenge/approve', {});
+await checkUnauthenticatedPost('/survival-challenge/started', {});
+await checkUnauthenticatedPost('/survival-challenge/result', {});
+await checkUnauthenticatedPost('/survival-challenge/cancel', {});
 
 async function checkUnauthenticatedPost(path, body) {
   const response = await fetch(base + path, {
