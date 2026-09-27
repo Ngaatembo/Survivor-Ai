@@ -38,6 +38,7 @@ import { evaluateOpportunity, VALIDATION_SCORE_THRESHOLD } from '../lib/decision
 import { generateBusinessModel } from '../lib/businessModel';
 import { generateOutreachMessages } from '../lib/outreachGenerator';
 import { researchProspect } from '../services/prospectIntelligence';
+import { computeProblemOutcomeStats } from '../lib/prospectLearning';
 import { researchMarketPrice } from '../services/marketPricing';
 import { generateOffer } from '../lib/offerGenerator';
 import { generateDesignBrief } from '../lib/designBriefGenerator';
@@ -749,6 +750,7 @@ export class AgentEngine {
 
         allProspects = await this.repo.listProspects();
         const existingIntelligence = await this.repo.listProspectIntelligence();
+        const problemOutcomeStats = computeProblemOutcomeStats(prospects, existingIntelligence);
         const revenueCandidates = rankRevenueProspects(allProspects, 5);
         const ENGAGED_STATUSES = new Set(['INTERESTED', 'PROPOSAL_SENT', 'NEGOTIATING', 'WON']);
         const offerCandidates = [
@@ -770,7 +772,7 @@ export class AgentEngine {
           for (const p of needsResearch) {
             const statusChanged = p.status === 'INTERESTED' || p.status === 'REPLIED';
             const offerPending = p.status === 'PROPOSAL_SENT' || p.status === 'NEGOTIATING';
-            const intel = await researchProspect(searchCtx, liveLlm, p, now, { statusChanged, offerPending });
+            const intel = await researchProspect(searchCtx, liveLlm, p, now, { statusChanged, offerPending, outcomeStats: problemOutcomeStats });
             await this.repo.upsertProspectIntelligence(intel);
             await this.repo.appendProspectInteraction({
               id: uid('pint'),
