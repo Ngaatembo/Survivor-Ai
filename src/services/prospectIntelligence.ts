@@ -70,7 +70,7 @@ function selectProblemCandidates(rawCandidates: unknown, rawPrimary: unknown, so
     .map((value) => normalizePrimaryProblem(value, sources))
     .filter((value): value is NonNullable<ReturnType<typeof normalizePrimaryProblem>> => Boolean(value));
 
-  const unique = candidates.filter((candidate, index, arr) =>
+  const unique = candidates.filter((candidate) => candidate.confidence !== 'LOW').filter((candidate, index, arr) =>
     arr.findIndex((x) => x.type === candidate.type && x.outreachClaim === candidate.outreachClaim) === index
   );
 
