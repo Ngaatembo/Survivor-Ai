@@ -340,7 +340,7 @@ export function ProspectDrawer({ prospect, onClose }: { prospect: Prospect; onCl
               </p>
               {intelligence.primaryProblem && (
                 <div className="panel" style={{ margin: '10px 0', padding: 10, border: '1px solid var(--border)' }}>
-                  <div style={{ fontWeight: 700, marginBottom: 6 }}>Selected problem: {intelligence.primaryProblem.type.replaceAll('_', ' ')}</div>
+                  <div style={{ fontWeight: 700, marginBottom: 6 }}>Selected problem: {intelligence.primaryProblem.type.replace(/_/g, ' ')}</div>
                   <div className="small"><span className="mono-label">Evidence — </span>{intelligence.primaryProblem.evidence}</div>
                   <div className="small"><span className="mono-label">Business friction — </span>{intelligence.primaryProblem.businessFriction}</div>
                   <div className="small"><span className="mono-label">Likely consequence — </span>{intelligence.primaryProblem.likelyConsequence}</div>
