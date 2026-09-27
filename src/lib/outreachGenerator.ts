@@ -35,6 +35,10 @@ function presenceLine(p: Prospect): string {
 function personalizedOpener(prospect: Prospect, intelligence: ProspectIntelligence | undefined): string {
   const generic = presenceLine(prospect);
   if (!intelligence || intelligence.generator !== 'llm' || intelligence.confidence === 'LOW') return generic;
+  const problem = intelligence.primaryProblem;
+  if (problem && problem.confidence !== 'LOW' && problem.outreachClaim?.trim()) {
+    return problem.outreachClaim.trim();
+  }
   return intelligence.specificProblemEvidence?.trim() || generic;
 }
 
