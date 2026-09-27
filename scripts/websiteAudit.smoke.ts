@@ -35,6 +35,14 @@ console.log('--- Website audit: weak commercial homepage ---');
   assert(audit.opportunities.length >= 3,'audit exposes actionable improvement signals');
 }
 
+console.log('--- Website audit: HTTP errors are not scored as quality ---');
+{
+  const fakeFetch: typeof fetch = async () => new Response('forbidden',{status:403,headers:{'content-type':'text/html'}});
+  const audit = await auditWebsite('https://example.co.zw/',fakeFetch);
+  assert(audit.status === 'UNREACHABLE','HTTP 4xx is treated as unavailable');
+  assert(audit.score === undefined,'unavailable site receives no misleading quality score');
+}
+
 console.log('--- Website audit: unsafe target fails closed ---');
 {
   const audit = await auditWebsite('http://127.0.0.1:8787/');
