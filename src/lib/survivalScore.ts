@@ -39,8 +39,8 @@ export function computeSurvivalScore(
   const runwayTransactions = transactions.filter((t) => t.amount < 0).length;
 
   const explanation: string[] = [];
-  if (status === 'DEAD') explanation.push('Balance is at or below zero; autonomous experiments remain stopped.');
-  else if (balance < 5) explanation.push('Cash is below the normal survival threshold; fast, low-cost actions should dominate.');
+  if (status === 'DEAD') explanation.push('Dormant: the real treasury is at or below the $10 floor. No paid AI or search until revenue or a top-up lifts it.');
+  else if (balance < 25) explanation.push('Cash is below the normal survival threshold; fast, low-cost actions should dominate.');
   else explanation.push('Cash remains above the survival threshold.');
   if (realizedRevenue > 0) explanation.push('Recorded revenue is $' + realizedRevenue.toFixed(2) + '.');
   else explanation.push('No realized revenue has been recorded yet.');

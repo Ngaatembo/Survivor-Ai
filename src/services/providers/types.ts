@@ -12,8 +12,14 @@ export interface LLMProvider {
   readonly connected: boolean;
   readonly label: string;
 
-  /** Free-form completion with a system prompt. Returns text or null on failure. */
+  /** Free-form completion with a system prompt. Returns text or null on failure
+   *  (including when the attached cost meter refuses the call). */
   complete(system: string, prompt: string): Promise<string | null>;
+
+  /** Attach (or detach with null) the treasury's cost meter for this cycle or
+   *  manual action. While attached, every call is checked against the daily
+   *  cap / dormant floor first and its real token cost is recorded after. */
+  attachMeter?(meter: import('../../lib/costMeter').CostMeter | null): void;
 
   /**
    * Produce a research brief for a candidate opportunity: fields extracted

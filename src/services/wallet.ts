@@ -1,11 +1,13 @@
 /* ============================================================================
- * SURVIVE AI — Simulated wallet service
+ * SURVIVE AI — Wallet (real treasury ledger) service
  * ----------------------------------------------------------------------------
  * Balance is NEVER stored or mutated directly. It is always derived from the
  * transaction ledger (starting DEPOSIT + sum of signed amounts). Every balance
  * change appends an immutable transaction record with balanceAfter.
  *
- * This is a SIMULATION: no payment connector exists (see connectors.ts).
+ * Since 27 Sep 2026 the ledger is the REAL treasury: owner capital, actual
+ * AI/search costs and verified revenue. Survivor still never moves money
+ * itself — every entry is accounting for money the owners hold.
  * ========================================================================== */
 
 import type { Transaction, TransactionType } from '../types';
@@ -42,15 +44,19 @@ export function record(
   return [...transactions, tx];
 }
 
-/** Opening deposit that seeds the simulated wallet. */
+/** Opening deposit of the REAL treasury: the owners' operating budget for
+ *  Survivor's own AI and search costs. Accounting only — the money is held by
+ *  the owners and Survivor never moves it. (The pre-27-Sep-2026 simulated
+ *  opening grant used the id 'tx-opening-deposit' and is kept as history.) */
 export function openingLedger(startingCapital: number): Transaction[] {
   const tx: Transaction = {
-    id: 'tx-opening-deposit',
+    id: 'tx-real-opening-deposit',
     type: 'DEPOSIT',
     amount: startingCapital,
-    description: 'Initial simulated capital grant (no real money)',
+    description: `[TREASURY CAPITAL] Owner capital: $${startingCapital.toFixed(2)} real operating budget for Survivor's AI and search costs (held by the owners; Survivor never moves money)`,
     balanceAfter: startingCapital,
     createdAt: Date.now(),
+    ledger: 'REAL',
   };
   return [tx];
 }

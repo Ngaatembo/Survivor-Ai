@@ -197,7 +197,8 @@ export class D1Repository implements EngineRepository {
    * Atomic compare-and-swap claim: only one caller can move the agent into
    * RESEARCHING/EXECUTING at a time. A stale lock (a previous run that
    * crashed mid-cycle without releasing it) can be reclaimed after
-   * `staleAfterMs`. Never reclaims a DEAD agent.
+   * `staleAfterMs`. A DORMANT agent (stored as 'DEAD') still runs cycles —
+   * it just can't spend — so it can wake up when revenue or a top-up lands.
    */
   async tryClaimCycle(staleAfterMs = 15 * 60 * 1000): Promise<boolean> {
     const now = Date.now();
@@ -205,7 +206,7 @@ export class D1Repository implements EngineRepository {
     const res: any = await this.db
       .prepare(
         `UPDATE agents SET status = 'RESEARCHING', cycle_lock_at = ?
-         WHERE id = ? AND status != 'DEAD'
+         WHERE id = ?
            AND (
              status NOT IN ('RESEARCHING', 'EXECUTING')
              OR cycle_lock_at IS NULL
@@ -218,9 +219,12 @@ export class D1Repository implements EngineRepository {
   }
 
   async releaseCycleLock(status: Agent['status']): Promise<void> {
+    // agents.status has no CRITICAL value in its CHECK constraint; store the
+    // nearest allowed state (the dashboard recomputes CRITICAL from balance).
+    const stored = status === 'CRITICAL' ? 'AT_RISK' : status;
     await this.db
       .prepare('UPDATE agents SET status = ?, cycle_lock_at = NULL WHERE id = ?')
-      .bind(status, this.agentId)
+      .bind(stored, this.agentId)
       .run();
   }
 
@@ -443,7 +447,9 @@ export class D1Repository implements EngineRepository {
 
   async listTransactions(): Promise<Transaction[]> {
     const { results } = await this.db
-      .prepare('SELECT * FROM transactions WHERE agent_id = ? ORDER BY created_at ASC')
+      // Only the REAL treasury counts. The pre-27-Sep-2026 simulated ledger
+      // stays in the table for history (ledger = 'SIMULATED', migration 0019).
+      .prepare("SELECT * FROM transactions WHERE agent_id = ? AND ledger = 'REAL' ORDER BY created_at ASC")
       .bind(this.agentId)
       .all();
     return results.map((r: any) => ({
@@ -454,14 +460,15 @@ export class D1Repository implements EngineRepository {
       relatedExperimentId: r.related_experiment_id ?? undefined,
       balanceAfter: this.n(r.balance_after),
       createdAt: this.ms(r.created_at),
+      ledger: 'REAL' as const,
     }));
   }
 
   async appendTransaction(tx: Transaction): Promise<void> {
     await this.db
       .prepare(
-        `INSERT INTO transactions (id, agent_id, type, amount, description, related_experiment_id, balance_after, created_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+        `INSERT INTO transactions (id, agent_id, type, amount, description, related_experiment_id, balance_after, created_at, ledger)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .bind(
         tx.id,
@@ -472,6 +479,7 @@ export class D1Repository implements EngineRepository {
         tx.relatedExperimentId ?? null,
         tx.balanceAfter,
         this.iso(tx.createdAt),
+        tx.ledger ?? 'REAL',
       )
       .run();
   }
@@ -1580,11 +1588,37 @@ export class D1Repository implements EngineRepository {
   /* ------------------------------ CRM write path ------------------------------ */
 
   async updateProspectStatus(prospectId: string, status: Prospect['status'], reasonLost?: string): Promise<void> {
+    const now = Date.now();
+    if (status === 'CONTACTED' || status === 'FOLLOW_UP') {
+      // A message just went out: remember when, and schedule the follow-up
+      // 3 days later so "Follow up with X" appears in the queue on time.
+      await this.db
+        .prepare(
+          `UPDATE prospects SET status = ?, reason_lost = COALESCE(?, reason_lost), updated_at = ?,
+             last_contact_at = ?, next_follow_up_at = ?, messages_sent_count = messages_sent_count + 1
+           WHERE id = ?`,
+        )
+        .bind(status, reasonLost ?? null, this.iso(now), this.iso(now), this.iso(now + 3 * 24 * 60 * 60 * 1000), prospectId)
+        .run();
+      return;
+    }
+    if (status === 'REPLIED' || status === 'INTERESTED' || status === 'WON' || status === 'LOST' || status === 'NOT_INTERESTED') {
+      // They answered (or it's decided): the automatic follow-up is no longer due.
+      await this.db
+        .prepare(
+          `UPDATE prospects SET status = ?, reason_lost = COALESCE(?, reason_lost), updated_at = ?, next_follow_up_at = NULL,
+             responses_received_count = responses_received_count + ?
+           WHERE id = ?`,
+        )
+        .bind(status, reasonLost ?? null, this.iso(now), status === 'REPLIED' ? 1 : 0, prospectId)
+        .run();
+      return;
+    }
     await this.db
       .prepare(
         `UPDATE prospects SET status = ?, reason_lost = COALESCE(?, reason_lost), updated_at = ? WHERE id = ?`,
       )
-      .bind(status, reasonLost ?? null, this.iso(Date.now()), prospectId)
+      .bind(status, reasonLost ?? null, this.iso(now), prospectId)
       .run();
   }
 

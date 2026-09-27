@@ -111,7 +111,7 @@ export class InMemoryRepository implements EngineRepository {
   private cycleLockAt: number | null = null;
   async tryClaimCycle(staleAfterMs = 15 * 60 * 1000) {
     const agent = this.state.agent;
-    if (!agent || agent.status === 'DEAD') return false;
+    if (!agent) return false; // a DORMANT ('DEAD') agent still runs free cycles
     const locked = agent.status === 'RESEARCHING' || agent.status === 'EXECUTING';
     if (locked && this.cycleLockAt !== null && Date.now() - this.cycleLockAt < staleAfterMs) return false;
     this.cycleLockAt = Date.now();

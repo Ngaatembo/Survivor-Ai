@@ -5,6 +5,20 @@
 
 ---
 
+## -10. Phase 0 of the $50 Survival Engine — real treasury (27 Sep 2026)
+
+- **Real ledger.** Migration `0019_real_treasury.sql` adds `transactions.ledger`. Every older row (simulated experiment budgets/revenue, balance $5.29) is `SIMULATED` and no longer counts. The engine seeds one REAL $50 owner-capital deposit and from then on writes only real money: owner capital, actual AI/search costs, verified revenue. Simulated experiments are now forecasts that never touch the ledger.
+- **Cost meter (`src/lib/costMeter.ts`).** Every paid AI call and search is checked first against a $0.40/day automatic cap and a $10 dormant floor, then charged by real token usage; each cycle writes one `[AUTO]` expense. Manual research the owner triggers is charged but not capped. Overrides: `DAILY_SPEND_CAP_USD`, `SEARCH_COST_PER_QUERY_USD`, `LLM_MODEL`, `LLM_INPUT_USD_PER_MTOK`, `LLM_OUTPUT_USD_PER_MTOK`.
+- **Gemini provider** added (free tier, `GEMINI_API_KEY`) alongside Claude and OpenAI; all three share one metered base class.
+- **Dormant, not dead.** Status ladder: ALIVE ≥ $25, AT_RISK < $25, CRITICAL < $15, DORMANT ≤ $10 (stored as `DEAD`). A dormant agent keeps running free cycles and wakes when revenue or a top-up lifts it.
+- **Approval queue fills itself (`src/lib/approvalQueue.ts`).** Each cycle queues up to 5 prepared actions for verified, contactable businesses (first WhatsApp message; offers to already-contacted ones) with the exact text and a wa.me link. Approval ids now match the server-side CRM gate (`outreach:` / `offer:`), fixing the Home screen's approvals never unlocking "mark contacted". Recommended-action ids are now stable across cycles.
+- **Follow-ups scheduled.** Marking CONTACTED/FOLLOW_UP sets `last_contact_at`, `next_follow_up_at` (+3 days) and `messages_sent_count`; replies clear the follow-up.
+- Tests: `scripts/realTreasury.smoke.ts` (new, all passing). Pre-existing failures unchanged: 6 LLM-path checks in `marketPricing.smoke.ts`, 3 in `prospectEntityResolution.smoke.ts`.
+
+## -9. Prospect names and Zimbabwe market prices (27 Sep 2026)
+
+- Discovery rejects articles, listicles, guides, directories, review sites, foreign results and unattributable social posts (`src/lib/prospectResultFilter.ts`); only Zimbabwe phone numbers are saved. Offers are priced per business type from published Zimbabwe prices (`src/lib/zimWebsitePricing.ts`).
+
 ## -8. Survivor 2.0, §18 — Strategy Performance table (COMPLETE, this session)
 
 Extends the existing `CategoryRealWorldStats` (Phase 5) with the fields needed for a genuine performance table, rather than building a parallel tracking system from scratch.

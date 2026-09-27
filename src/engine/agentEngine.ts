@@ -25,7 +25,6 @@ import type {
 import { uid } from '../lib/format';
 import { simulateExperiment, experimentBudget } from '../lib/simulation';
 import { balanceFrom } from '../services/wallet';
-import { record as ledgerRecord } from '../services/wallet';
 import { advanceStage, scoreAll, rankOpportunities } from '../services/research';
 import { decide, generateReport, strategyFromMemory, type Decision } from '../services/ai';
 import { recordResult, lessonFromExperiment } from '../services/memory';
@@ -50,6 +49,8 @@ import { computeRecommendedActions } from '../lib/recommendedActions';
 import { rankRevenueProspects } from '../lib/revenueConversion';
 import { verifyProspect } from '../services/prospectVerification';
 import { resolveProspectEntities } from '../services/prospectEntityResolution';
+import { CostMeter, type CostPolicy } from '../lib/costMeter';
+import { APPROVALS_KV_KEY, queueApprovals, type QueuedApproval } from '../lib/approvalQueue';
 
 export const STEP_ORDER: CycleStepKey[] = [
   'RESEARCH',
@@ -90,6 +91,10 @@ export interface EngineOptions {
   onStatus?: (status: AgentStatusLike) => void;
   onActivity?: (activity: string, step: CycleStepKey | null) => void;
   onLog?: (type: EventType, message: string) => void;
+  /** Real-treasury spending rules (daily cap, dormant floor). */
+  costPolicy?: Partial<CostPolicy>;
+  /** Price of one real search call, USD (0 on free tiers). */
+  searchCostUsd?: number;
 }
 
 export interface RunOptions {
@@ -121,10 +126,10 @@ export class AgentEngine {
     const agent = await this.safeGetAgent();
     const snap = createSeedSnapshot();
 
-    // Repair/bootstrap the simulated wallet independently of agent creation.
-    // This matters after a manual D1 reset: the agent row may exist while its
-    // append-only ledger is empty. The opening deposit is inserted exactly
-    // once, so normal boots cannot mint another $50.
+    // Bootstrap the REAL treasury independently of agent creation. The
+    // repository only returns ledger = 'REAL' rows, so on the first boot after
+    // migration 0019 (old rows are SIMULATED) this records the owners' real
+    // $50 operating budget exactly once; normal boots cannot mint another.
     if (agent) {
       const transactions = await this.repo.listTransactions();
       if (transactions.length === 0) {
@@ -163,10 +168,6 @@ export class AgentEngine {
     const hooks = this.hooks();
 
     const agent = await this.repo.getAgent();
-    if (agent.status === 'DEAD') {
-      await hooks.log('WARNING', 'Agent is DEAD — no new cycles can start. Reset the simulation.');
-      return null;
-    }
 
     // Atomic claim: prevents an overlapping cron tick / manual trigger from
     // racing this one and creating duplicate cycles or double-spending the
@@ -180,9 +181,32 @@ export class AgentEngine {
       return null;
     }
 
+    // The bot pays for its own brain: every paid AI call and search this
+    // cycle is checked against the daily cap and the dormant floor, and what
+    // it actually cost is written to the real ledger when the cycle ends.
+    const meter = CostMeter.fromLedger(await this.repo.listTransactions(), this.options.costPolicy);
+    this.providers.llm?.attachMeter?.(meter);
+    if (meter.dormant) {
+      await hooks.log(
+        'WARNING',
+        `Dormant: the real treasury is at or below the $${meter.policy.floorUsd.toFixed(2)} floor. No paid AI or search this cycle — free work only. Survivor wakes when revenue or a top-up lifts it above the floor.`,
+      );
+    }
+
     try {
-      return await this.runClaimedCycle(agent, opts, hooks, stepDelay, shouldContinue);
+      return await this.runClaimedCycle(agent, opts, hooks, stepDelay, shouldContinue, meter);
     } finally {
+      this.providers.llm?.attachMeter?.(null);
+      try {
+        const cycleLabel = `cycle #${agent.totalCyclesRun + 1}`;
+        const costTx = meter.toExpense(await this.repo.listTransactions(), cycleLabel);
+        if (costTx) await this.repo.appendTransaction(costTx);
+        if (meter.llmCalls || meter.searchCalls || meter.blockedTotal) {
+          await hooks.log('WALLET', `Running costs, ${cycleLabel}: ${meter.summary()}.`);
+        }
+      } catch (e) {
+        await hooks.log('WARNING', `Could not record this cycle's AI/search costs: ${(e as Error).message}`);
+      }
       const finalTx = await this.repo.listTransactions();
       const finalBalance = balanceFrom(finalTx);
       const releaseStatus = computeSurvivalStatus(finalBalance);
@@ -196,6 +220,7 @@ export class AgentEngine {
     hooks: EngineHooks,
     stepDelay: number,
     shouldContinue: () => boolean,
+    meter: CostMeter,
   ): Promise<CycleOutcome | null> {
     let opportunities = await this.repo.listOpportunities();
     let transactions = await this.repo.listTransactions();
@@ -254,12 +279,14 @@ export class AgentEngine {
     const searchCtx: SearchEconomyContext = {
       state: economyState,
       providers: { tavily: tavilyProvider, brave: braveProvider },
-      survivalStatus: agent.status === 'DEAD' ? 'DEAD' : survivalStatusAtStart,
+      survivalStatus: survivalStatusAtStart,
       now: Date.now(),
       cycleStartedAt: cycle.startedAt,
       onLog: (message) => {
         void hooks.log('WARNING', message);
       },
+      meter,
+      searchCostUsd: this.options.searchCostUsd ?? 0,
     };
 
     /* 2 — DISCOVER */
@@ -402,7 +429,7 @@ export class AgentEngine {
     if (selected && budget > 0 && budget <= hardCap + 0.005) {
       await hooks.setActivity?.(`Simulating experiment: ${selected.name}…`, 'SIMULATE');
       const expId = uid('exp');
-      await hooks.log('EXPERIMENT', `Experiment simulation created for "${selected.name}" with $${budget.toFixed(2)} simulated budget. No real money moves.`);
+      await hooks.log('EXPERIMENT', `Forecast created for "${selected.name}" (modelled $${budget.toFixed(2)} test budget). Forecast only — nothing is charged to the real treasury.`);
 
       await delay(stepDelay);
       if (!shouldContinue()) {
@@ -465,30 +492,13 @@ export class AgentEngine {
       // was a real, verified bug: fixed after it surfaced in local testing.)
       await this.repo.appendExperiment(experiment);
 
-      const expenseTx: Transaction = ledgerRecord(transactions, {
-        type: 'EXPENSE',
-        amount: -budget,
-        description: `Simulated experiment budget — ${selected.name}`,
-        relatedExperimentId: expId,
-      }).slice(-1)[0];
-      await this.repo.appendTransaction(expenseTx);
-      transactions = [...transactions, expenseTx];
-
-      if (sim.actualRevenue > 0) {
-        const revenueTx: Transaction = ledgerRecord(transactions, {
-          type: 'REVENUE',
-          amount: sim.actualRevenue,
-          description: `Simulated revenue — ${selected.name}`,
-          relatedExperimentId: expId,
-        }).slice(-1)[0];
-        await this.repo.appendTransaction(revenueTx);
-        await hooks.log(
-          'WALLET',
-          `Experiment returned $${sim.actualRevenue.toFixed(2)} simulated revenue (net ${sim.actualRevenue - sim.actualCost >= 0 ? '+' : ''}$${(sim.actualRevenue - sim.actualCost).toFixed(2)}).`,
-        );
-      } else {
-        await hooks.log('WALLET', `Experiment returned $0.00 simulated revenue — $${sim.actualCost.toFixed(2)} budget consumed.`);
-      }
+      // Real treasury (27 Sep 2026): a simulated experiment is a FORECAST.
+      // It never writes to the ledger — only real owner capital, real AI/search
+      // costs and verified revenue move the balance.
+      await hooks.log(
+        'EXPERIMENT',
+        `Forecast: $${sim.actualRevenue.toFixed(2)} modelled revenue on a $${sim.actualCost.toFixed(2)} modelled cost. Not real money — the treasury is unchanged.`,
+      );
 
       await this.repo.completeCycle(cycle.id, {
         experimentId: experiment.id,
@@ -918,6 +928,31 @@ export class AgentEngine {
         await this.repo.replaceActions(actions);
         if (actions[0]) {
           await hooks.log('DECISION', `Top recommended action: ${actions[0].title}`);
+        }
+
+        // Put the best prepared outreach into the human approval queue by
+        // itself, with the exact message attached. Nothing is sent: the owner
+        // approves, sends it from their own WhatsApp, then marks it sent.
+        {
+          let existingApprovals: QueuedApproval[] = [];
+          try {
+            const raw = await this.repo.getKV(APPROVALS_KV_KEY);
+            const parsed = raw ? JSON.parse(raw) : [];
+            existingApprovals = Array.isArray(parsed) ? parsed : [];
+          } catch {
+            existingApprovals = [];
+          }
+          const { approvals, added } = queueApprovals(existingApprovals, {
+            actions,
+            prospects: finalProspects,
+            outreach: await this.repo.listOutreachMessages(),
+            offers: finalOffers,
+            now,
+          });
+          if (added.length > 0) {
+            await this.repo.setKV(APPROVALS_KV_KEY, JSON.stringify(approvals));
+            await hooks.log('DECISION', `Queued ${added.length} message(s) for your approval: ${added.map((a) => a.prospectName).join(', ')}.`);
+          }
         }
       } catch (e) {
         // Commercial-core evaluation must never take down the core research

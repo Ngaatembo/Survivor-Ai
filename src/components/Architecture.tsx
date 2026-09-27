@@ -22,7 +22,7 @@ const SAFETY = [
   'All capital, revenue and expenses are simulated ledger entries.',
   'Finance categories (forex, crypto, prediction markets) are research-only: blocked from autonomous execution.',
   'Every experiment is capped at ≤18% of simulated balance and cannot spend below survival floor.',
-  'At $0 balance the agent becomes DEAD: read-only, no new budgets or experiments.',
+  'At or below the $10 floor the agent goes DORMANT: no paid AI or search, free work only, and it wakes when revenue or a top-up lifts the real treasury.',
   'Future real-money mode is designed behind explicit per-action authorization, hard spending limits, approval gates and full audit logs.',
 ];
 

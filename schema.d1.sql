@@ -192,10 +192,12 @@ CREATE TABLE transactions (
   description           TEXT NOT NULL,
   related_experiment_id TEXT REFERENCES experiments(id),
   balance_after         REAL NOT NULL,   -- denormalized checkpoint
-  created_at            TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
+  created_at            TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+  ledger                TEXT NOT NULL DEFAULT 'REAL' CHECK (ledger IN ('REAL','SIMULATED'))  -- see 0019_real_treasury.sql
 );
--- Balance is always derived: SUM(amount). The ledger is append-only.
+-- Balance is always derived: SUM(amount) over ledger = 'REAL'. The ledger is append-only.
 CREATE INDEX idx_tx_agent_time ON transactions(agent_id, created_at);
+CREATE INDEX idx_tx_agent_ledger_time ON transactions(agent_id, ledger, created_at);
 
 -- agent_events -----------------------------------------------------------------
 

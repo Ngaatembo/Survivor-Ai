@@ -22,6 +22,17 @@ export interface Env {
 
   ANTHROPIC_API_KEY?: string;
   OPENAI_API_KEY?: string;
+  /** Google Gemini API key — free tier works without billing. */
+  GEMINI_API_KEY?: string;
+  /** Optional model override for whichever LLM key is set. */
+  LLM_MODEL?: string;
+  /** Optional price overrides (USD per million tokens) for the treasury's cost meter. */
+  LLM_INPUT_USD_PER_MTOK?: string;
+  LLM_OUTPUT_USD_PER_MTOK?: string;
+  /** Optional per-query search price; defaults to 0 (Tavily/Brave free tiers). */
+  SEARCH_COST_PER_QUERY_USD?: string;
+  /** Optional override of the $0.40/day automatic AI + search spending cap. */
+  DAILY_SPEND_CAP_USD?: string;
   TAVILY_API_KEY?: string;
   BRAVE_API_KEY?: string;
 

@@ -8,7 +8,8 @@
  * ========================================================================== */
 import { useState } from 'react';
 import { useStore, useWalletTotals, backendConfigured } from '../store';
-import { demoUrl, requestActionApproval, reviewActionApproval, markActionExecuted, BackendError } from '../services/backendApi';
+import { demoUrl, requestActionApproval, reviewActionApproval, markActionExecuted, BackendError, type ActionApproval, updateProspectStatus as apiUpdateProspectStatus, updateOfferStatus as apiUpdateOfferStatus } from '../services/backendApi';
+import { approvalActionId } from '../lib/approvalQueue';
 import { usd, usdWhole, timeAgo } from '../lib/format';
 import type { RecommendedAction } from '../types';
 import { salesReadiness } from '../lib/salesReadiness';
@@ -72,7 +73,8 @@ function ActionButtons({ a, go, compact }: { a: RecommendedAction; go: (v: View)
   const prep = usePrepared()(a.prospectId);
   const syncFromBackend = useStore((s) => s.syncFromBackend);
   const approvals = useStore((s) => s.actionApprovals ?? []);
-  const approval = approvals.find((x) => x.actionId === a.id);
+  const approvalKey = approvalActionId(a.kind, a.prospectId, prep?.offer?.id, a.id);
+  const approval = approvals.find((x) => x.actionId === approvalKey);
   const approved = approval?.status === 'APPROVED';
   const [confirm, setConfirm] = useState<null | 'contacted' | 'followup' | 'sent'>(null);
   const [copied, setCopied] = useState(false);
@@ -144,7 +146,7 @@ function ActionButtons({ a, go, compact }: { a: RecommendedAction; go: (v: View)
           View demo
         </a>
       )}
-      <button className="btn big" disabled={approvalBusy || approval?.status === 'APPROVED' || approval?.status === 'EXECUTED'} onClick={async () => { setApprovalBusy(true); setApprovalError(null); try { await requestActionApproval(a); await syncFromBackend(); } catch (e) { const message = e instanceof BackendError ? e.message : (e as Error).message; setApprovalError(message || 'Could not create approval request.'); } finally { setApprovalBusy(false); } }}>{approvalBusy ? 'Requesting…' : approval?.status === 'APPROVED' ? 'Approved' : approval?.status === 'EXECUTED' ? 'Executed' : 'Request approval'}</button>
+      <button className="btn big" disabled={approvalBusy || approval?.status === 'APPROVED' || approval?.status === 'EXECUTED'} onClick={async () => { setApprovalBusy(true); setApprovalError(null); try { await requestActionApproval(a, prep?.offer?.id); await syncFromBackend(); } catch (e) { const message = e instanceof BackendError ? e.message : (e as Error).message; setApprovalError(message || 'Could not create approval request.'); } finally { setApprovalBusy(false); } }}>{approvalBusy ? 'Requesting…' : approval?.status === 'APPROVED' ? 'Approved' : approval?.status === 'EXECUTED' ? 'Executed' : 'Request approval'}</button>
       {prep?.outreach && (
         <button className="btn big" onClick={copyMessage}>
           {copied ? 'Copied' : 'Copy message'}
@@ -381,24 +383,67 @@ function SurvivalRunHistory() {
 
 function ApprovalQueue() {
   const approvals = useStore((s) => s.actionApprovals ?? []);
-  const pending = approvals.filter((a) => a.status === 'PENDING');
+  // Waiting for a yes/no, or approved but not yet marked as sent.
+  const open = approvals.filter((a) => a.status === 'PENDING' || a.status === 'APPROVED');
   const [busy, setBusy] = useState<string | null>(null);
-  if (!pending.length) return null;
-  const review = async (id: string, decision: 'APPROVED' | 'REJECTED') => {
-    setBusy(id);
-    try { await reviewActionApproval(id, decision); await useStore.getState().syncFromBackend(); } catch (e) { const message = e instanceof BackendError ? e.message : (e as Error).message; useStore.setState({ actionError: `Approval review failed: ${message}`, actionSuccess: null }); } finally { setBusy(null); }
+  const [copied, setCopied] = useState<string | null>(null);
+  if (!open.length) return null;
+
+  const fail = (what: string, e: unknown) => {
+    const message = e instanceof BackendError ? e.message : (e as Error).message;
+    useStore.setState({ actionError: `${what} failed: ${message}`, actionSuccess: null });
   };
+  const review = async (a: ActionApproval, decision: 'APPROVED' | 'REJECTED') => {
+    // Open WhatsApp in the same tap so the browser doesn't block the pop-up.
+    if (decision === 'APPROVED' && a.whatsappUrl) window.open(a.whatsappUrl, '_blank', 'noopener,noreferrer');
+    setBusy(a.id);
+    try { await reviewActionApproval(a.id, decision); await useStore.getState().syncFromBackend(); } catch (e) { fail('Approval review', e); } finally { setBusy(null); }
+  };
+  const markSent = async (a: ActionApproval) => {
+    setBusy(a.id);
+    try {
+      // Direct API calls (they throw), so a refused CRM update never marks
+      // the approval as executed.
+      if (a.actionKind === 'SEND_OFFER' && a.offerId) await apiUpdateOfferStatus(a.offerId, 'SENT');
+      else if (a.prospectId) await apiUpdateProspectStatus(a.prospectId, 'CONTACTED');
+      await markActionExecuted(a.id);
+      await useStore.getState().syncFromBackend();
+    } catch (e) { fail('Marking as sent', e); } finally { setBusy(null); }
+  };
+  const copy = async (a: ActionApproval) => {
+    if (!a.message) return;
+    try { await navigator.clipboard.writeText(a.message); setCopied(a.id); setTimeout(() => setCopied(null), 2000); } catch { /* clipboard unavailable */ }
+  };
+
   return (
     <section className="block">
-      <div className="card-head"><div><h2>Human approval queue</h2><span className="faint small">Approval records intent only. Survivor still never sends messages or moves real money.</span></div></div>
+      <div className="card-head"><div><h2>Your approval queue ({open.length})</h2><span className="faint small">Survivor prepared these. Approve to open WhatsApp with the message filled in, send it yourself, then mark it sent. Nothing is ever sent for you.</span></div></div>
       <div className="action-list">
-        {pending.slice(0, 8).map((a) => (
+        {open.slice(0, 8).map((a) => (
           <div className="action-card" key={a.id}>
             <div className="action-title">{a.title}</div>
-            <div className="muted small">{a.actionKind}</div>
+            <div className="muted small">
+              {a.actionKind === 'SEND_OFFER' ? 'Send offer' : 'First message'}
+              {a.contact ? ` · ${a.contact}` : ''}
+              {a.source === 'AUTO' ? ' · queued by Survivor' : ''}
+            </div>
+            {a.message && (
+              <div className="small" style={{ whiteSpace: 'pre-wrap', margin: '8px 0', padding: 10, borderRadius: 8, background: 'var(--panel-2, rgba(127,127,127,0.08))' }}>{a.message}</div>
+            )}
             <div className="act-row" style={{ marginTop: 8 }}>
-              <button className="btn primary big" disabled={busy === a.id} onClick={() => review(a.id, 'APPROVED')}>{busy === a.id ? 'Saving…' : 'Approve'}</button>
-              <button className="btn big" disabled={busy === a.id} onClick={() => review(a.id, 'REJECTED')}>Reject</button>
+              {a.status === 'PENDING' ? (
+                <>
+                  <button className="btn primary big" disabled={busy === a.id} onClick={() => review(a, 'APPROVED')}>{busy === a.id ? 'Saving…' : a.whatsappUrl ? 'Approve & open WhatsApp' : 'Approve'}</button>
+                  {a.message && <button className="btn big" onClick={() => copy(a)}>{copied === a.id ? 'Copied' : 'Copy message'}</button>}
+                  <button className="btn big" disabled={busy === a.id} onClick={() => review(a, 'REJECTED')}>Reject</button>
+                </>
+              ) : (
+                <>
+                  <button className="btn primary big" disabled={busy === a.id} onClick={() => markSent(a)}>{busy === a.id ? 'Saving…' : 'I sent it'}</button>
+                  {a.whatsappUrl && <a className="btn big" href={a.whatsappUrl} target="_blank" rel="noopener noreferrer">Open WhatsApp again</a>}
+                  {a.message && <button className="btn big" onClick={() => copy(a)}>{copied === a.id ? 'Copied' : 'Copy message'}</button>}
+                </>
+              )}
             </div>
           </div>
         ))}

@@ -94,7 +94,7 @@ export function createStoreRepository(get: Get, set: Set, reseed: () => StateSha
     },
     async tryClaimCycle(staleAfterMs = 15 * 60 * 1000) {
       const agent = get().agent;
-      if (!agent || agent.status === 'DEAD') return false;
+      if (!agent) return false; // a DORMANT ('DEAD') agent still runs free cycles
       const locked = agent.status === 'RESEARCHING' || agent.status === 'EXECUTING';
       if (locked && cycleLockAt !== null && Date.now() - cycleLockAt < staleAfterMs) return false;
       cycleLockAt = Date.now();

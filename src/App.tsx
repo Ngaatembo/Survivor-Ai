@@ -87,7 +87,6 @@ export function App() {
 
   const running = useStore((s) => s.loop.running);
   const busy = useStore((s) => s.loop.busy);
-  const dead = useStore((s) => s.agent.status === 'DEAD');
   const startLoop = useStore((s) => s.startLoop);
   const pauseLoop = useStore((s) => s.pauseLoop);
   const runNextCycle = useStore((s) => s.runNextCycle);
@@ -205,13 +204,13 @@ export function App() {
               </span>
             ) : (
               <>
-                <button className="btn primary" onClick={startLoop} disabled={running || busy || dead} title="Run the autonomous loop continuously">
+                <button className="btn primary" onClick={startLoop} disabled={running || busy} title="Run the autonomous loop continuously">
                   {running ? '◉ RUNNING' : '▶ START RESEARCH'}
                 </button>
                 <button className="btn warn" onClick={pauseLoop} disabled={!running}>
                   ❚❚ PAUSE AGENT
                 </button>
-                <button className="btn" onClick={runNextCycle} disabled={busy || dead} title="Run one complete research → simulate → learn cycle">
+                <button className="btn" onClick={runNextCycle} disabled={busy} title="Run one complete research → simulate → learn cycle">
                   ⏭ RUN NEXT CYCLE
                 </button>
                 {confirmReset ? (

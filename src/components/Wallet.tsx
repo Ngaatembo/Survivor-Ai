@@ -2,6 +2,7 @@ import { useStore, useWalletTotals } from '../store';
 import { Panel, Stat } from './ui';
 import { SurvivalMeter } from './SurvivalMeter';
 import { usd, dateTime } from '../lib/format';
+import { autoSpentToday, DEFAULT_COST_POLICY } from '../lib/costMeter';
 
 export function Wallet() {
   const transactions = useStore((s) => s.transactions);
@@ -11,9 +12,11 @@ export function Wallet() {
   return (
     <div className="view-enter">
       <div className="warn-banner">
-        <strong>SIMULATED WALLET.</strong> Balance is derived solely from the transaction ledger —
-        no entry ever mutates the balance directly. No bank, crypto, payment or trading account is
-        connected; 100% of these figures are model outputs.
+        <strong>REAL TREASURY.</strong> A $50 operating budget from the owners pays for Survivor's own
+        AI and search costs, capped at {usd(DEFAULT_COST_POLICY.dailyCapUsd)} a day. Only owner capital,
+        actual running costs and verified revenue appear here — forecasts never touch the balance.
+        Survivor never moves money itself. Today's automatic spend:{' '}
+        <strong>${autoSpentToday(transactions).toFixed(4)}</strong> of {usd(DEFAULT_COST_POLICY.dailyCapUsd)}.
       </div>
 
       <div className="grid cols-4" style={{ marginBottom: 14 }}>
@@ -27,9 +30,9 @@ export function Wallet() {
         <Panel title="Survival meter">
           <SurvivalMeter />
           <div className="faint small" style={{ marginTop: 14, lineHeight: 1.7 }}>
-            Balance below the survival threshold ($5.00) → agent status <span className="badge amber">AT RISK</span>.
-            Balance at $0.00 → <span className="badge red">DEAD</span>: experiments lock and the agent
-            enters read-only mode.
+            Below $25 → <span className="badge amber">AT RISK</span>. Below $15 → CRITICAL.
+            At or below {usd(DEFAULT_COST_POLICY.floorUsd)} → <span className="badge">DORMANT</span>: no paid AI or
+            search, free work only; it wakes when revenue or a top-up lifts the balance.
           </div>
         </Panel>
 

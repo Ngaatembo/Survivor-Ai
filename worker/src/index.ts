@@ -28,6 +28,7 @@ import { generateDesignBrief } from '../../src/lib/designBriefGenerator';
 import { generateOffer } from '../../src/lib/offerGenerator';
 import { generateOutreachMessages } from '../../src/lib/outreachGenerator';
 import { createLLMProvider } from '../../src/services/providers/llm';
+import { CostMeter, type CostPolicy } from '../../src/lib/costMeter';
 import { createSearchProviders } from '../../src/services/providers/search';
 import { balanceFrom } from '../../src/services/wallet';
 import { loadEconomyState, saveEconomyState, getEconomySummary, computeSearchROI } from '../../src/services/searchEconomy';
@@ -185,6 +186,44 @@ async function hasHumanApproval(
   );
 }
 
+/* ---------------------- real treasury: running costs ---------------------- */
+
+function costPolicyFromEnv(env: Env): Partial<CostPolicy> {
+  const cap = Number(env.DAILY_SPEND_CAP_USD);
+  return env.DAILY_SPEND_CAP_USD && Number.isFinite(cap) && cap >= 0 ? { dailyCapUsd: cap } : {};
+}
+
+function searchCostFromEnv(env: Env): number {
+  const v = Number(env.SEARCH_COST_PER_QUERY_USD);
+  return env.SEARCH_COST_PER_QUERY_USD && Number.isFinite(v) && v > 0 ? v : 0;
+}
+
+/** A human pressed the button, so the call is approved: it is charged to the
+ *  real treasury like any other AI/search cost, but the automatic daily cap
+ *  and dormant floor don't block it. */
+async function openManualCostSession(
+  repo: EngineRepository,
+  llm: import('../../src/services/providers/types').LLMProvider | null,
+): Promise<CostMeter> {
+  const meter = CostMeter.fromLedger(await repo.listTransactions(), {
+    dailyCapUsd: Number.POSITIVE_INFINITY,
+    floorUsd: Number.NEGATIVE_INFINITY,
+  });
+  llm?.attachMeter?.(meter);
+  return meter;
+}
+
+async function closeManualCostSession(
+  repo: EngineRepository,
+  llm: import('../../src/services/providers/types').LLMProvider | null,
+  meter: CostMeter,
+  label: string,
+): Promise<void> {
+  llm?.attachMeter?.(null);
+  const tx = meter.toExpense(await repo.listTransactions(), `manual: ${label}`);
+  if (tx) await repo.appendTransaction(tx);
+}
+
 function buildEngine(env: Env): {
   engine: AgentEngine;
   repo: EngineRepository;
@@ -216,13 +255,20 @@ function buildEngine(env: Env): {
   const llm = createLLMProvider({
     anthropic: env.ANTHROPIC_API_KEY,
     openai: env.OPENAI_API_KEY,
+    gemini: env.GEMINI_API_KEY,
+    model: env.LLM_MODEL,
+    inputUsdPerMTok: env.LLM_INPUT_USD_PER_MTOK ? Number(env.LLM_INPUT_USD_PER_MTOK) : undefined,
+    outputUsdPerMTok: env.LLM_OUTPUT_USD_PER_MTOK ? Number(env.LLM_OUTPUT_USD_PER_MTOK) : undefined,
   });
   const { tavily, brave } = createSearchProviders({
     tavily: env.TAVILY_API_KEY,
     brave: env.BRAVE_API_KEY,
   });
 
-  const engine = new AgentEngine(repo, { llm, tavily, brave }, {});
+  const engine = new AgentEngine(repo, { llm, tavily, brave }, {
+    costPolicy: costPolicyFromEnv(env),
+    searchCostUsd: searchCostFromEnv(env),
+  });
 
   return {
     engine,
@@ -950,6 +996,12 @@ export default {
             .all<{ name: string }>();
           const found = new Set(rows.results.map((row) => row.name));
           missingTables = requiredTables.filter((name) => !found.has(name));
+          // Real treasury (migration 0019): the balance query needs this column.
+          try {
+            await env.DB.prepare('SELECT ledger FROM transactions LIMIT 0').all();
+          } catch {
+            missingTables.push('transactions.ledger (run migrations/0019_real_treasury.sql)');
+          }
           schemaReady = missingTables.length === 0;
         } catch {
           schemaReady = false;
@@ -977,7 +1029,7 @@ export default {
         },
         connectors: {
           db: { backend, connected: backend === 'supabase' ? Boolean(env.SUPABASE_URL && env.SUPABASE_SERVICE_ROLE_KEY) : Boolean(env.DB) },
-          llm: Boolean(env.ANTHROPIC_API_KEY || env.OPENAI_API_KEY),
+          llm: Boolean(env.ANTHROPIC_API_KEY || env.OPENAI_API_KEY || env.GEMINI_API_KEY),
           search: Boolean(env.TAVILY_API_KEY || env.BRAVE_API_KEY),
           payments: {
             sandboxConfigured: ecoCashStatus(ecoCashConfig(env)).configured,
@@ -1786,15 +1838,23 @@ export default {
         const now = Date.now();
         const balance = balanceFrom(await repo.listTransactions());
         const state = await loadEconomyState(repo);
+        const meter = await openManualCostSession(repo, llm);
         const ctx = {
           state,
           providers: { tavily, brave },
           survivalStatus: computeSurvivalStatus(balance),
           now,
           cycleStartedAt: now,
+          meter,
+          searchCostUsd: searchCostFromEnv(env),
         };
 
-        const packageResult = await runUnifiedProspectResearch(ctx, llm, prospect, opportunity, now);
+        let packageResult: Awaited<ReturnType<typeof runUnifiedProspectResearch>>;
+        try {
+          packageResult = await runUnifiedProspectResearch(ctx, llm, prospect, opportunity, now);
+        } finally {
+          await closeManualCostSession(repo, llm, meter, `full research of ${prospect.businessName}`);
+        }
         await repo.upsertProspects([packageResult.prospect]);
         await repo.upsertProspectIntelligence(packageResult.intelligence);
         await repo.upsertMarketPriceResearch(packageResult.marketPrice);
@@ -1843,20 +1903,28 @@ export default {
         const now = Date.now();
         const balance = balanceFrom(await repo.listTransactions());
         const state = await loadEconomyState(repo);
+        const meter = await openManualCostSession(repo, llm);
         const ctx = {
           state,
           providers: { tavily, brave },
           survivalStatus: computeSurvivalStatus(balance),
           now,
           cycleStartedAt: now,
+          meter,
+          searchCostUsd: searchCostFromEnv(env),
         };
         // Manual deep research starts with identity/contact consolidation so
         // the research is performed against the best-supported business name,
         // location and public contact rather than an unverified discovery label.
-        const verified = await verifyProspect(ctx, prospect, now);
-        await repo.upsertProspects([verified]);
-
-        const intel = await researchProspect(ctx, llm, verified, now, { statusChanged: true });
+        let verified: Awaited<ReturnType<typeof verifyProspect>>;
+        let intel: Awaited<ReturnType<typeof researchProspect>>;
+        try {
+          verified = await verifyProspect(ctx, prospect, now);
+          await repo.upsertProspects([verified]);
+          intel = await researchProspect(ctx, llm, verified, now, { statusChanged: true });
+        } finally {
+          await closeManualCostSession(repo, llm, meter, `deep research of ${prospect.businessName}`);
+        }
         await saveEconomyState(repo, ctx.state);
         await repo.upsertProspectIntelligence(intel);
         await repo.appendProspectInteraction({

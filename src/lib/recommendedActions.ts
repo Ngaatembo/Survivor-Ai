@@ -254,8 +254,19 @@ export function computeRecommendedActions(
     topTen.sort((a, b) => b.expectedValue * survivalWeight(b.effort) - a.expectedValue * survivalWeight(a.effort) || b.urgency - a.urgency);
   }
 
+  // Stable ids (kind + the thing it acts on) so an approval given to an
+  // action still matches it after the next cycle recomputes the list.
+  const seen = new Set<string>();
+  const stableId = (input: ActionInput): string => {
+    const base = `act_${input.kind}_${input.prospect?.id ?? input.opportunity?.id ?? input.title.toLowerCase().replace(/[^a-z0-9]+/g, '-').slice(0, 40)}`;
+    let id = base;
+    for (let n = 2; seen.has(id); n++) id = `${base}_${n}`;
+    seen.add(id);
+    return id;
+  };
+
   return topTen.map((input, i) => ({
-    id: uid('act'),
+    id: stableId(input),
     kind: input.kind,
     opportunityId: input.opportunity?.id,
     opportunityName: input.opportunity?.name,

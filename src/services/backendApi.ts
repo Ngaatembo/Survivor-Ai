@@ -13,6 +13,7 @@
  * autonomous loop runs on the Worker's cron; the dashboard only observes it.
  * ========================================================================== */
 
+import { approvalActionId } from '../lib/approvalQueue';
 import type {
   Agent,
   AgentCycle,
@@ -128,6 +129,14 @@ export interface ActionApproval {
   createdAt: number;
   reviewedAt?: number;
   executedAt?: number;
+  /** Filled in when the cycle queued it (lib/approvalQueue.ts). */
+  source?: 'AUTO' | 'HUMAN';
+  prospectName?: string;
+  offerId?: string;
+  channel?: string;
+  contact?: string;
+  message?: string;
+  whatsappUrl?: string;
 }
 
 export type SurvivalChallengePhase =
@@ -651,9 +660,11 @@ export function fetchActionApprovals(): Promise<{ ok: true; approvals: ActionApp
   return getJson('/actions/approvals');
 }
 
-export function requestActionApproval(action: RecommendedAction): Promise<{ ok: true; approval: ActionApproval }> {
+export function requestActionApproval(action: RecommendedAction, offerId?: string): Promise<{ ok: true; approval: ActionApproval }> {
   return postJson('/actions/approvals', {
-    actionId: action.id,
+    // Same id the server-side CRM gate checks (outreach:/offer:), so the
+    // approval actually unlocks "mark contacted" / "mark offer sent".
+    actionId: approvalActionId(action.kind, action.prospectId, offerId, action.id),
     actionKind: action.kind,
     title: action.title,
     prospectId: action.prospectId,

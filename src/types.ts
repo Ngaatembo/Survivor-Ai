@@ -270,6 +270,10 @@ export interface Transaction {
   relatedExperimentId?: string;
   balanceAfter: number;
   createdAt: number;
+  /** REAL = the live treasury (real money: owner capital, actual AI/search
+   *  costs, verified revenue). SIMULATED = the pre-27-Sep-2026 practice
+   *  ledger, kept for history but never counted in the balance. */
+  ledger?: 'REAL' | 'SIMULATED';
 }
 
 /* ------------------------------- agent_events ----------------------------- */

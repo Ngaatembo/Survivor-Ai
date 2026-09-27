@@ -62,7 +62,7 @@ export function DecisionCenter() {
         strongest candidate. Reasoning is rule-based in v1 (LLM connector not attached).
       </div>
 
-      {dead && <div className="dead-banner">AGENT DEAD — decision execution locked. Reset the simulation to continue.</div>}
+      {dead && <div className="dead-banner">DORMANT — no paid AI or search until revenue or a top-up lifts the treasury above $10. Free work continues.</div>}
 
       {!livePick ? (
         <Panel>

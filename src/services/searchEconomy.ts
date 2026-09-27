@@ -17,6 +17,7 @@
 import type { AgentStatus } from '../types';
 import type { EngineRepository } from '../engine/repository';
 import type { LLMProvider, SearchProvider, SearchResult } from './providers/types';
+import type { CostMeter } from '../lib/costMeter';
 import {
   emptyState,
   recordSearch,
@@ -64,6 +65,12 @@ export interface SearchEconomyContext {
   /** Mutated in place across a cycle's worth of runSearch() calls; the
    *  caller (agentEngine) persists it once at the end via saveEconomyState. */
   onLog?: (message: string) => void;
+  /** Real-treasury cost meter (daily cap + dormant floor). Cache hits are free
+   *  and never checked; a real provider call is checked first and charged
+   *  `searchCostUsd` after. */
+  meter?: CostMeter | null;
+  /** Price of one real search call in USD (0 on Tavily/Brave free tiers). */
+  searchCostUsd?: number;
 }
 
 export interface RunSearchOptions {
@@ -131,6 +138,20 @@ export async function runSearch(ctx: SearchEconomyContext, opts: RunSearchOption
     return { results: [], cacheHit: false, budgetExceeded: false, skippedReason: 'NO_PROVIDER_CONFIGURED', providerUsed: 'none' };
   }
 
+  const searchCost = Math.max(0, ctx.searchCostUsd ?? 0);
+  if (ctx.meter) {
+    const spend = ctx.meter.check(searchCost);
+    if (!spend.ok) {
+      return {
+        results: [],
+        cacheHit: false,
+        budgetExceeded: spend.reason === 'DAILY_CAP',
+        skippedReason: spend.reason === 'DORMANT' ? 'TREASURY_DORMANT' : 'DAILY_SPEND_CAP',
+        providerUsed: 'none',
+      };
+    }
+  }
+
   let results: SearchResult[] = [];
   try {
     results = await provider.search(opts.query, opts.max ?? 5);
@@ -143,6 +164,7 @@ export async function runSearch(ctx: SearchEconomyContext, opts: RunSearchOption
     { ts: ctx.now, purpose: opts.purpose, provider: providerId, query: opts.query, entityId: opts.entityId, cacheHit: false },
     results,
   );
+  ctx.meter?.recordSearch(searchCost);
 
   return { results, cacheHit: false, budgetExceeded: false, providerUsed: providerId };
 }
