@@ -18,6 +18,7 @@ import type { AgentStatus } from '../types';
 import type { EngineRepository } from '../engine/repository';
 import type { LLMProvider, SearchProvider, SearchResult } from './providers/types';
 import type { CostMeter } from '../lib/costMeter';
+import { SearchProviderError } from './providers/search';
 import {
   emptyState,
   recordSearch,
@@ -153,20 +154,37 @@ export async function runSearch(ctx: SearchEconomyContext, opts: RunSearchOption
   }
 
   let results: SearchResult[] = [];
+  let usedProvider: SearchProviderId = providerId;
   try {
     results = await provider.search(opts.query, opts.max ?? 5);
-  } catch {
-    results = [];
+  } catch (error) {
+    // A hard provider quota/rate/credential failure is different from a
+    // legitimate empty search result. Fail over immediately to the other
+    // configured provider so exhausting Tavily cannot stall Survivor when
+    // Brave is available (and vice versa).
+    if (error instanceof SearchProviderError) {
+      const fallbackId = providerId === 'tavily' ? 'brave' : providerId === 'brave' ? 'tavily' : 'none';
+      const fallback = fallbackId === 'tavily' ? ctx.providers.tavily : fallbackId === 'brave' ? ctx.providers.brave : null;
+      if (fallback?.connected) {
+        try {
+          results = await fallback.search(opts.query, opts.max ?? 5);
+          usedProvider = fallbackId;
+        } catch {
+          results = [];
+          usedProvider = fallbackId;
+        }
+      }
+    }
   }
 
   ctx.state = recordSearch(
     ctx.state,
-    { ts: ctx.now, purpose: opts.purpose, provider: providerId, query: opts.query, entityId: opts.entityId, cacheHit: false },
+    { ts: ctx.now, purpose: opts.purpose, provider: usedProvider, query: opts.query, entityId: opts.entityId, cacheHit: false },
     results,
   );
   ctx.meter?.recordSearch(searchCost);
 
-  return { results, cacheHit: false, budgetExceeded: false, providerUsed: providerId };
+  return { results, cacheHit: false, budgetExceeded: false, providerUsed: usedProvider };
 }
 
 export function getEconomySummary(state: SearchEconomyState, survivalStatus: AgentStatus, now = Date.now()): SearchEconomySummary {
