@@ -175,7 +175,7 @@ export async function verifyProspect(
   const outcomes = await Promise.all(queries.map(async (query) => {
     const localCtx: SearchEconomyContext = {
       ...ctx,
-      state: { log: [...baseState.log], cache: { ...baseState.cache },
+      state: { log: [...baseState.log], cache: { ...baseState.cache } },
     };
     const outcome = await runSearch(localCtx, {
       purpose: 'CONTACT_VERIFICATION',
