@@ -1884,7 +1884,8 @@ export default {
 
         let packageResult: Awaited<ReturnType<typeof runUnifiedProspectResearch>>;
         try {
-          packageResult = await runUnifiedProspectResearch(ctx, llm, prospect, opportunity, now);
+          const outcomeStats = computeProblemOutcomeStats(prospects, await repo.listProspectIntelligence());
+          packageResult = await runUnifiedProspectResearch(ctx, llm, prospect, opportunity, now, outcomeStats);
         } finally {
           await closeManualCostSession(repo, llm, meter, `full research of ${prospect.businessName}`);
         }
