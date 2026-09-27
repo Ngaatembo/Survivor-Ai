@@ -36,10 +36,12 @@ function personalizedOpener(prospect: Prospect, intelligence: ProspectIntelligen
   const generic = presenceLine(prospect);
   if (!intelligence || intelligence.generator !== 'llm' || intelligence.confidence === 'LOW') return generic;
   const problem = intelligence.primaryProblem;
-  if (problem && problem.confidence !== 'LOW' && problem.outreachClaim?.trim()) {
+  if (problem && problem.confidence !== 'LOW' && problem.outreachClaim?.trim() && problem.sourceIds.length > 0) {
     return problem.outreachClaim.trim();
   }
-  return intelligence.specificProblemEvidence?.trim() || generic;
+  // Never put an unstructured LLM evidence string directly in customer-facing
+  // outreach. Without a validated primary problem, stay with the safe opener.
+  return generic;
 }
 
 export function generateOutreachMessages(
