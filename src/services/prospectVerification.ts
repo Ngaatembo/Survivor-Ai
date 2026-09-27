@@ -196,7 +196,7 @@ export async function verifyProspect(
   const results: SearchResult[] = [];
   const seen = new Set<string>();
   for (const outcome of outcomes) {
-    for (const r of outcome.results) {
+    for (const r of outcome.outcome.results) {
       const key = r.url + '|' + r.title;
       if (!seen.has(key)) { seen.add(key); results.push(r); }
     }
