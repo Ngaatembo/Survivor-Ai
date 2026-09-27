@@ -714,6 +714,7 @@ export interface ProspectDiscoveryResponse {
   discovered: number;
   saved?: number;
   verified: number;
+  verificationQueued?: number;
   rejectedUnverifiedOrConflicting: number;
   rejectedNotABusiness?: number;
   budgetExceeded?: number;
