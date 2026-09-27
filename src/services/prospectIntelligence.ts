@@ -20,6 +20,49 @@ import type { LLMProvider } from './providers/types';
 import { runSearch, type SearchEconomyContext } from './searchEconomy';
 
 const MAX_SNIPPETS = 8;
+const PROBLEM_TYPES: ProspectProblemType[] = [
+  'DISCOVERABILITY', 'TRUST', 'CONVERSION', 'BOOKING', 'ORDERING',
+  'LEAD_CAPTURE', 'FOLLOW_UP', 'CUSTOMER_EXPERIENCE',
+  'COMPETITIVE_POSITION', 'WEBSITE_QUALITY', 'OTHER',
+];
+const INTELLIGENCE_CONFIDENCES = ['HIGH', 'MEDIUM', 'LOW'] as const;
+
+function normalizePrimaryProblem(
+  raw: unknown,
+  sources: ResearchSource[],
+): ProspectIntelligence['primaryProblem'] {
+  if (!raw || typeof raw !== 'object') return undefined;
+  const value = raw as Record<string, unknown>;
+  const type = typeof value.type === 'string' && PROBLEM_TYPES.includes(value.type as ProspectProblemType)
+    ? value.type as ProspectProblemType
+    : null;
+  const confidence = typeof value.confidence === 'string' && INTELLIGENCE_CONFIDENCES.includes(value.confidence as typeof INTELLIGENCE_CONFIDENCES[number])
+    ? value.confidence as typeof INTELLIGENCE_CONFIDENCES[number]
+    : null;
+  const textFields = ['evidence', 'businessFriction', 'likelyConsequence', 'solvableOpportunity', 'outreachClaim']
+    .map((key) => [key, typeof value[key] === 'string' ? value[key].trim() : ''] as const);
+  if (!type || !confidence || textFields.some(([, text]) => !text)) return undefined;
+
+  // The model receives numbered snippets [1]...[8]. Convert those stable
+  // references into the actual persisted source IDs before storing them.
+  const rawSourceIds = Array.isArray(value.sourceIds) ? value.sourceIds : [];
+  const sourceIds = rawSourceIds
+    .map((id) => Number.parseInt(String(id).replace(/^src[-_]/i, ''), 10))
+    .filter((n) => Number.isInteger(n) && n >= 1 && n <= sources.length)
+    .map((n) => sources[n - 1].id);
+  if (sourceIds.length === 0) return undefined;
+
+  return {
+    type,
+    evidence: textFields[0][1],
+    businessFriction: textFields[1][1],
+    likelyConsequence: textFields[2][1],
+    solvableOpportunity: textFields[3][1],
+    outreachClaim: textFields[4][1],
+    confidence,
+    sourceIds,
+  };
+}
 
 async function gatherSnippets(
   ctx: SearchEconomyContext,
@@ -139,18 +182,7 @@ export async function researchProspect(
           competitiveNote: analysis.competitiveNote ?? 'Not addressed by the model.',
           specificProblemEvidence: analysis.specificProblemEvidence ?? prospect.evidenceNotes,
           recommendedAngle: analysis.recommendedAngle ?? 'Not addressed by the model.',
-          primaryProblem: analysis.primaryProblem && typeof analysis.primaryProblem === 'object'
-            ? {
-                type: (analysis.primaryProblem.type || 'OTHER') as ProspectProblemType,
-                evidence: analysis.primaryProblem.evidence || '',
-                businessFriction: analysis.primaryProblem.businessFriction || '',
-                likelyConsequence: analysis.primaryProblem.likelyConsequence || '',
-                solvableOpportunity: analysis.primaryProblem.solvableOpportunity || '',
-                outreachClaim: analysis.primaryProblem.outreachClaim || '',
-                confidence: analysis.primaryProblem.confidence || 'LOW',
-                sourceIds: Array.isArray(analysis.primaryProblem.sourceIds) ? analysis.primaryProblem.sourceIds : [],
-              }
-            : undefined,
+          primaryProblem: normalizePrimaryProblem(analysis.primaryProblem, sources),
           confidence: analysis.confidence ?? 'MEDIUM',
           generator: 'llm',
         };
