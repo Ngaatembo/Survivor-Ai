@@ -18,6 +18,8 @@ import type { Prospect, ProspectIntelligence, ProspectProblemCandidate, Prospect
 import { uid } from '../lib/format';
 import type { LLMProvider } from './providers/types';
 import { runSearch, type SearchEconomyContext } from './searchEconomy';
+import type { ProblemOutcomeStats } from '../lib/prospectLearning';
+import { problemLearningAdjustment } from '../lib/prospectLearning';
 
 const MAX_SNIPPETS = 8;
 const PROBLEM_TYPES: ProspectProblemType[] = [
@@ -64,7 +66,7 @@ function normalizePrimaryProblem(
   };
 }
 
-function selectProblemCandidates(rawCandidates: unknown, rawPrimary: unknown, sources: ResearchSource[], now: number): { primaryProblem?: ProspectProblemCandidate; problemSelection?: ProspectProblemSelection } {
+function selectProblemCandidates(rawCandidates: unknown, rawPrimary: unknown, sources: ResearchSource[], now: number, outcomeStats: ProblemOutcomeStats[] = []): { primaryProblem?: ProspectProblemCandidate; problemSelection?: ProspectProblemSelection } {
   const rawList = Array.isArray(rawCandidates) ? rawCandidates : [];
   const candidates = [...rawList, ...(rawPrimary ? [rawPrimary] : [])]
     .map((value) => normalizePrimaryProblem(value, sources))
@@ -79,8 +81,10 @@ function selectProblemCandidates(rawCandidates: unknown, rawPrimary: unknown, so
     const businessRelevance = Math.min(100, 40 + (candidate.businessFriction.length >= 40 ? 20 : 5) + (candidate.likelyConsequence.length >= 30 ? 20 : 5));
     const solvability = Math.min(100, 50 + (candidate.solvableOpportunity.length >= 30 ? 25 : 5) + (candidate.outreachClaim.length >= 20 ? 15 : 5));
     const clarity = candidate.outreachClaim.length <= 180 ? 90 : 60;
-    const selectionScore = Math.round(evidenceStrength * 0.35 + businessRelevance * 0.25 + solvability * 0.25 + clarity * 0.15);
-    return { ...candidate, evidenceStrength, businessRelevance, solvability, clarity, selectionScore, selectionReason: 'Strongest combination of evidence, business relevance, solvability and clear customer-facing claim.' };
+    const learning = problemLearningAdjustment(candidate.type, outcomeStats);
+    const selectionScore = Math.max(0, Math.min(100, Math.round(evidenceStrength * 0.35 + businessRelevance * 0.25 + solvability * 0.25 + clarity * 0.15 + learning.bonus)));
+
+    return { ...candidate, evidenceStrength, businessRelevance, solvability, clarity, selectionScore, selectionReason: learning.reason ? 'Strongest evidence/relevance/solvability/clarity, adjusted by observed outcome history: ' + learning.reason : 'Strongest combination of evidence, business relevance, solvability and clear customer-facing claim.' };
   }).sort((a, b) => b.selectionScore - a.selectionScore);
 
   if (!scored.length) return {};
@@ -192,7 +196,7 @@ export async function researchProspect(
   llm: LLMProvider | null,
   prospect: Prospect,
   now: number = Date.now(),
-  opts: { statusChanged?: boolean; offerPending?: boolean } = {},
+  opts: { statusChanged?: boolean; offerPending?: boolean; outcomeStats?: ProblemOutcomeStats[] } = {},
 ): Promise<ProspectIntelligence> {
   const { snippets, sources } = await gatherSnippets(ctx, prospect, opts.statusChanged ?? false, opts.offerPending ?? false);
 
@@ -214,7 +218,7 @@ export async function researchProspect(
           competitiveNote: analysis.competitiveNote ?? 'Not addressed by the model.',
           specificProblemEvidence: analysis.specificProblemEvidence ?? prospect.evidenceNotes,
           recommendedAngle: analysis.recommendedAngle ?? 'Not addressed by the model.',
-          ...selectProblemCandidates(analysis.problemCandidates, analysis.primaryProblem, sources, now),
+          ...selectProblemCandidates(analysis.problemCandidates, analysis.primaryProblem, sources, now, opts.outcomeStats ?? []),
           confidence: analysis.confidence ?? 'MEDIUM',
           generator: 'llm',
         };
