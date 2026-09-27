@@ -270,11 +270,9 @@ export async function verifyProspect(
   const websiteAudit = verifiedWebsite ? await auditWebsite(bestWebsite.url) : undefined;
   const auditedPresence = websiteAudit?.status === 'AUDITED' && websiteAudit.verdict === 'NEEDS_WORK'
     ? 'WEAK_OR_OUTDATED'
-    : websiteAudit?.status === 'UNREACHABLE'
-      ? 'WEAK_OR_OUTDATED'
-      : websiteAudit?.status === 'AUDITED' && websiteAudit.verdict === 'HEALTHY'
-        ? 'ADEQUATE'
-        : undefined;
+    : websiteAudit?.status === 'AUDITED' && websiteAudit.verdict === 'HEALTHY'
+      ? 'ADEQUATE'
+      : undefined;
   const websiteAssessment = auditedPresence
     ? { presence: auditedPresence as Prospect['websitePresence'], note: websiteAudit?.status === 'AUDITED'
         ? `Website audit score: ${websiteAudit.score}/100. ${websiteAudit.opportunities.length} improvement signal(s) detected.`
