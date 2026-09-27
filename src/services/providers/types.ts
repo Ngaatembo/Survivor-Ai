@@ -84,6 +84,16 @@ export interface ProspectIntelligenceAnalysis {
     confidence: 'HIGH' | 'MEDIUM' | 'LOW';
     sourceIds: string[];
   };
+  problemCandidates?: Array<{
+    type: string;
+    evidence: string;
+    businessFriction: string;
+    likelyConsequence: string;
+    solvableOpportunity: string;
+    outreachClaim: string;
+    confidence: 'HIGH' | 'MEDIUM' | 'LOW';
+    sourceIds: string[];
+  }>;
   confidence: 'HIGH' | 'MEDIUM' | 'LOW';
 }
 
