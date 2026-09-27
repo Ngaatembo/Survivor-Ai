@@ -112,6 +112,37 @@ console.log('--- Prospect verification: conflicting contacts fail closed ---');
   assert((verified.verification?.conflictingContacts.length ?? 0) >= 2, 'both conflicting numbers remain visible as evidence');
 }
 
+console.log('--- Prospect verification: same name but conflicting city fails closed ---');
+{
+  const p = baseProspect({
+    id: 'verification-test-location-conflict',
+    businessName: 'Topclass Autobody',
+    location: 'Mutare',
+    contactValue: '0716307770',
+    websitePresence: 'NONE_FOUND',
+  });
+  const results: Result[] = [
+    {
+      title: 'Topclass Autobody | Home',
+      url: 'https://www.topclass.co.zw/',
+      snippet: '23 George Avenue, Msasa, Harare. Call +263 242 446954. Topclass Autobody.',
+      source: 'stub',
+    },
+    {
+      title: 'TOPCLASS Autobody | Hararelife',
+      url: 'https://hararelife.com/listing/topclass-autobody/',
+      snippet: '23 George Avenue, Msasa, Harare. +263 242 446954. www.topclass.co.zw',
+      source: 'stub',
+    },
+  ];
+  const verified = await verifyProspect(ctx(results), p);
+  assert(verified.verification?.status === 'CONFLICT', 'same-name evidence in another city produces CONFLICT');
+  assert(!verified.contactValue, 'conflicting-city contact is removed');
+  assert(verified.contactChannel === 'UNKNOWN', 'conflicting-city contact channel is unusable');
+  assert(verified.websitePresence === 'UNKNOWN', 'wrong-city website is not attributed to the lead');
+  assert(!verified.websiteUrl, 'wrong-city website URL is not retained');
+}
+
 console.log('--- Prospect verification: no evidence remains unverified ---');
 {
   const p = baseProspect({ id: 'verification-test-3' });
