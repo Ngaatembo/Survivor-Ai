@@ -70,13 +70,13 @@ function auditHtml(url: URL, html: string, ms: number, status: number): WebsiteA
     ] };
 }
 
-export async function auditWebsite(rawUrl:string):Promise<WebsiteAudit>{
+export async function auditWebsite(rawUrl:string, fetchImpl: typeof fetch = fetch):Promise<WebsiteAudit>{
   const u=safeUrl(rawUrl);
   if(!u) return {status:'UNSUPPORTED',url:rawUrl,criticalIssues:['Website URL failed safe HTTP/HTTPS validation.'],
     opportunities:[],checks:emptyChecks(false),auditedAt:Date.now(),notes:['Audit skipped for safety.']};
   const controller=new AbortController(); const timer=setTimeout(()=>controller.abort(),TIMEOUT_MS); const started=Date.now();
   try{
-    const response=await fetch(u.toString(),{method:'GET',redirect:'manual',signal:controller.signal,
+    const response=await fetchImpl(u.toString(),{method:'GET',redirect:'manual',signal:controller.signal,
       headers:{'user-agent':'Survivor-AI-Website-Audit/1.0'}});
     const ms=Date.now()-started;
     if(response.status>=300&&response.status<400) return {status:'UNREACHABLE',url:u.toString(),httpStatus:response.status,responseMs:ms,
