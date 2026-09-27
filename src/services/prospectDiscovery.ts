@@ -205,9 +205,16 @@ export async function discoverProspects(
   // Run the planned searches in parallel: sequential searches (plus inline
   // verification) took longer than the dashboard's request timeout, so the
   // "Find clients" button timed out and saved nothing (27 Sept 2026).
+  // Search providers run concurrently, but each gets an isolated snapshot
+  // of the economy ledger. Sharing ctx.state across concurrent runSearch()
+  // calls creates a last-writer-wins race: one result can overwrite the
+  // other's fresh-search log/cache entry. Merge the two deltas explicitly
+  // after both calls finish.
+  const baseState = ctx.state;
   const outcomes = await Promise.all(
-    plan.map((seed) =>
-      runSearch(ctx, {
+    plan.map(async (seed) => {
+      const localCtx: SearchEconomyContext = { ...ctx, state: { log: [...baseState.log], cache: { ...baseState.cache } } };
+      const outcome = await runSearch(localCtx, {
         purpose: 'PROSPECT_DISCOVERY',
         // "site:facebook.com …" is turned into a Facebook-only domain filter by
         // the search provider; the other phrasing asks for business pages with
@@ -215,15 +222,23 @@ export async function discoverProspects(
         query: seed.query,
         entityId: seed.entityId,
         max: MAX_RESULTS_PER_QUERY,
-      }),
-    ),
+      });
+      return { outcome, state: localCtx.state };
+    }),
   );
+  ctx.state = {
+    log: [
+      ...baseState.log,
+      ...outcomes.flatMap((x) => x.state.log.slice(baseState.log.length)),
+    ].slice(-4000),
+    cache: Object.assign({}, baseState.cache, ...outcomes.map((x) => x.state.cache)),
+  };
 
   for (const [planIndex, seed] of plan.entries()) {
     if (found.length >= MAX_NEW_PROSPECTS_PER_CYCLE) break;
     const region = seed.region;
     const zimRegion = /zimbabwe|harare|bulawayo|mutare|gweru|marondera|masvingo|chitungwiza|kwekwe|kadoma|ruwa|norton|bindura|rusape|chinhoyi/i.test(region);
-    const searchOutcome = outcomes[planIndex];
+    const searchOutcome = outcomes[planIndex].outcome;
     if (searchOutcome.budgetExceeded) {
       budgetExceeded += 1;
       continue;
