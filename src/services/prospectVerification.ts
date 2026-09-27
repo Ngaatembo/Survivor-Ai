@@ -22,6 +22,22 @@ const GENERIC = new Set([
   'instagram','official','home','page','contact',
 ]);
 
+// Cities used for hard identity/location conflict detection. Suburbs such as
+// Msasa are intentionally excluded: "Msasa, Harare" is still Harare.
+const ZIM_CITIES = [
+  'Harare','Bulawayo','Mutare','Gweru','Kwekwe','Masvingo','Kadoma',
+  'Chitungwiza','Marondera','Norton','Ruwa','Bindura','Rusape','Chinhoyi',
+  'Beitbridge','Victoria Falls','Hwange','Kariba','Zvishavane','Chegutu',
+  'Chiredzi','Gwanda','Karoi','Shurugwi','Redcliff',
+];
+
+function extractCity(value: string): string | undefined {
+  const found = ZIM_CITIES.find((city) => new RegExp(
+    `\\\\b${city.replace(/ /g, '\\\\s+')}\\\\b`, 'i',
+  ).test(value));
+  return found?.toLowerCase();
+}
+
 function normalizeName(value: string): string[] {
   return value
     .toLowerCase()
@@ -151,13 +167,32 @@ export async function verifyProspect(
     `"${prospect.businessName}" "${prospect.location}" official website Facebook Instagram`,
   ];
 
-  const outcomes = await Promise.all(queries.map((query) => runSearch(ctx, {
-    purpose: 'CONTACT_VERIFICATION',
-    query,
-    entityId: prospect.id,
-    max: 5,
-    priority: prospect.priority === 'DO_NOT_CONTACT' ? 'LOW' : prospect.priority,
-  })));
+  // The two verification searches are independent, but runSearch mutates the
+  // economy ledger. Give each query an isolated snapshot, then merge both
+  // deltas so the parallelism cannot lose cache/log entries or bypass the
+  // entity/cycle accounting.
+  const baseState = ctx.state;
+  const outcomes = await Promise.all(queries.map(async (query) => {
+    const localCtx: SearchEconomyContext = {
+      ...ctx,
+      state: { log: [...baseState.log], cache: { ...baseState.cache },
+    };
+    const outcome = await runSearch(localCtx, {
+      purpose: 'CONTACT_VERIFICATION',
+      query,
+      entityId: prospect.id,
+      max: 5,
+      priority: prospect.priority === 'DO_NOT_CONTACT' ? 'LOW' : prospect.priority,
+    });
+    return { outcome, state: localCtx.state };
+  }));
+  ctx.state = {
+    log: [
+      ...baseState.log,
+      ...outcomes.flatMap((x) => x.state.log.slice(baseState.log.length)),
+    ].slice(-4000),
+    cache: Object.assign({}, baseState.cache, ...outcomes.map((x) => x.state.cache)),
+  };
   const results: SearchResult[] = [];
   const seen = new Set<string>();
   for (const outcome of outcomes) {
@@ -280,6 +315,22 @@ export async function verifyProspect(
     : classifyVerifiedWebsitePresence(verifiedWebsite ? bestWebsite.url : undefined, identityResults);
   const verifiedLocation = bestLocation && (bestLocation.sources >= 2 || (bestLocation.sources >= 1 && bestLocation.bestScore >= 0.82));
 
+  // A name match alone is not enough when the discovery record says Mutare but
+  // the strongest independent evidence consistently places the business in
+  // Harare (or another city). Treat that as an entity conflict rather than
+  // silently "correcting" the lead to the other business.
+  const prospectCity = extractCity(prospect.location);
+  const strongSourceCities = new Set(
+    identityResults
+      .filter(({ score }) => score >= 0.72)
+      .map(({ r }) => extractCity(`${r.title} ${r.snippet}`))
+      .filter((city): city is string => Boolean(city)),
+  );
+  const locationConflict = Boolean(
+    prospectCity &&
+    [...strongSourceCities].some((city) => city !== prospectCity),
+  );
+
   const identityScore = canonical.score;
   const contactScore = bestContact
     ? Math.min(1, bestContact.bestScore + Math.min(0.25, (bestContact.sources - 1) * 0.2))
@@ -291,7 +342,7 @@ export async function verifyProspect(
     rankedContacts[0].sources >= 1;
 
   const status: ProspectVerification['status'] =
-    contactConflict ? 'CONFLICT' :
+    (contactConflict || locationConflict) ? 'CONFLICT' :
     (identityScore >= 0.72 && sourceKeys.size >= 2 && (verifiedContact || verifiedEmail)) ? 'VERIFIED' :
     (identityScore >= 0.55 && (sourceKeys.size >= 1 || existingNormalized) && (verifiedContact || verifiedEmail || verifiedWebsite || verifiedLocation || existingNormalized)) ? 'PROVISIONAL' :
     'UNVERIFIED';
@@ -310,6 +361,7 @@ export async function verifyProspect(
   if (bestContact?.sources >= 2) notes.push('The same phone number appears on multiple independent public sources.');
   else if (bestContact) notes.push('A phone number was found on a matching source, but it is not corroborated across multiple domains.');
   if (rankedContacts.length > 1) notes.push(`Multiple contact numbers were found: ${rankedContacts.map((c) => c.raw).join(', ')}. Keep the conflict visible for human review.`);
+  if (locationConflict) notes.push(`Location conflict: the discovery record says ${prospect.location}, while strong independent evidence points to ${[...strongSourceCities].join(', ')}. Do not merge or contact automatically.`);
   if (bestEmail?.sources >= 2) notes.push('The same email appears on multiple independent public sources.');
   else if (bestEmail) notes.push('An email was found on a matching source, but it is not corroborated across multiple domains.');
   if (verifiedWebsite) notes.push('A matching business website was found: ' + bestWebsite.url);
@@ -348,15 +400,18 @@ export async function verifyProspect(
     ...verificationSources.filter((s) => !prospect.sources.some((existing) => existing.url && existing.url === s.url)),
   ];
 
+  const safeWebsitePresence = locationConflict ? 'UNKNOWN' as Prospect['websitePresence'] : websiteAssessment.presence;
+  const safeWebsiteUrl = locationConflict ? undefined : verification.verifiedWebsiteUrl;
+
   const next: Prospect = {
     ...prospect,
     businessName: verification.verifiedBusinessName ?? prospect.businessName,
     contactChannel: verification.verifiedContactChannel ?? (status === 'CONFLICT' ? 'UNKNOWN' : prospect.contactChannel),
     contactValue: verification.verifiedContactValue,
-    location: verification.verifiedLocation ?? prospect.location,
-    websitePresence: websiteAssessment.presence === 'UNKNOWN' ? prospect.websitePresence : websiteAssessment.presence,
-    websiteUrl: verification.verifiedWebsiteUrl ?? prospect.websiteUrl,
-    priority: websiteAssessment.presence === 'ADEQUATE' ? 'DO_NOT_CONTACT' : prospect.priority,
+    location: locationConflict ? prospect.location : (verification.verifiedLocation ?? prospect.location),
+    websitePresence: safeWebsitePresence === 'UNKNOWN' ? 'UNKNOWN' : safeWebsitePresence,
+    websiteUrl: safeWebsiteUrl,
+    priority: safeWebsitePresence === 'ADEQUATE' ? 'DO_NOT_CONTACT' : prospect.priority,
     verification,
     sources: mergedSources,
     evidenceNotes: `${prospect.evidenceNotes} Verification: ${verification.notes.join(' ')}`.trim(),
@@ -369,6 +424,7 @@ export async function verifyProspect(
   if (status === 'CONFLICT') {
     next.contactValue = undefined;
     next.contactChannel = 'UNKNOWN';
+    if (locationConflict) next.websiteUrl = undefined;
   }
 
   return next;
