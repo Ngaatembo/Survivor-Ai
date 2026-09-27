@@ -338,6 +338,25 @@ export function ProspectDrawer({ prospect, onClose }: { prospect: Prospect; onCl
                 <span className="mono-label">Specific problem evidence — </span>
                 {intelligence.specificProblemEvidence}
               </p>
+              {intelligence.primaryProblem && (
+                <div className="panel" style={{ margin: '10px 0', padding: 10, border: '1px solid var(--border)' }}>
+                  <div style={{ fontWeight: 700, marginBottom: 6 }}>Selected problem: {intelligence.primaryProblem.type.replaceAll('_', ' ')}</div>
+                  <div className="small"><span className="mono-label">Evidence — </span>{intelligence.primaryProblem.evidence}</div>
+                  <div className="small"><span className="mono-label">Business friction — </span>{intelligence.primaryProblem.businessFriction}</div>
+                  <div className="small"><span className="mono-label">Likely consequence — </span>{intelligence.primaryProblem.likelyConsequence}</div>
+                  <div className="small"><span className="mono-label">WebAura opportunity — </span>{intelligence.primaryProblem.solvableOpportunity}</div>
+                  <div className="small"><span className="mono-label">Outreach claim — </span>{intelligence.primaryProblem.outreachClaim}</div>
+                  {intelligence.problemSelection && (
+                    <details style={{ marginTop: 7 }}>
+                      <summary className="small faint">Why this problem was selected</summary>
+                      <div className="small muted" style={{ marginTop: 5 }}>{intelligence.problemSelection.reason}</div>
+                      <div className="small muted" style={{ marginTop: 5 }}>
+                        Candidates: {intelligence.problemSelection.candidates.map((x) => `${x.type} (${x.selectionScore}/100)`).join(' · ')}
+                      </div>
+                    </details>
+                  )}
+                </div>
+              )}
               <p className="small" style={{ marginBottom: 8 }}>
                 <span className="mono-label">Recommended angle — </span>
                 {intelligence.recommendedAngle}
