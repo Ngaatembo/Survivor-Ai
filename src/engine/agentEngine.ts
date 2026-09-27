@@ -750,7 +750,7 @@ export class AgentEngine {
 
         allProspects = await this.repo.listProspects();
         const existingIntelligence = await this.repo.listProspectIntelligence();
-        const problemOutcomeStats = computeProblemOutcomeStats(prospects, existingIntelligence);
+        const problemOutcomeStats = computeProblemOutcomeStats(allProspects, existingIntelligence);
         const revenueCandidates = rankRevenueProspects(allProspects, 5);
         const ENGAGED_STATUSES = new Set(['INTERESTED', 'PROPOSAL_SENT', 'NEGOTIATING', 'WON']);
         const offerCandidates = [
