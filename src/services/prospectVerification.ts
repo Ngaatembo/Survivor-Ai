@@ -131,6 +131,15 @@ function chooseCanonicalName(prospect: Prospect, results: SearchResult[]): { nam
   return candidates[0] ? { name: candidates[0].name, score: candidates[0].score } : { score: 0 };
 }
 
+function classifyVerifiedWebsitePresence(url: string | undefined, matchedResults: Array<{ r: SearchResult; score: number }>): { presence: Prospect['websitePresence']; note?: string } {
+  if (!url) return { presence: 'UNKNOWN' };
+  const evidence = matchedResults.map(({ r }) => r.title + ' ' + r.snippet).join(' ').toLowerCase();
+  if (/(under construction|coming soon|website is outdated|outdated website|old website|not mobile friendly|not mobile-friendly|broken website|site is down)/i.test(evidence)) {
+    return { presence: 'WEAK_OR_OUTDATED', note: 'Independent search evidence suggests the existing website may be outdated, unfinished, unavailable, or weak on mobile.' };
+  }
+  return { presence: 'ADEQUATE', note: 'An independent business website was corroborated; quality was not independently audited from page content.' };
+}
+
 export async function verifyProspect(
   ctx: SearchEconomyContext,
   prospect: Prospect,
@@ -141,18 +150,18 @@ export async function verifyProspect(
     `"${prospect.businessName}" "${prospect.location}" official website Facebook Instagram`,
   ];
 
+  const outcomes = await Promise.all(queries.map((query) => runSearch(ctx, {
+    purpose: 'CONTACT_VERIFICATION',
+    query,
+    entityId: prospect.id,
+    max: 5,
+    priority: prospect.priority === 'DO_NOT_CONTACT' ? 'LOW' : prospect.priority,
+  })));
   const results: SearchResult[] = [];
   const seen = new Set<string>();
-  for (const query of queries) {
-    const outcome = await runSearch(ctx, {
-      purpose: 'CONTACT_VERIFICATION',
-      query,
-      entityId: prospect.id,
-      max: 5,
-      priority: prospect.priority === 'DO_NOT_CONTACT' ? 'LOW' : prospect.priority,
-    });
+  for (const outcome of outcomes) {
     for (const r of outcome.results) {
-      const key = `${r.url}|${r.title}`;
+      const key = r.url + '|' + r.title;
       if (!seen.has(key)) { seen.add(key); results.push(r); }
     }
   }
@@ -257,6 +266,7 @@ export async function verifyProspect(
   );
   const verifiedEmail = bestEmail && (bestEmail.sources >= 2 || (bestEmail.sources >= 1 && bestEmail.bestScore >= 0.82));
   const verifiedWebsite = bestWebsite && bestWebsite.bestScore >= 0.72;
+  const websiteAssessment = classifyVerifiedWebsitePresence(verifiedWebsite ? bestWebsite.url : undefined, identityResults);
   const verifiedLocation = bestLocation && (bestLocation.sources >= 2 || (bestLocation.sources >= 1 && bestLocation.bestScore >= 0.82));
 
   const identityScore = canonical.score;
@@ -292,6 +302,7 @@ export async function verifyProspect(
   if (bestEmail?.sources >= 2) notes.push('The same email appears on multiple independent public sources.');
   else if (bestEmail) notes.push('An email was found on a matching source, but it is not corroborated across multiple domains.');
   if (verifiedWebsite) notes.push('A matching business website was found: ' + bestWebsite.url);
+  if (websiteAssessment.note) notes.push(websiteAssessment.note);
   if (verifiedLocation) notes.push('A matching location signal was found: ' + bestLocation.value);
   if (canonical.name && nameSimilarity(prospect.businessName, canonical.name) < 1) notes.push(`Canonical source name differs from the discovery label: "${canonical.name}".`);
 
@@ -330,7 +341,9 @@ export async function verifyProspect(
     contactChannel: verification.verifiedContactChannel ?? (status === 'CONFLICT' ? 'UNKNOWN' : prospect.contactChannel),
     contactValue: verification.verifiedContactValue,
     location: verification.verifiedLocation ?? prospect.location,
+    websitePresence: websiteAssessment.presence === 'UNKNOWN' ? prospect.websitePresence : websiteAssessment.presence,
     websiteUrl: verification.verifiedWebsiteUrl ?? prospect.websiteUrl,
+    priority: websiteAssessment.presence === 'ADEQUATE' ? 'DO_NOT_CONTACT' : prospect.priority,
     verification,
     sources: mergedSources,
     evidenceNotes: `${prospect.evidenceNotes} Verification: ${verification.notes.join(' ')}`.trim(),
