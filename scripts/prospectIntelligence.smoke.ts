@@ -165,6 +165,42 @@ console.log('--- researchProspect: no search results at all -> honest low-confid
     const fallbackIntel = await researchProspect(mkCtx(snippetSearch), failingLlm, prospect);
     assert(fallbackIntel.generator === 'snippet-digest', 'a null/unusable LLM response falls back to the honest digest, never a fabricated report');
 
+    console.log('--- weak/LOW problem candidates are never promoted to a primary problem ---');
+    const weakLlm = new MockLLMProvider({
+      businessOverview: 'Test Bakery is a local bakery with a public Facebook presence.',
+      apparentServices: ['Fresh bread'],
+      socialPresenceSummary: 'Public Facebook presence found.',
+      competitiveNote: 'Not enough evidence for a comparison.',
+      specificProblemEvidence: 'No sufficiently strong business-specific problem was established.',
+      recommendedAngle: 'Review the available evidence manually.',
+      problemCandidates: [
+        {
+          type: 'ORDERING',
+          evidence: 'A single ambiguous snippet may relate to ordering.',
+          businessFriction: 'The available evidence is too weak to establish a real ordering friction.',
+          likelyConsequence: 'There may be some inconvenience, but this is not established.',
+          solvableOpportunity: 'Could review the ordering path if stronger evidence appears.',
+          outreachClaim: 'I noticed something that may affect ordering.',
+          confidence: 'LOW',
+          sourceIds: ['1'],
+        },
+      ],
+      primaryProblem: {
+        type: 'ORDERING',
+        evidence: 'A single ambiguous snippet may relate to ordering.',
+        businessFriction: 'The available evidence is too weak to establish a real ordering friction.',
+        likelyConsequence: 'There may be some inconvenience, but this is not established.',
+        solvableOpportunity: 'Could review the ordering path if stronger evidence appears.',
+        outreachClaim: 'I noticed something that may affect ordering.',
+        confidence: 'LOW',
+        sourceIds: ['1'],
+      },
+      confidence: 'LOW',
+    });
+    const weakIntel = await researchProspect(mkCtx(snippetSearch), weakLlm, prospect);
+    assert(!weakIntel.primaryProblem, 'LOW-confidence candidate cannot become a primary problem');
+    assert(!weakIntel.problemSelection, 'no candidate is selected when all evidence is insufficient');
+
     console.log('--- generateOffer / generateOutreachMessages: only trust HIGH/MEDIUM LLM-synthesized intelligence ---');
     const model = generateBusinessModel(opp, []);
     const offerWithGoodIntel = generateOffer(prospect, model, llmIntel);
