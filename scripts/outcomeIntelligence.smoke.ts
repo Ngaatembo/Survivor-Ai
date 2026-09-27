@@ -1,0 +1,8 @@
+import { computeProblemOutcomeStats } from '../src/lib/prospectLearning';
+import type { Prospect, ProspectIntelligence } from '../src/types';
+const p=(id:string,status:Prospect['status']):Prospect=>({id,opportunityId:'o',opportunityName:'Websites',businessName:id,category:'Local',location:'Harare',websitePresence:'NONE_FOUND',socialLinks:[],contactChannel:'WHATSAPP',contactValue:'+263771111111',sources:[],evidenceNotes:'',priority:'HIGH',score:{} as Prospect['score'],status,dataSource:'LIVE',dateDiscovered:0,messagesSentCount:1,responsesReceivedCount:status==='WON'?1:0,actualRevenue:0,notes:[],createdAt:0,updatedAt:0});
+const i=(id:string):ProspectIntelligence=>({id:'i'+id,prospectId:id,businessOverview:'',apparentServices:[],socialPresenceSummary:'',competitiveNote:'',specificProblemEvidence:'',recommendedAngle:'',confidence:'HIGH',generator:'llm',sources:[],generatedAt:0,updatedAt:0,primaryProblem:{type:'BOOKING',evidence:'e',businessFriction:'f',likelyConsequence:'c',solvableOpportunity:'o',outreachClaim:'claim',confidence:'HIGH',sourceIds:['s']}});
+const stats=computeProblemOutcomeStats([p('1','WON'),p('2','LOST'),p('3','NOT_INTERESTED')],[i('1'),i('2'),i('3')]);
+if(stats.length!==1||stats[0].decided!==3||stats[0].won!==1||Math.round((stats[0].closeRate??0)*100)!==33)throw new Error('problem outcome aggregation failed');
+if(computeProblemOutcomeStats([p('4','CONTACTED')],[i('4')]).length!==0)throw new Error('undecided prospect leaked into outcome intelligence');
+console.log('Outcome Intelligence smoke: all checks passed.');
