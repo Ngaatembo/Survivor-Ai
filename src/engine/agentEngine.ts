@@ -728,16 +728,22 @@ export class AgentEngine {
             .slice(0, 2);
 
           for (const target of verificationTargets) {
-            const verified = await verifyProspect(searchCtx, target, now);
-            await this.repo.upsertProspects([verified]);
-            const v = verified.verification;
-            await this.repo.appendProspectInteraction({
-              id: uid('pint'),
-              prospectId: verified.id,
-              kind: 'NOTE',
-              summary: `Identity/contact verification: ${v?.status ?? 'UNVERIFIED'} (${v?.confidence ?? 0}% confidence), ${v?.independentSources ?? 0} independent source(s), ${v?.contactSources ?? 0} contact source(s).`,
-              createdAt: now,
-            });
+            try {
+              const verified = await verifyProspect(searchCtx, target, now);
+              await this.repo.upsertProspects([verified]);
+              const v = verified.verification;
+              await this.repo.appendProspectInteraction({
+                id: uid('pint'),
+                prospectId: verified.id,
+                kind: 'NOTE',
+                summary: `Identity/contact verification: ${v?.status ?? 'UNVERIFIED'} (${v?.confidence ?? 0}% confidence), ${v?.independentSources ?? 0} independent source(s), ${v?.contactSources ?? 0} contact source(s).`,
+                createdAt: now,
+              });
+            } catch (error) {
+              // One provider/search failure must not abort the entire survivor
+              // cycle or prevent the remaining prospects from being processed.
+              await hooks.log('VERIFY', `Verification failed for ${target.businessName}: ${(error as Error).message}`);
+            }
           }
 
           if (verificationTargets.length > 0) {
