@@ -34,7 +34,10 @@ const NEXT_STATUS_OPTIONS: Partial<Record<ProspectStatus, ProspectStatus[]>> = {
 };
 
 export function ProspectDrawer({ prospect, onClose }: { prospect: Prospect; onClose: () => void }) {
-  const outreach = useStore((s) => s.outreachMessages.find((m) => m.prospectId === prospect.id));
+  const verifiedReady = prospect.verification?.status === 'VERIFIED' || prospect.verification?.status === 'PROVISIONAL';
+  const outreach = useStore((s) =>
+    verifiedReady ? s.outreachMessages.find((m) => m.prospectId === prospect.id) : undefined,
+  );
   const offer = useStore((s) => s.offers.find((o) => o.prospectId === prospect.id));
   const brief = useStore((s) => (offer ? s.designBriefs.find((b) => b.offerId === offer.id) : undefined));
   const project = useStore((s) => s.projects.find((p) => p.prospectId === prospect.id));
@@ -105,7 +108,6 @@ export function ProspectDrawer({ prospect, onClose }: { prospect: Prospect; onCl
     finally { setBuildingDemo(false); }
   };
 
-  const verifiedReady = prospect.verification?.status === 'VERIFIED' || prospect.verification?.status === 'PROVISIONAL';
   const offerApproval = offer ? actionApprovals.find((a) => a.actionId === `offer:${offer.id}`) : undefined;
   const outreachApproval = outreach ? actionApprovals.find((a) => a.actionId === `outreach:${prospect.id}`) : undefined;
 
