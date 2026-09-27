@@ -143,7 +143,7 @@ console.log('--- researchProspect: no search results at all -> honest low-confid
         likelyConsequence: 'Ordering may be less convenient.',
         solvableOpportunity: 'Provide a direct online ordering path.',
         outreachClaim: 'I noticed a review mentioning slow delivery times.',
-        confidence: 'HIGH', sourceIds: ['src-1'],
+        confidence: 'HIGH', sourceIds: ['1'],
       },
       confidence: 'HIGH',
     });
@@ -152,6 +152,8 @@ console.log('--- researchProspect: no search results at all -> honest low-confid
     assert(llmIntel.confidence === 'HIGH', 'confidence passed through from the model');
     assert(llmIntel.apparentServices.includes('Fresh bread'), 'apparent services come from the real analysis');
     assert(llmIntel.recommendedAngle.includes('delivery'), 'recommended angle is grounded in the actual snippet evidence (slow delivery)');
+    assert(llmIntel.primaryProblem?.type === 'ORDERING', 'numeric LLM source reference resolves to the stored primary problem');
+    assert(llmIntel.primaryProblem?.sourceIds.length === 1, 'primary problem retains the linked source ID');
 
     console.log('--- researchProspect: LLM connected but fails/returns unusable JSON -> falls back to digest ---');
     const failingLlm = new MockLLMProvider(null);
