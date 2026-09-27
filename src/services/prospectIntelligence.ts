@@ -14,7 +14,7 @@
  * that says so, never a fabricated one.
  * ========================================================================== */
 
-import type { Prospect, ProspectIntelligence, ProspectProblemType, ResearchSource } from '../types';
+import type { Prospect, ProspectIntelligence, ProspectProblemCandidate, ProspectProblemSelection, ProspectProblemType, ResearchSource } from '../types';
 import { uid } from '../lib/format';
 import type { LLMProvider } from './providers/types';
 import { runSearch, type SearchEconomyContext } from './searchEconomy';
@@ -61,6 +61,38 @@ function normalizePrimaryProblem(
     outreachClaim: textFields[4][1],
     confidence,
     sourceIds,
+  };
+}
+
+function selectProblemCandidates(rawCandidates: unknown, rawPrimary: unknown, sources: ResearchSource[], now: number): { primaryProblem?: ProspectProblemCandidate; problemSelection?: ProspectProblemSelection } {
+  const rawList = Array.isArray(rawCandidates) ? rawCandidates : [];
+  const candidates = [...rawList, ...(rawPrimary ? [rawPrimary] : [])]
+    .map((value) => normalizePrimaryProblem(value, sources))
+    .filter((value): value is NonNullable<ReturnType<typeof normalizePrimaryProblem>> => Boolean(value));
+
+  const unique = candidates.filter((candidate, index, arr) =>
+    arr.findIndex((x) => x.type === candidate.type && x.outreachClaim === candidate.outreachClaim) === index
+  );
+
+  const scored: ProspectProblemCandidate[] = unique.map((candidate) => {
+    const evidenceStrength = Math.min(100, 50 + Math.min(40, candidate.sourceIds.length * 20) + (candidate.confidence === 'HIGH' ? 10 : candidate.confidence === 'MEDIUM' ? 5 : 0));
+    const businessRelevance = Math.min(100, 40 + (candidate.businessFriction.length >= 40 ? 20 : 5) + (candidate.likelyConsequence.length >= 30 ? 20 : 5));
+    const solvability = Math.min(100, 50 + (candidate.solvableOpportunity.length >= 30 ? 25 : 5) + (candidate.outreachClaim.length >= 20 ? 15 : 5));
+    const clarity = candidate.outreachClaim.length <= 180 ? 90 : 60;
+    const selectionScore = Math.round(evidenceStrength * 0.35 + businessRelevance * 0.25 + solvability * 0.25 + clarity * 0.15);
+    return { ...candidate, evidenceStrength, businessRelevance, solvability, clarity, selectionScore, selectionReason: 'Strongest combination of evidence, business relevance, solvability and clear customer-facing claim.' };
+  }).sort((a, b) => b.selectionScore - a.selectionScore);
+
+  if (!scored.length) return {};
+  const selected = scored[0];
+  return {
+    primaryProblem: selected,
+    problemSelection: {
+      candidates: scored,
+      selectedIndex: 0,
+      reason: selected.selectionReason,
+      selectedAt: now,
+    },
   };
 }
 
@@ -182,7 +214,7 @@ export async function researchProspect(
           competitiveNote: analysis.competitiveNote ?? 'Not addressed by the model.',
           specificProblemEvidence: analysis.specificProblemEvidence ?? prospect.evidenceNotes,
           recommendedAngle: analysis.recommendedAngle ?? 'Not addressed by the model.',
-          primaryProblem: normalizePrimaryProblem(analysis.primaryProblem, sources),
+          ...selectProblemCandidates(analysis.problemCandidates, analysis.primaryProblem, sources, now),
           confidence: analysis.confidence ?? 'MEDIUM',
           generator: 'llm',
         };
