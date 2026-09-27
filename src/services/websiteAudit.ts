@@ -23,28 +23,28 @@ function emptyChecks(https: boolean, reachable = false) {
 }
 
 function textOf(html: string): string {
-  return html.replace(/<script[\\s\\S]*?<\\/script>/gi,' ')
-    .replace(/<style[\\s\\S]*?<\\/style>/gi,' ')
-    .replace(/<noscript[\\s\\S]*?<\\/noscript>/gi,' ')
+  return html.replace(/<script[\s\S]*?<\/script>/gi,' ')
+    .replace(/<style[\s\S]*?<\/style>/gi,' ')
+    .replace(/<noscript[\s\S]*?<\/noscript>/gi,' ')
     .replace(/<[^>]+>/g,' ').replace(/&nbsp;|&#160;/gi,' ')
-    .replace(/&amp;/gi,'&').replace(/\\s+/g,' ').trim().toLowerCase();
+    .replace(/&amp;/gi,'&').replace(/\s+/g,' ').trim().toLowerCase();
 }
 
 function auditHtml(url: URL, html: string, ms: number, status: number): WebsiteAudit {
   const text = textOf(html);
-  const images = (html.match(/<img\\b/gi) ?? []).length;
-  const altImages = (html.match(/<img\\b[^>]*\\balt=["'][^"']*["']/gi) ?? []).length;
+  const images = (html.match(/<img\b/gi) ?? []).length;
+  const altImages = (html.match(/<img\b[^>]*\balt=["'][^"']*["']/gi) ?? []).length;
   const checks = {
     https: url.protocol === 'https:',
     reachable: status >= 200 && status < 300,
     mobileViewport: /<meta[^>]+name=["']viewport["'][^>]+content=/i.test(html) ||
       /<meta[^>]+content=["'][^"']*width=device-width[^"']*["'][^>]+name=["']viewport["']/i.test(html),
-    title: /<title(?:\\s[^>]*)?>\\s*[^<]{2,}\\s*<\\/title>/i.test(html),
+    title: /<title(?:\s[^>]*)?>\s*[^<]{2,}\s*<\/title>/i.test(html),
     metaDescription: /<meta[^>]+name=["']description["'][^>]+content=["'][^"']{20,}["']/i.test(html) ||
       /<meta[^>]+content=["'][^"']{20,}["'][^>]+name=["']description["']/i.test(html),
-    contactPath: /(tel:|mailto:|whatsapp|contact(?:\\s+us)?|call\\s+(?:us|now))/i.test(html),
-    conversionPath: /(book(?:ing)?|reserve|appointment|order\\s+online|request\\s+(?:a\\s+)?quote|get\\s+(?:a\\s+)?quote|enquir|buy\\s+now|shop\\s+now)/i.test(text),
-    serviceEvidence: /(services?|products?|menu|rooms?|packages?|pricing|prices?|our\\s+work|portfolio)/i.test(text),
+    contactPath: /(tel:|mailto:|whatsapp|contact(?:\s+us)?|call\s+(?:us|now))/i.test(html),
+    conversionPath: /(book(?:ing)?|reserve|appointment|order\s+online|request\s+(?:a\s+)?quote|get\s+(?:a\s+)?quote|enquir|buy\s+now|shop\s+now)/i.test(text),
+    serviceEvidence: /(services?|products?|menu|rooms?|packages?|pricing|prices?|our\s+work|portfolio)/i.test(text),
     imageAltCoverage: images === 0 || altImages / images >= 0.6,
     lightweightResponse: ms <= 3000 && html.length <= MAX_HTML_BYTES,
   };
