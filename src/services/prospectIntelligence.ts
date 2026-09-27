@@ -139,6 +139,18 @@ export async function researchProspect(
           competitiveNote: analysis.competitiveNote ?? 'Not addressed by the model.',
           specificProblemEvidence: analysis.specificProblemEvidence ?? prospect.evidenceNotes,
           recommendedAngle: analysis.recommendedAngle ?? 'Not addressed by the model.',
+          primaryProblem: analysis.primaryProblem && typeof analysis.primaryProblem === 'object'
+            ? {
+                type: analysis.primaryProblem.type || 'OTHER',
+                evidence: analysis.primaryProblem.evidence || '',
+                businessFriction: analysis.primaryProblem.businessFriction || '',
+                likelyConsequence: analysis.primaryProblem.likelyConsequence || '',
+                solvableOpportunity: analysis.primaryProblem.solvableOpportunity || '',
+                outreachClaim: analysis.primaryProblem.outreachClaim || '',
+                confidence: analysis.primaryProblem.confidence || 'LOW',
+                sourceIds: Array.isArray(analysis.primaryProblem.sourceIds) ? analysis.primaryProblem.sourceIds : [],
+              }
+            : undefined,
           confidence: analysis.confidence ?? 'MEDIUM',
           generator: 'llm',
         };
