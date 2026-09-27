@@ -25,15 +25,7 @@ const ANALYSIS_SCHEMA_HINT = `Return ONLY minified JSON with this shape:
 Conservative, realistic numbers for a beginner with ~$50. If sources are weak,
 use UNCERTAIN/UNVERIFIED. No prose outside the JSON.`;
 
-const PROSPECT_SCHEMA_HINT = `Return ONLY minified JSON with this shape:
-{"businessOverview":string,"apparentServices":string[],"socialPresenceSummary":string,
-"competitiveNote":string,"specificProblemEvidence":string,"recommendedAngle":string,
-"confidence":"HIGH|MEDIUM|LOW"}
-Base every field ONLY on the provided snippets — never invent a service, review, or
-fact this business doesn't have evidence for in the snippets. If the snippets don't
-support a field, say so plainly in that field rather than guessing (e.g.
-"no evidence found of X in available sources"). Use LOW confidence when snippets are
-thin or generic. No prose outside the JSON.`;
+const PROSPECT_SCHEMA_HINT = `Return ONLY minified JSON with this shape:\n{"businessOverview":string,"apparentServices":string[],"socialPresenceSummary":string,"competitiveNote":string,"specificProblemEvidence":string,"recommendedAngle":string,"primaryProblem":{"type":"DISCOVERABILITY|TRUST|CONVERSION|BOOKING|ORDERING|LEAD_CAPTURE|FOLLOW_UP|CUSTOMER_EXPERIENCE|COMPETITIVE_POSITION|WEBSITE_QUALITY|OTHER","evidence":string,"businessFriction":string,"likelyConsequence":string,"solvableOpportunity":string,"outreachClaim":string,"confidence":"HIGH|MEDIUM|LOW","sourceIds":string[]},"confidence":"HIGH|MEDIUM|LOW"}\nReason in this order: OBSERVATION -> FRICTION -> CONSEQUENCE -> OPPORTUNITY -> OUTREACH CLAIM. Prefer one strong evidenced problem over many weak ones. A missing feature alone is not a business problem. Never invent metrics, lost sales, customer complaints, motives, or competitor superiority. Distinguish facts from reasonable inferences. sourceIds must map to [1]...[8]. If no sufficiently evidenced business-specific problem exists, set primaryProblem to null and confidence to LOW. No prose outside the JSON.`;
 
 const MARKET_PRICE_SCHEMA_HINT = `Return ONLY minified JSON with this shape:
 {"priceMin":number,"priceMax":number,"currency":string,"rationale":string,
