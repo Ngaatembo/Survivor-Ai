@@ -232,6 +232,38 @@ export function ProspectDrawer({ prospect, onClose }: { prospect: Prospect; onCl
                 <KV k="Verified website" v={prospect.verification.verifiedWebsiteUrl ?? prospect.websiteUrl ?? 'Not verified'} />
                 <KV k="Verified location" v={prospect.verification.verifiedLocation ?? prospect.location ?? 'Not verified'} />
               </div>
+              {prospect.verification.websiteAudit && (
+                <div style={{ marginTop: 10, padding: 10, border: '1px solid var(--border)', borderRadius: 8 }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8, alignItems: 'center', marginBottom: 6 }}>
+                    <strong className="small">Website commercial audit</strong>
+                    <Badge tone={prospect.verification.websiteAudit.verdict === 'HEALTHY' ? 'green' : prospect.verification.websiteAudit.status === 'AUDITED' ? 'amber' : 'blue'}>
+                      {prospect.verification.websiteAudit.status === 'AUDITED'
+                        ? `${prospect.verification.websiteAudit.score}/100 · ${prospect.verification.websiteAudit.verdict}`
+                        : prospect.verification.websiteAudit.status}
+                    </Badge>
+                  </div>
+                  {prospect.verification.websiteAudit.criticalIssues.length > 0 && (
+                    <div className="small muted" style={{ marginBottom: 6 }}>
+                      <strong>Critical:</strong> {prospect.verification.websiteAudit.criticalIssues.join(' · ')}
+                    </div>
+                  )}
+                  {prospect.verification.websiteAudit.opportunities.length > 0 && (
+                    <details>
+                      <summary className="small faint" style={{ cursor: 'pointer' }}>
+                        {prospect.verification.websiteAudit.opportunities.length} improvement signal(s)
+                      </summary>
+                      <ul style={{ marginTop: 6, paddingLeft: 18 }}>
+                        {prospect.verification.websiteAudit.opportunities.slice(0, 8).map((item, i) => (
+                          <li key={i} className="small muted" style={{ marginBottom: 3 }}>{item}</li>
+                        ))}
+                      </ul>
+                    </details>
+                  )}
+                  <div className="faint small" style={{ marginTop: 6 }}>
+                    First-page signal audit only — not a Lighthouse/Core Web Vitals score.
+                  </div>
+                </div>
+              )}
               {prospect.verification.conflictingContacts.length > 0 && (
                 <div className="warn-banner" style={{ marginTop: 10 }}>
                   <strong>Contact conflict:</strong> {prospect.verification.conflictingContacts.join(' · ')}. Survivor will not choose an ambiguous number automatically.

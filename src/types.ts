@@ -466,6 +466,34 @@ export type ContactChannel = 'PHONE' | 'WHATSAPP' | 'EMAIL' | 'FACEBOOK' | 'INST
 
 export type ProspectVerificationStatus = 'VERIFIED' | 'PROVISIONAL' | 'CONFLICT' | 'UNVERIFIED';
 
+export type WebsiteAuditStatus = 'AUDITED' | 'UNREACHABLE' | 'UNSUPPORTED' | 'SKIPPED';
+
+export interface WebsiteAudit {
+  status: WebsiteAuditStatus;
+  url: string;
+  finalUrl?: string;
+  httpStatus?: number;
+  responseMs?: number;
+  score?: number; // 0..100, deterministic first-page commercial/technical audit
+  verdict?: 'HEALTHY' | 'NEEDS_WORK';
+  criticalIssues: string[];
+  opportunities: string[];
+  checks: {
+    https: boolean;
+    reachable: boolean;
+    mobileViewport: boolean;
+    title: boolean;
+    metaDescription: boolean;
+    contactPath: boolean;
+    conversionPath: boolean;
+    serviceEvidence: boolean;
+    imageAltCoverage: boolean;
+    lightweightResponse: boolean;
+  };
+  auditedAt: number;
+  notes: string[];
+}
+
 export interface ProspectVerification {
   status: ProspectVerificationStatus;
   confidence: number; // 0..100, evidence-based identity/contact confidence
@@ -475,6 +503,7 @@ export interface ProspectVerification {
   verifiedEmail?: string;
   verifiedWebsiteUrl?: string;
   verifiedLocation?: string;
+  websiteAudit?: WebsiteAudit;
   alternateContacts?: string[];
   businessNameMatchScore: number; // 0..1
   contactMatchScore: number; // 0..1
