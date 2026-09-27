@@ -83,6 +83,9 @@ console.log('--- Prospect verification: corroborated business + contact ---');
   assert(verified.contactValue === '0771234567', 'corroborated phone is retained');
   assert(verified.contactChannel === 'PHONE', 'verified phone is exposed as PHONE');
   assert((verified.verification?.contactSources ?? 0) >= 2, 'contact is corroborated across independent sources');
+  assert(verified.websitePresence === 'ADEQUATE', 'independent website evidence upgrades website presence to ADEQUATE');
+  assert(verified.websiteUrl === 'https://chidocuts.co.zw/', 'verified independent website URL is retained');
+  assert(verified.priority === 'DO_NOT_CONTACT', 'adequate website prospect is removed from the website-offer contact queue');
 }
 
 console.log('--- Prospect verification: conflicting contacts fail closed ---');
