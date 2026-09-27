@@ -65,8 +65,9 @@ function gapAnalysis(p: Prospect, intelligence?: ProspectIntelligence): string |
   // research exists on this specific business, fold its recommended angle
   // in alongside the generic presence-based gap analysis, rather than
   // replacing it — both are grounded in real evidence about this business.
-  if (intelligence && intelligence.generator === 'llm' && intelligence.confidence !== 'LOW' && intelligence.recommendedAngle) {
-    return [generic, intelligence.recommendedAngle].filter(Boolean).join(' ');
+  const problem = intelligence?.primaryProblem;
+  if (problem && intelligence?.generator === 'llm' && intelligence.confidence !== 'LOW' && problem.confidence !== 'LOW' && problem.solvableOpportunity && problem.sourceIds.length > 0) {
+    return [generic, `Evidence-backed opportunity: ${problem.solvableOpportunity}.`].filter(Boolean).join(' ');
   }
   return generic;
 }
