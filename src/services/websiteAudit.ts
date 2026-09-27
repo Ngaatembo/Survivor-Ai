@@ -83,6 +83,10 @@ export async function auditWebsite(rawUrl:string, fetchImpl: typeof fetch = fetc
       criticalIssues:['Homepage returned a redirect; Survivor does not follow redirects during audits.'],
       opportunities:['Audit the final verified HTTPS homepage URL instead.'],checks:emptyChecks(u.protocol==='https:'),
       auditedAt:Date.now(),notes:['Redirects are not followed to reduce SSRF risk.']};
+    if(response.status>=400) return {status:'UNREACHABLE',url:u.toString(),httpStatus:response.status,responseMs:ms,
+      criticalIssues:[`Homepage returned HTTP ${response.status}; commercial quality was not scored.`],opportunities:[],
+      checks:emptyChecks(u.protocol==='https:'),auditedAt:Date.now(),
+      notes:['HTTP errors are treated as unavailable rather than as proof of poor site quality.']};
     const ct=response.headers.get('content-type')??'';
     if(!ct.toLowerCase().includes('text/html')) return {status:'UNSUPPORTED',url:u.toString(),httpStatus:response.status,responseMs:ms,
       criticalIssues:[`Homepage content type is ${ct||'unknown'}, not HTML.`],opportunities:[],
