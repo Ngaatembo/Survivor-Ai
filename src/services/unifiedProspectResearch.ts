@@ -1,6 +1,7 @@
 import type { MarketPriceResearch, Opportunity, Prospect, ProspectIntelligence, ResearchSource } from '../types';
 import type { LLMProvider } from './providers/types';
 import type { SearchEconomyContext } from './searchEconomy';
+import type { ProblemOutcomeStats } from '../lib/prospectLearning';
 import { verifyProspect } from './prospectVerification';
 import { researchProspect } from './prospectIntelligence';
 import { researchMarketPrice } from './marketPricing';
@@ -69,6 +70,7 @@ export async function runUnifiedProspectResearch(
   prospect: Prospect,
   opportunity: Opportunity,
   now = Date.now(),
+  outcomeStats: ProblemOutcomeStats[] = [],
 ): Promise<UnifiedProspectResearch> {
   const verified = await verifyProspect(ctx, prospect, now);
   const intelligence = await researchProspect(
@@ -76,7 +78,7 @@ export async function runUnifiedProspectResearch(
     llm,
     verified,
     now,
-    { statusChanged: true, offerPending: true },
+    { statusChanged: true, offerPending: true, outcomeStats },
   );
   const marketPrice = await researchMarketPrice(
     ctx,
