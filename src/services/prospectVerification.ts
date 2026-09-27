@@ -9,6 +9,7 @@
  * ========================================================================== */
 
 import type { ContactChannel, Prospect, ProspectVerification, ResearchSource } from '../types';
+import { auditWebsite } from './websiteAudit';
 import type { SearchEconomyContext } from './searchEconomy';
 import { runSearch } from './searchEconomy';
 import { uid } from '../lib/format';
@@ -266,7 +267,19 @@ export async function verifyProspect(
   );
   const verifiedEmail = bestEmail && (bestEmail.sources >= 2 || (bestEmail.sources >= 1 && bestEmail.bestScore >= 0.82));
   const verifiedWebsite = bestWebsite && bestWebsite.bestScore >= 0.72;
-  const websiteAssessment = classifyVerifiedWebsitePresence(verifiedWebsite ? bestWebsite.url : undefined, identityResults);
+  const websiteAudit = verifiedWebsite ? await auditWebsite(bestWebsite.url) : undefined;
+  const auditedPresence = websiteAudit?.status === 'AUDITED' && websiteAudit.verdict === 'NEEDS_WORK'
+    ? 'WEAK_OR_OUTDATED'
+    : websiteAudit?.status === 'UNREACHABLE'
+      ? 'WEAK_OR_OUTDATED'
+      : websiteAudit?.status === 'AUDITED' && websiteAudit.verdict === 'HEALTHY'
+        ? 'ADEQUATE'
+        : undefined;
+  const websiteAssessment = auditedPresence
+    ? { presence: auditedPresence as Prospect['websitePresence'], note: websiteAudit?.status === 'AUDITED'
+        ? `Website audit score: ${websiteAudit.score}/100. ${websiteAudit.opportunities.length} improvement signal(s) detected.`
+        : 'Existing website was verified, but its homepage could not be fully audited.' }
+    : classifyVerifiedWebsitePresence(verifiedWebsite ? bestWebsite.url : undefined, identityResults);
   const verifiedLocation = bestLocation && (bestLocation.sources >= 2 || (bestLocation.sources >= 1 && bestLocation.bestScore >= 0.82));
 
   const identityScore = canonical.score;
@@ -302,6 +315,7 @@ export async function verifyProspect(
   if (bestEmail?.sources >= 2) notes.push('The same email appears on multiple independent public sources.');
   else if (bestEmail) notes.push('An email was found on a matching source, but it is not corroborated across multiple domains.');
   if (verifiedWebsite) notes.push('A matching business website was found: ' + bestWebsite.url);
+  if (websiteAudit?.status === 'AUDITED') notes.push(...websiteAudit.criticalIssues, ...websiteAudit.opportunities.slice(0, 6));
   if (websiteAssessment.note) notes.push(websiteAssessment.note);
   if (verifiedLocation) notes.push('A matching location signal was found: ' + bestLocation.value);
   if (canonical.name && nameSimilarity(prospect.businessName, canonical.name) < 1) notes.push(`Canonical source name differs from the discovery label: "${canonical.name}".`);
@@ -314,6 +328,7 @@ export async function verifyProspect(
     verifiedContactValue: verifiedValue ?? (verifiedEmail ? bestEmail.value : undefined),
     verifiedEmail: verifiedEmail ? bestEmail.value : undefined,
     verifiedWebsiteUrl: verifiedWebsite ? bestWebsite.url : undefined,
+    websiteAudit,
     verifiedLocation: verifiedLocation ? bestLocation.value : undefined,
     alternateContacts: [...rankedContacts.slice(0, 4).map((c) => c.raw), ...rankedEmails.slice(0, 4).map((e) => e.value)].filter((v, i, arr) => arr.indexOf(v) === i),
     businessNameMatchScore: Number(identityScore.toFixed(3)),
