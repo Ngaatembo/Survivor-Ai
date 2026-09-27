@@ -484,6 +484,76 @@ async function ensureProductionCoreTables(db: D1Database): Promise<void> {
   productionCoreTablesReady = true;
 }
 
+/**
+ * Clean-slate discovery maintenance.
+ *
+ * This deliberately does NOT touch the wallet, real revenue, learning,
+ * opportunities, or contacted/engaged prospects. It archives only live
+ * discovery candidates that were never contacted and never verified, then
+ * deletes those stale candidates so the next discovery run starts from
+ * trustworthy data. Search-economy state is reset separately.
+ *
+ * The archive is kept inside D1 so the operation is reversible/auditable.
+ */
+async function resetDiscoveryData(db: D1Database, agentId: string): Promise<{ archived: number; deleted: number }> {
+  await db.prepare(`
+    CREATE TABLE IF NOT EXISTS prospect_archive (
+      id TEXT PRIMARY KEY,
+      agent_id TEXT NOT NULL,
+      original_id TEXT NOT NULL,
+      archived_at TEXT NOT NULL,
+      reason TEXT NOT NULL,
+      prospect_json TEXT NOT NULL
+    )
+  `).run();
+
+  const { results } = await db.prepare(`
+    SELECT p.*
+    FROM prospects p
+    WHERE p.agent_id = ?
+      AND p.data_source = 'LIVE'
+      AND p.status IN ('DISCOVERED','QUALIFIED')
+      AND p.messages_sent_count = 0
+      AND p.responses_received_count = 0
+      AND COALESCE(p.actual_revenue, 0) = 0
+      AND (
+        p.verification = '{}'
+        OR json_extract(p.verification, '$.status') IN ('UNVERIFIED','CONFLICT')
+      )
+      AND NOT EXISTS (SELECT 1 FROM offers o WHERE o.prospect_id = p.id)
+      AND NOT EXISTS (SELECT 1 FROM projects pr WHERE pr.prospect_id = p.id)
+      AND NOT EXISTS (SELECT 1 FROM prospect_intelligence pi WHERE pi.prospect_id = p.id)
+      AND NOT EXISTS (SELECT 1 FROM prospect_demos pd WHERE pd.prospect_id = p.id)
+  `).bind(agentId).all<any>();
+
+  if (!results.length) return { archived: 0, deleted: 0 };
+
+  const now = new Date().toISOString();
+  const statements = results.flatMap((row: any) => [
+    db.prepare(`
+      INSERT OR REPLACE INTO prospect_archive
+        (id, agent_id, original_id, archived_at, reason, prospect_json)
+      VALUES (?, ?, ?, ?, ?, ?)
+    `).bind(
+      `parch_${crypto.randomUUID()}`,
+      agentId,
+      String(row.id),
+      now,
+      'stale-unverified-discovery-reset',
+      JSON.stringify(row),
+    ),
+    // agent_actions is derived state and has a non-cascading prospect FK.
+    db.prepare('DELETE FROM agent_actions WHERE prospect_id = ?').bind(String(row.id)),
+    // prospect_sources, interactions and outreach are ON DELETE CASCADE;
+    // deleting the parent therefore removes only data belonging to this
+    // stale, uncontacted candidate.
+    db.prepare('DELETE FROM prospects WHERE id = ? AND agent_id = ?').bind(String(row.id), agentId),
+  ]);
+
+  await db.batch(statements);
+  return { archived: results.length, deleted: results.length };
+}
+
 export default {
   async fetch(req: Request, env: Env): Promise<Response> {
     if (env.DB_BACKEND === 'd1') await ensureProductionCoreTables(env.DB);
@@ -510,6 +580,64 @@ export default {
       }
     }
 
+
+    if (url.pathname === '/admin/discovery/reset' && req.method === 'POST') {
+      // Administrative maintenance uses the existing deployment trigger
+      // secret rather than exposing a new credential surface.
+      const secret = req.headers.get('x-trigger-secret');
+      if (!env.TRIGGER_SECRET || secret !== env.TRIGGER_SECRET) {
+        return json({ ok: false, error: 'unauthorized' }, { status: 401 });
+      }
+      try {
+        const agentId = env.AGENT_ID ?? 'agent-survive-01';
+        const { archived, deleted } = await resetDiscoveryData(env.DB, agentId);
+        const { repo } = buildEngine(env);
+        // Clear both the fresh-search log and cache. This resets Survivor's
+        // internal budget/caching ledger only; it does NOT restore external
+        // Tavily/Brave provider credits.
+        await repo.setKV('search_economy_state', JSON.stringify({ log: [], cache: {} }));
+        await repo.appendEvent({
+          id: 'evt_' + crypto.randomUUID(),
+          type: 'SYSTEM',
+          message: `Discovery clean-slate reset: archived ${archived} stale unverified candidate(s); cleared search economy cache/ledger.`,
+          createdAt: Date.now(),
+        });
+        return json({
+          ok: true,
+          archived,
+          deleted,
+          searchEconomyReset: true,
+          preserved: ['wallet', 'real revenue', 'learning', 'opportunities', 'contacted/engaged prospects'],
+          note: 'External search-provider credits are not replenished by this reset.',
+        });
+      } catch (e) {
+        return json({ ok: false, error: (e as Error).message }, { status: 500 });
+      }
+    }
+
+    if (url.pathname === '/admin/search/reset' && req.method === 'POST') {
+      const secret = req.headers.get('x-trigger-secret');
+      if (!env.TRIGGER_SECRET || secret !== env.TRIGGER_SECRET) {
+        return json({ ok: false, error: 'unauthorized' }, { status: 401 });
+      }
+      try {
+        const { repo } = buildEngine(env);
+        await repo.setKV('search_economy_state', JSON.stringify({ log: [], cache: {} }));
+        await repo.appendEvent({
+          id: 'evt_' + crypto.randomUUID(),
+          type: 'SYSTEM',
+          message: 'Search-economy ledger and cache reset by operator.',
+          createdAt: Date.now(),
+        });
+        return json({
+          ok: true,
+          searchEconomyReset: true,
+          note: 'This resets Survivor bookkeeping/cache only; it does not replenish Tavily or Brave provider credits.',
+        });
+      } catch (e) {
+        return json({ ok: false, error: (e as Error).message }, { status: 500 });
+      }
+    }
 
     if (url.pathname === '/integrations/windsor/summary' && req.method === 'GET') {
       try {
