@@ -1,6 +1,6 @@
 # SURVIVE AI — Production deployment guide (D1 + Cloudflare Workers)
 
-This deploys the production path as a 24/7 Cloudflare Worker using D1, live web research, and the shared AgentEngine. SAMPLE records remain development/test fixtures and are never a production fallback.
+This deploys the production path as a 24/7 Cloudflare Worker using D1, live web research, treasury controls, revenue verification, and the shared AgentEngine. SAMPLE records remain development/test fixtures and are never a production fallback.
 
 Architecture after deployment:
 
@@ -25,7 +25,7 @@ The production Worker is configured with the D1 database `survivor-ai` in `worke
 
 Apply schema/migrations deliberately with Wrangler against the **remote** D1 database. Do not assume a GitHub push applies migrations automatically.
 
-The Worker auto-initializes the production agent row on first cycle when the required tables exist. Starting simulated capital is $50 and `real_money_enabled` remains disabled.
+The Worker auto-initializes the production agent row on first cycle when the required tables exist. The production treasury separates owner capital, operating costs, verified revenue and legacy simulated history. Real-money execution remains disabled.
 
 Supabase support is retained only as a legacy repository implementation; it is not the production default.
 
