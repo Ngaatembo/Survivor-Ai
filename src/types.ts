@@ -628,6 +628,22 @@ export interface ProspectProblem {
   sourceIds: string[];
 }
 
+export interface ProspectProblemCandidate extends ProspectProblem {
+  evidenceStrength: number; // 0..100
+  businessRelevance: number; // 0..100
+  solvability: number; // 0..100
+  clarity: number; // 0..100
+  selectionScore: number; // 0..100
+  selectionReason: string;
+}
+
+export interface ProspectProblemSelection {
+  candidates: ProspectProblemCandidate[];
+  selectedIndex?: number;
+  reason: string;
+  selectedAt: number;
+}
+
 export interface ProspectIntelligence {
   id: string;
   prospectId: string;
@@ -638,6 +654,7 @@ export interface ProspectIntelligence {
   specificProblemEvidence: string;
   recommendedAngle: string;
   primaryProblem?: ProspectProblem;
+  problemSelection?: ProspectProblemSelection;
   confidence: IntelligenceConfidence;
   generator: 'llm' | 'snippet-digest';
   sources: ResearchSource[];
