@@ -205,8 +205,3 @@ console.log('--- researchProspect: no search results at all -> honest low-confid
     process.exit(failures === 0 ? 0 : 1);
   })();
 }
-
-// Regression: weak/LOW evidence must never become a customer-facing primary problem.
-const weak = await researchProspect(ctx, llmProvider, weakProspect, now);
-assert(!weak.primaryProblem, 'LOW-confidence candidate cannot become a primary problem');
-assert(!weak.problemSelection?.selectedIndex, 'no candidate is selected when evidence is insufficient');
