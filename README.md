@@ -1,64 +1,95 @@
 # SURVIVE AI — Autonomous Economic Research & Revenue Engine
 
-> **The question this prototype answers:** if an AI has **$50 of simulated capital** and no
-> predefined business model, can it research legitimate income opportunities, evaluate them
-> objectively, select the strongest, simulate an experiment, measure the result, remember the
-> outcome, and improve its next decision?
+Survivor is an autonomous economic research and revenue-operations system. It discovers and verifies opportunities, researches prospects, generates offers/demos, tracks outreach and verified revenue, learns from outcomes, controls search/LLM costs, and maintains an explicit survival/treasury state.
 
-**Everything involving money is simulated.** No real money, trading accounts, bank accounts,
-crypto wallets, payment accounts, or financial APIs are connected. Finance categories
-(forex, crypto, prediction markets) are research-only and blocked from autonomous execution.
+## Current production boundary
 
-## Run
+The production Worker runs against Cloudflare D1 and executes a research cycle on a 30-minute cron.
+
+**Real-money execution is disabled.** The treasury is an accounting/authorization layer, and human approval remains required for real-world revenue actions. Payment integrations are sandbox/test constrained where applicable.
+
+The production treasury now distinguishes simulated history from real ledger entries. The current production model seeds owner capital separately from old simulated experiments so simulated balances cannot silently become real money.
+
+## Autonomous production loop
+
+```
+SEARCH ECONOMY GATE
+        ↓
+DISCOVER → VERIFY → RESOLVE
+        ↓
+DEEP RESEARCH / MARKET PRICING
+        ↓
+SCORE / RANK
+        ↓
+OFFER + DEMO
+        ↓
+HUMAN ACTION / APPROVAL QUEUE
+        ↓
+OUTREACH / FOLLOW-UP
+        ↓
+INDEPENDENT REVENUE VERIFICATION
+        ↓
+REAL TREASURY + LEARNING
+        ↺
+```
+
+The Worker is the production execution boundary. The browser dashboard is a view/control surface and must not become a second autonomous production loop.
+
+## Production architecture
+
+- **Cloudflare Worker:** scheduled backend and authenticated operator endpoints.
+- **Cloudflare D1:** production persistence.
+- **Supabase repository:** retained as a legacy/alternate repository implementation, not the production default.
+- **Search:** Tavily and/or Brave, subject to the search-economy controls.
+- **LLM:** Anthropic, OpenAI and Gemini providers, subject to the cost meter.
+- **Payments:** sandbox/test integrations plus human-controlled revenue recording and verification.
+- **Dashboard:** React/Vite frontend consuming the Worker in live mode.
+
+## Economic controls
+
+The production system includes:
+
+- real treasury ledger
+- automatic daily AI/search spend cap
+- dormant-floor protection
+- survival states
+- search-result caching and budget controls
+- survival-aware action ranking
+- market-price research
+- prospect verification
+- deep prospect intelligence
+- revenue funnel analytics
+- independent revenue verification
+- human approval queue
+- production guard
+- production runtime smoke test
+
+Simulated experiments remain explicitly separated from the real-revenue ledger.
+
+## Database and migrations
+
+D1 migrations are deliberately applied separately from application deployment. The deploy workflow does **not** silently execute production SQL.
+
+The current migration chain is maintained under `migrations/`. Before production operation, the Worker health endpoint must report the required schema as ready. If schema readiness fails, the production path must be treated as unhealthy rather than allowing the dashboard to invent or substitute state.
+
+## Verification
+
+Before merging/deploying, the repository should pass:
 
 ```bash
-npm install
-npm run dev      # http://localhost:5173
-npm run build    # type-check + production build
+npm ci
+npm run production:guard
+npm run typecheck
+npm run build
 ```
 
-## The autonomous loop
+The production deployment workflow also performs a Worker dry-run and a post-deploy runtime smoke test.
 
-```
-RESEARCH → DISCOVER → VERIFY → SCORE → RANK → SELECT → SIMULATE → MEASURE → LEARN ↺
-```
+## Important engineering rule
 
-Controls in the top bar: **START RESEARCH** (continuous autonomous looping), **PAUSE AGENT**,
-**RUN NEXT CYCLE** (one full loop), **RESET SIMULATION**.
+A feature is not considered complete merely because the UI exists or the deployment is green.
 
-## Architecture
+For Survivor, completion means:
 
-```
-src/
-├── types.ts                 # Domain models — mirror Supabase tables 1:1
-├── data/sampleData.ts       # DEVELOPMENT-ONLY SAMPLE fixtures (never production fallback)
-├── lib/
-│   ├── scoring.ts           # Deterministic 0–100, 9 weighted factors, auditable breakdown
-│   ├── simulation.ts        # Experiment simulation engine (probability/risk/memory-adjusted)
-│   └── format.ts
-├── services/                # live search, LLM, commercial pipeline, economy controls
-│   ├── connectors.ts        # Registry: Claude, OpenAI, Search, Browser, Payments… all NOT CONNECTED
-│   ├── research.ts          # discover() / verify() / score() / rank() — KB now, live APIs later
-│   ├── ai.ts                # decide() + generateReport() — rule engine now, LLM later
-│   ├── wallet.ts            # Append-only ledger; balance derived, never mutated directly
-│   ├── memory.ts            # Per-opportunity & per-category learning that biases decisions
-│   └── experiments orchestration via store.ts loop
-├── store.ts                 # Zustand store + autonomous cycle runner (persisted to localStorage)
-└── components/              # Command Center, Research Engine, Explorer, Decision Center…
-supabase/schema.sql          # Target Postgres schema: 11 normalized tables, enums, RLS
-```
+**implemented → integrated → failure path tested → production boundary checked → documented.**
 
-### Production vs development data
-The production Worker never uses the legacy SAMPLE opportunity set as a fallback. If live search is unavailable, the cycle records an empty live-discovery result and continues only with already-persisted live state. Development fixtures remain available to smoke tests.
-
-### SAMPLE vs LIVE
-Seed records are tagged `dataSource: 'SAMPLE'` and badged everywhere. Live research results
-will be tagged `LIVE` once the search/browser connectors exist. The UI never presents seed
-data as live fact; every figure carries an evidence tier (VERIFIED / LIKELY / UNCERTAIN /
-UNVERIFIED).
-
-## Safety controls
-- Simulated experiment ledger is isolated from the real-revenue ledger; EcoCash sandbox events never become real revenue.
-- Finance models are classified RESEARCH ONLY.
-- Experiments capped at ≤18% of simulated balance per cycle.
-- Balance < $5 → **AT RISK**; balance = $0 → **DEAD** (read-only, experiments locked, resettable).
