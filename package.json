@@ -3,7 +3,7 @@
   "private": true,
   "version": "0.2.0",
   "type": "module",
-  "description": "SURVIVE AI — autonomous economic AI research laboratory (simulated capital, no real money)",
+  "description": "SURVIVE AI — autonomous economic research and revenue-operations engine with production D1, treasury controls, verification, and human approval boundaries",
   "scripts": {
     "dev": "vite",
     "build": "tsc --noEmit && vite build",
