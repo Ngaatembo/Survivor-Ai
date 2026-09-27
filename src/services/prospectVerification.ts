@@ -33,7 +33,7 @@ const ZIM_CITIES = [
 
 function extractCity(value: string): string | undefined {
   const found = ZIM_CITIES.find((city) => new RegExp(
-    `\\\\b${city.replace(/ /g, '\\\\s+')}\\\\b`, 'i',
+    `\\b${city.replace(/ /g, '\\s+')}\\b`, 'i',
   ).test(value));
   return found?.toLowerCase();
 }
