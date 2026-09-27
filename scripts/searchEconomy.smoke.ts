@@ -31,6 +31,7 @@ import {
   DAY_MS,
 } from '../src/services/searchBudget';
 import { runSearch, computeSearchROI, type SearchEconomyContext } from '../src/services/searchEconomy';
+import { SearchProviderError } from '../src/services/providers/search';
 import { computeRevenueFunnel, conversionByAcquisitionChannel, conversionByCategory } from '../src/lib/revenueFunnel';
 import { computeCategoryRealWorldStats, statsForCategory } from '../src/lib/realRevenue';
 import { scoreProspect, priorityFromScore } from '../src/lib/prospectScoring';
@@ -196,6 +197,23 @@ async function main() {
 
     const none = selectProvider('OTHER', { tavily: false, brave: false }, 'ALIVE');
     assert(none === 'none', 'no provider configured -> "none", never throws');
+
+    class QuotaFailSearch extends MockSearch {
+      override async search(): Promise<SearchResult[]> {
+        this.calls += 1;
+        throw new SearchProviderError('quota exceeded', this.id as 'tavily' | 'brave', 432);
+      }
+    }
+    const failoverCtx = mkCtx({
+      providers: { tavily: new QuotaFailSearch('tavily'), brave: new MockSearch('brave') },
+    });
+    const failover = await runSearch(failoverCtx, {
+      purpose: 'MARKET_PRICING',
+      query: 'provider failover smoke test',
+      entityId: 'failover-1',
+    });
+    assert(failover.providerUsed === 'brave' && failover.results.length === 1, 'a Tavily quota/plan error fails over to Brave without returning a fake empty result');
+    assert((failoverCtx.providers.tavily as QuotaFailSearch).calls === 1 && (failoverCtx.providers.brave as MockSearch).calls === 1, 'both providers are called exactly once during quota failover');
   }
 
   /* --------------------------- 9. survival status throttling -------------------- */
