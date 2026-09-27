@@ -137,14 +137,17 @@ console.log('--- researchProspect: no search results at all -> honest low-confid
       competitiveNote: 'No direct evidence of nearby competitors in the snippets.',
       specificProblemEvidence: 'A review mentions slow delivery times, which a booking/ordering system could help address.',
       recommendedAngle: 'Lead with an online ordering page to address the slow-delivery complaint directly.',
-      primaryProblem: {
-        type: 'ORDERING', evidence: 'A review mentions slow delivery times.',
+      problemCandidates: [
+        { type: 'TRUST', evidence: 'The business profile has limited independent information.', businessFriction: 'A new customer may have less third-party reassurance.', likelyConsequence: 'Trust may take longer to establish.', solvableOpportunity: 'Add a clear proof and trust section.', outreachClaim: 'I noticed there is limited independent information about the business online.', confidence: 'MEDIUM', sourceIds: ['1'] },
+        { type: 'ORDERING', evidence: 'A review mentions slow delivery times.',
         businessFriction: 'Customers may not have a clear ordering path.',
         likelyConsequence: 'Ordering may be less convenient.',
         solvableOpportunity: 'Provide a direct online ordering path.',
         outreachClaim: 'I noticed a review mentioning slow delivery times.',
-        confidence: 'HIGH', sourceIds: ['1'],
-      },
+        confidence: 'HIGH', sourceIds: ['2'],
+        },
+      ],
+      primaryProblem: null,
       confidence: 'HIGH',
     });
     const llmIntel = await researchProspect(mkCtx(snippetSearch), goodLlm, prospect);
@@ -152,7 +155,9 @@ console.log('--- researchProspect: no search results at all -> honest low-confid
     assert(llmIntel.confidence === 'HIGH', 'confidence passed through from the model');
     assert(llmIntel.apparentServices.includes('Fresh bread'), 'apparent services come from the real analysis');
     assert(llmIntel.recommendedAngle.includes('delivery'), 'recommended angle is grounded in the actual snippet evidence (slow delivery)');
-    assert(llmIntel.primaryProblem?.type === 'ORDERING', 'numeric LLM source reference resolves to the stored primary problem');
+    assert(llmIntel.primaryProblem?.type === 'ORDERING', 'selector chooses the stronger evidence-backed ordering problem');
+    assert((llmIntel.problemSelection?.candidates.length ?? 0) === 2, 'selector retains the candidate set for auditability');
+    assert(llmIntel.problemSelection?.selectedIndex === 0, 'selected problem is explicitly recorded');
     assert(llmIntel.primaryProblem?.sourceIds.length === 1, 'primary problem retains the linked source ID');
 
     console.log('--- researchProspect: LLM connected but fails/returns unusable JSON -> falls back to digest ---');
