@@ -112,7 +112,7 @@ function looksLikeRealPhoneNumber(candidate: string): boolean {
 const COMMERCIAL_HINTS = ['open', 'hours', 'call us', 'call or whatsapp', 'whatsapp us', 'order', 'book now', 'booking', 'service', 'contact us', 'located', 'price', 'quote', 'deliver', 'visit us', 'followers', 'we offer', 'we specialise', 'we specialize'];
 const URGENCY_HINTS = ['now open', 'new location', 'hiring', 'grand opening', 'coming soon', 'newly opened'];
 
-function classifyPresence(domain: string, snippet: string): { presence: WebsitePresence; note: string } {
+function classifyPresence(domain: string, url: string, snippet: string): { presence: WebsitePresence; note: string; websiteUrl?: string } {
   const s = snippet.toLowerCase();
   if (domain.includes('facebook.com')) {
     return { presence: 'SOCIAL_ONLY', note: 'Primary public result is a Facebook page, not an independent website.' };
@@ -134,7 +134,7 @@ function classifyPresence(domain: string, snippet: string): { presence: WebsiteP
     return { presence: 'WEAK_OR_OUTDATED', note: 'Source text suggests the existing website is outdated or unfinished.' };
   }
   if (domain) {
-    return { presence: 'ADEQUATE', note: `Indexed under its own domain (${domain}) — appears to already have a website; quality not independently verified.` };
+    return { presence: 'ADEQUATE', websiteUrl: url, note: `Indexed under its own domain (${domain}) — an independent website exists; quality is not independently verified.` };
   }
   return { presence: 'UNKNOWN', note: 'Website status not determinable from available sources.' };
 }
@@ -259,7 +259,7 @@ export async function discoverProspects(
 
       const domain = extractDomain(r.url);
       const text = `${r.title} ${r.snippet}`;
-      const { presence, note } = classifyPresence(domain, r.snippet);
+      const { presence, note, websiteUrl } = classifyPresence(domain, r.url, r.snippet);
       const { channel, value } = classifyContact(domain, r.url, text, zimRegion, judged.zimPhone);
       // A real Zimbabwe phone number in the business's own listing is itself a
       // sign of an operating business.
@@ -318,7 +318,7 @@ export async function discoverProspects(
         category: seed.label,
         location: judged.location,
         websitePresence: presence,
-        websiteUrl: undefined,
+        websiteUrl,
         // Keep the Facebook/Instagram/WhatsApp page so the operator can look
         // at it before messaging.
         socialLinks: isSocialDomain(domain) ? [r.url] : [],
