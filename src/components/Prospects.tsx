@@ -81,7 +81,7 @@ export function Prospects() {
         searchQuery: searchQuery.trim() || undefined,
       });
       await syncFromBackend();
-      setDiscoverMessage(`Found ${result.discovered} businesses; ${result.verified} passed identity/contact verification. ${result.rejectedUnverifiedOrConflicting} were rejected because the evidence was insufficient or conflicting.`);
+      setDiscoverMessage(`Found ${result.discovered} businesses and saved ${result.saved ?? result.prospects.length}. ${result.verificationQueued ?? 0} queued for identity/contact verification; only verified prospects can be used for offers or outreach.`);
     } catch (e) {
       setDiscoverMessage(e instanceof BackendError ? e.message : (e as Error).message || 'Business discovery failed.');
     } finally {
