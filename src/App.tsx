@@ -8,6 +8,7 @@ import { Prospects } from './components/Prospects';
 import { Projects } from './components/Projects';
 import { Analytics } from './components/Analytics';
 import { EconomicEfficiency } from './components/EconomicEfficiency';
+import { OutcomeIntelligence } from './components/OutcomeIntelligence';
 import { IncomeHub } from './components/IncomeHub';
 import { ContentHub } from './components/ContentHub';
 import { DecisionCenter } from './components/DecisionCenter';
@@ -31,6 +32,7 @@ export type View =
   | 'projects'
   | 'analytics'
   | 'economics'
+  | 'outcomes'
   | 'income'
   | 'content'
   | 'decision'
@@ -59,6 +61,7 @@ const NAV: { id: View; label: string; icon: string; section: string }[] = [
   { id: 'experiments', label: 'Experiments (simulated)', icon: '▶', section: 'LAB' },
   { id: 'analytics', label: 'Performance', icon: '📊', section: 'LAB' },
   { id: 'economics', label: 'Economic Efficiency', icon: '⚖', section: 'LAB' },
+  { id: 'outcomes', label: 'Outcome Intelligence', icon: '◈', section: 'LAB' },
   { id: 'wallet', label: 'Simulated Wallet', icon: '◌', section: 'LAB' },
   { id: 'architecture', label: 'Architecture & Safety', icon: '⬡', section: 'LAB' },
 ];
@@ -112,6 +115,7 @@ const TITLES: Record<View, string> = {
   projects: 'Delivery Projects',
   analytics: 'Simulation vs. Reality Analytics',
   economics: 'Economic Efficiency — Search Cost, Revenue Funnel, Next Money Action',
+  outcomes: 'Outcome Intelligence — What Actually Produces Replies & Revenue',
   income: 'Income Hub — Multi-Channel Revenue & Money Actions',
   content: 'Content Income Engine — Research, Create, Measure, Monetize',
   decision: 'AI Decision Center',
@@ -300,6 +304,7 @@ export function App() {
           {view === 'projects' && <Projects />}
           {view === 'analytics' && <Analytics />}
           {view === 'economics' && <EconomicEfficiency />}
+          {view === 'outcomes' && <OutcomeIntelligence />}
           {view === 'income' && <IncomeHub />}
           {view === 'content' && <ContentHub />}
           {view === 'decision' && <DecisionCenter />}
