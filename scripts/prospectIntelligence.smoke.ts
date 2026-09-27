@@ -137,6 +137,14 @@ console.log('--- researchProspect: no search results at all -> honest low-confid
       competitiveNote: 'No direct evidence of nearby competitors in the snippets.',
       specificProblemEvidence: 'A review mentions slow delivery times, which a booking/ordering system could help address.',
       recommendedAngle: 'Lead with an online ordering page to address the slow-delivery complaint directly.',
+      primaryProblem: {
+        type: 'ORDERING', evidence: 'A review mentions slow delivery times.',
+        businessFriction: 'Customers may not have a clear ordering path.',
+        likelyConsequence: 'Ordering may be less convenient.',
+        solvableOpportunity: 'Provide a direct online ordering path.',
+        outreachClaim: 'I noticed a review mentioning slow delivery times.',
+        confidence: 'HIGH', sourceIds: ['src-1'],
+      },
       confidence: 'HIGH',
     });
     const llmIntel = await researchProspect(mkCtx(snippetSearch), goodLlm, prospect);
