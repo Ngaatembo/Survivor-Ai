@@ -74,6 +74,16 @@ export interface ProspectIntelligenceAnalysis {
   competitiveNote: string;
   specificProblemEvidence: string;
   recommendedAngle: string;
+  primaryProblem?: {
+    type: string;
+    evidence: string;
+    businessFriction: string;
+    likelyConsequence: string;
+    solvableOpportunity: string;
+    outreachClaim: string;
+    confidence: 'HIGH' | 'MEDIUM' | 'LOW';
+    sourceIds: string[];
+  };
   confidence: 'HIGH' | 'MEDIUM' | 'LOW';
 }
 
