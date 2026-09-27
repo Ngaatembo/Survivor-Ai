@@ -267,8 +267,10 @@ console.log('--- End-to-end discovery: fake search results -> real prospects -> 
     search: async () => canned,
   };
 
-  const { prospects, queriesRun } = await discoverProspects(mkCtx(stubSearch), opp, model, []);
+  const discoveryCtx = mkCtx(stubSearch);
+  const { prospects, queriesRun } = await discoverProspects(discoveryCtx, opp, model, []);
   assert(queriesRun > 0, `ran at least one query (got ${queriesRun})`);
+  assert(discoveryCtx.state.log.filter((e) => !e.cacheHit && e.purpose === 'PROSPECT_DISCOVERY').length === queriesRun, 'parallel discovery preserves every fresh search in the economy ledger');
   assert(prospects.length > 0, `surfaced at least one real prospect (got ${prospects.length})`);
   assert(
     prospects.every((p) => p.sources.length > 0 && p.sources[0].url),
