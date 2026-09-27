@@ -6,6 +6,19 @@
 
 import type { SearchProvider, SearchResult } from './types';
 
+const SEARCH_TIMEOUT_MS = 8_000;
+
+async function fetchWithTimeout(input: RequestInfo | URL, init: RequestInit): Promise<Response> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), SEARCH_TIMEOUT_MS);
+  try {
+    return await fetch(input, { ...init, signal: controller.signal });
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+
 /* ------------------------------- Tavily ----------------------------------- */
 
 class TavilyProvider implements SearchProvider {
@@ -24,7 +37,7 @@ class TavilyProvider implements SearchProvider {
       // "site:domain" into its include_domains filter instead (Brave
       // understands "site:" natively, so the query text stays portable).
       const site = query.match(/^\s*site:(\S+)\s+(.*)$/i);
-      const res = await fetch('https://api.tavily.com/search', {
+      const res = await fetchWithTimeout('https://api.tavily.com/search', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({
@@ -71,7 +84,7 @@ class BraveProvider implements SearchProvider {
       const url = new URL('https://api.search.brave.com/res/v1/web/search');
       url.searchParams.set('q', query);
       url.searchParams.set('count', String(max));
-      const res = await fetch(url, {
+      const res = await fetchWithTimeout(url, {
         headers: {
           'X-Subscription-Token': this.apiKey,
           accept: 'application/json',
