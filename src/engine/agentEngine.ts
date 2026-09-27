@@ -797,6 +797,7 @@ export class AgentEngine {
         const existingOutreach = await this.repo.listOutreachMessages();
         const needsOutreach = revenueCandidates
           .map((candidate) => candidate.prospect)
+          .filter((p) => ['VERIFIED', 'PROVISIONAL'].includes(p.verification?.status ?? ''))
           .filter((p) => !existingOutreach.some((m) => m.prospectId === p.id))
           .slice(0, 5);
         for (const p of needsOutreach) {
@@ -831,8 +832,11 @@ export class AgentEngine {
             (p) =>
               !existingOffers.some((o) => o.prospectId === p.id) &&
               (
-                ENGAGED_STATUSES.has(p.status) ||
-                (p.status === 'QUALIFIED' && (p.priority === 'HIGH' || p.priority === 'MEDIUM') && p.score.total >= 60)
+                ['VERIFIED', 'PROVISIONAL'].includes(p.verification?.status ?? '') &&
+                (
+                  ENGAGED_STATUSES.has(p.status) ||
+                  (p.status === 'QUALIFIED' && (p.priority === 'HIGH' || p.priority === 'MEDIUM') && p.score.total >= 60)
+                )
               ),
           )
           .slice(0, 5);
