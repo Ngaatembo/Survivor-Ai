@@ -8,6 +8,25 @@ import type { SearchProvider, SearchResult } from './types';
 
 const SEARCH_TIMEOUT_MS = 8_000;
 
+export class SearchProviderError extends Error {
+  constructor(
+    message: string,
+    readonly provider: 'tavily' | 'brave',
+    readonly status: number,
+  ) {
+    super(message);
+    this.name = 'SearchProviderError';
+  }
+}
+
+function shouldFailover(status: number): boolean {
+  // Tavily uses 432/433 for plan or pay-as-you-go limits; both providers
+  // can also return 429 for rate limits and 401/403 for unusable credentials.
+  // A provider-level failure should not strand Survivor when the other
+  // configured provider is still usable.
+  return [401, 402, 403, 429, 432, 433, 500, 502, 503, 504].includes(status);
+}
+
 async function fetchWithTimeout(input: RequestInfo | URL, init: RequestInit): Promise<Response> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), SEARCH_TIMEOUT_MS);
@@ -51,7 +70,10 @@ class TavilyProvider implements SearchProvider {
           ...(site ? { include_domains: [site[1]] } : {}),
         }),
       });
-      if (!res.ok) throw new Error(`tavily ${res.status}`);
+      if (!res.ok) {
+        if (shouldFailover(res.status)) throw new SearchProviderError(`tavily ${res.status}`, 'tavily', res.status);
+        throw new Error(`tavily ${res.status}`);
+      }
       const data: any = await res.json();
       return (data?.results ?? []).map((r: Record<string, unknown>) => ({
         title: String(r.title ?? 'Untitled'),
@@ -62,6 +84,7 @@ class TavilyProvider implements SearchProvider {
       }));
     } catch (e) {
       console.warn('[search:tavily] failed', e);
+      if (e instanceof SearchProviderError) throw e;
       return [];
     }
   }
@@ -90,7 +113,10 @@ class BraveProvider implements SearchProvider {
           accept: 'application/json',
         },
       });
-      if (!res.ok) throw new Error(`brave ${res.status}`);
+      if (!res.ok) {
+        if (shouldFailover(res.status)) throw new SearchProviderError(`brave ${res.status}`, 'brave', res.status);
+        throw new Error(`brave ${res.status}`);
+      }
       const data: any = await res.json();
       return (data?.web?.results ?? []).map((r: Record<string, unknown>) => ({
         title: String(r.title ?? 'Untitled'),
@@ -101,6 +127,7 @@ class BraveProvider implements SearchProvider {
       }));
     } catch (e) {
       console.warn('[search:brave] failed', e);
+      if (e instanceof SearchProviderError) throw e;
       return [];
     }
   }
