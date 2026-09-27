@@ -718,7 +718,9 @@ export class AgentEngine {
         // the CONTACT_VERIFICATION search budget and fails closed on conflicts.
         if (hasLiveSearch) {
           const verificationTargets = allProspects
-            .filter((p) => !p.verification || p.verification.status === 'UNVERIFIED' || p.verification.status === 'CONFLICT')
+            // A never-verified prospect is stored with an empty {} verification, so
+            // test the status, not the object (SupaFix sat unverified for 6 days).
+            .filter((p) => !p.verification?.status || p.verification.status === 'UNVERIFIED' || p.verification.status === 'CONFLICT')
             .filter((p) => p.priority !== 'DO_NOT_CONTACT')
             .filter((p) => p.status === 'DISCOVERED' || p.status === 'QUALIFIED' || p.status === 'REPLIED' || p.status === 'INTERESTED' || p.status === 'PROPOSAL_SENT' || p.status === 'NEGOTIATING')
             .sort((a, b) => b.score.expectedValue - a.score.expectedValue || b.score.total - a.score.total)

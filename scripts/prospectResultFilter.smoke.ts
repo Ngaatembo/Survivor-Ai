@@ -96,5 +96,12 @@ assert(!looksLikeBusinessName('This is SupaFix Workshop. This is how we work'), 
 assert(!looksLikeBusinessName('THE 10 BEST Harare Business Hotels 2026'), 'listicle rejected');
 assert(!looksLikeBusinessName('Need a trusted service provider in Zimbabwe? Find ...'), 'question/ellipsis rejected');
 
+console.log('--- WhatsApp Business links are social presence, not a website ---');
+{
+  const j = judgeSearchResult({ title: 'Geoffrey Electrical Contractors on WhatsApp | +263 78 715 2054', url: 'https://wa.me/electrical213', snippet: 'Electrical installations and repairs in Bulawayo. Call or WhatsApp +263 78 715 2054.' }, 'Zimbabwe');
+  assert(j.ok && j.businessName === 'Geoffrey Electrical Contractors', `"on WhatsApp" suffix stripped from the name (got ${j.ok ? j.businessName : j.reason})`);
+  assert(j.ok && j.isSocial, 'wa.me is treated as a social/WhatsApp presence, not the business\'s own website');
+}
+
 console.log(`\n${failures === 0 ? 'ALL PASSED' : `${failures} FAILURE(S)`}`);
 process.exit(failures === 0 ? 0 : 1);

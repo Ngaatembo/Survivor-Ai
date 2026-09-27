@@ -107,7 +107,16 @@ function isNonBusinessDomain(domain: string, url: string): boolean {
   return false;
 }
 
-export const SOCIAL_DOMAINS = ['facebook.com', 'instagram.com', 'tiktok.com', 'linkedin.com', 'x.com', 'twitter.com'];
+export const SOCIAL_DOMAINS = ['facebook.com', 'instagram.com', 'tiktok.com', 'linkedin.com', 'x.com', 'twitter.com', 'wa.me', 'whatsapp.com'];
+
+/** WhatsApp Business links/catalogues (wa.me/…, api.whatsapp.com) — a business
+ *  whose main public presence is one of these has NO website of its own,
+ *  which makes it one of the best leads for the website offer. An earlier
+ *  version treated wa.me as the business's "own domain" and marked it
+ *  DO_NOT_CONTACT (Geoffrey Electrical Contractors, 27 Sept 2026). */
+export function isWhatsAppDomain(domain: string): boolean {
+  return domain === 'wa.me' || domain === 'whatsapp.com' || domain.endsWith('.whatsapp.com');
+}
 
 export function isSocialDomain(domain: string): boolean {
   return SOCIAL_DOMAINS.some((d) => domain === d || domain.endsWith(`.${d}`));
@@ -211,7 +220,7 @@ export function judgeSearchResult(
   const isSocial = isSocialDomain(domain);
   const segments = r.title
     .split(/\s+[|·•]\s+|\s+[-–—]\s+|\s*\|\s*/)
-    .map((s) => s.replace(/\s*\((@[^)]*)\)\s*/g, ' ').replace(/\s+on\s+(tiktok|instagram|facebook)\s*$/i, '').trim())
+    .map((s) => s.replace(/\s*\((@[^)]*)\)\s*/g, ' ').replace(/\s+(on|via)\s+(tiktok|instagram|facebook|whatsapp)\s*$/i, '').trim())
     .filter(Boolean);
 
   let businessName: string | undefined;

@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useStore, backendConfigured } from './store';
 import { AgentStatusPill } from './components/AgentStatusPill';
 import { CommandCenter } from './components/CommandCenter';
@@ -19,8 +19,11 @@ import { ActivityLog } from './components/ActivityLog';
 import { Reports } from './components/Reports';
 import { Architecture } from './components/Architecture';
 import { OpportunityDrawer } from './components/OpportunityDrawer';
+import { Clients, UnlockForm } from './components/Clients';
+import { setOperatorSecretPrompt } from './services/backendApi';
 
 export type View =
+  | 'clients'
   | 'command'
   | 'research'
   | 'explorer'
@@ -40,26 +43,68 @@ export type View =
   | 'architecture';
 
 const NAV: { id: View; label: string; icon: string; section: string }[] = [
-  { id: 'command', label: 'Command Center', icon: '▣', section: 'HOME' },
-  { id: 'research', label: 'Research Engine', icon: '◎', section: 'DISCOVER' },
-  { id: 'explorer', label: 'Opportunities', icon: '▤', section: 'DISCOVER' },
-  { id: 'prospects', label: 'Prospects', icon: '☎', section: 'REVENUE' },
-  { id: 'projects', label: 'Delivery', icon: '🛠', section: 'REVENUE' },
-  { id: 'decision', label: 'Decisions', icon: '➤', section: 'INTELLIGENCE' },
-  { id: 'reports', label: 'Reports', icon: '▦', section: 'INTELLIGENCE' },
-  { id: 'memory', label: 'Memory', icon: '◉', section: 'INTELLIGENCE' },
-  { id: 'experiments', label: 'Experiments', icon: '▶', section: 'INTELLIGENCE' },
-  { id: 'analytics', label: 'Performance', icon: '📊', section: 'ANALYTICS' },
-  { id: 'economics', label: 'Economic Efficiency', icon: '⚖', section: 'ANALYTICS' },
-  { id: 'income', label: 'Income Hub', icon: '💰', section: 'ANALYTICS' },
-  { id: 'content', label: 'Content Engine', icon: '●', section: 'REVENUE' },
-  { id: 'wallet', label: 'Simulated Wallet', icon: '◇', section: 'ANALYTICS' },
-  { id: 'treasury', label: 'Treasury', icon: '₿', section: 'ANALYTICS' },
-  { id: 'activity', label: 'Activity Log', icon: '☰', section: 'SYSTEM' },
-  { id: 'architecture', label: 'Architecture & Safety', icon: '⬡', section: 'SYSTEM' },
+  { id: 'clients', label: 'Get Clients', icon: '☎', section: 'CLIENTS' },
+  { id: 'prospects', label: 'All leads (CRM)', icon: '▤', section: 'CLIENTS' },
+  { id: 'projects', label: 'Delivery', icon: '🛠', section: 'CLIENTS' },
+  { id: 'income', label: 'Income Hub', icon: '💰', section: 'CLIENTS' },
+  { id: 'command', label: 'Command Center', icon: '▣', section: 'SURVIVOR' },
+  { id: 'treasury', label: 'Treasury ($50)', icon: '₿', section: 'SURVIVOR' },
+  { id: 'decision', label: 'Decisions', icon: '➤', section: 'SURVIVOR' },
+  { id: 'activity', label: 'Activity Log', icon: '☰', section: 'SURVIVOR' },
+  { id: 'research', label: 'Research Engine', icon: '◎', section: 'LAB' },
+  { id: 'explorer', label: 'Opportunities', icon: '◇', section: 'LAB' },
+  { id: 'content', label: 'Content Engine', icon: '●', section: 'LAB' },
+  { id: 'reports', label: 'Reports', icon: '▦', section: 'LAB' },
+  { id: 'memory', label: 'Memory', icon: '◉', section: 'LAB' },
+  { id: 'experiments', label: 'Experiments (simulated)', icon: '▶', section: 'LAB' },
+  { id: 'analytics', label: 'Performance', icon: '📊', section: 'LAB' },
+  { id: 'economics', label: 'Economic Efficiency', icon: '⚖', section: 'LAB' },
+  { id: 'wallet', label: 'Simulated Wallet', icon: '◌', section: 'LAB' },
+  { id: 'architecture', label: 'Architecture & Safety', icon: '⬡', section: 'LAB' },
 ];
 
+const NAV_SECTIONS = ['CLIENTS', 'SURVIVOR', 'LAB'] as const;
+
+/** The app's own unlock dialog, used whenever a button needs the operator
+ *  session (replaces the easily-dismissed browser prompt). */
+function UnlockDialog() {
+  const [pending, setPending] = useState<null | ((v: string | null) => void)>(null);
+  useEffect(() => {
+    setOperatorSecretPrompt(
+      () =>
+        new Promise<string | null>((resolve) => {
+          setPending(() => resolve);
+        }),
+    );
+    return () => setOperatorSecretPrompt(null);
+  }, []);
+  if (!pending) return null;
+  const close = () => {
+    pending(null);
+    setPending(null);
+  };
+  return (
+    <div className="unlock-backdrop" role="dialog" aria-modal="true" aria-labelledby="unlock-title" onClick={close}>
+      <div className="unlock-dialog" onClick={(e) => e.stopPropagation()}>
+        <h2 id="unlock-title">Unlock Survivor</h2>
+        <p className="muted small">This button changes real data. Enter your operator secret once — this phone stays unlocked for 8 hours.</p>
+        <UnlockForm
+          compact
+          onDone={() => {
+            // Already logged in by the form; hand back a non-empty value so the
+            // waiting request continues without asking again.
+            pending('__session__');
+            setPending(null);
+          }}
+        />
+        <button className="link-btn" onClick={close}>Cancel</button>
+      </div>
+    </div>
+  );
+}
+
 const TITLES: Record<View, string> = {
+  clients: 'Get Clients',
   command: 'Command Center',
   research: 'AI Research Engine',
   explorer: 'Opportunity Explorer',
@@ -80,7 +125,7 @@ const TITLES: Record<View, string> = {
 };
 
 export function App() {
-  const [view, setView] = useState<View>('command');
+  const [view, setView] = useState<View>('clients');
   const [drawerId, setDrawerId] = useState<string | null>(null);
   const [confirmReset, setConfirmReset] = useState(false);
   const [navOpen, setNavOpen] = useState(false);
@@ -118,7 +163,7 @@ export function App() {
           </button>
         </div>
         <nav className="nav">
-          {(['HOME', 'DISCOVER', 'REVENUE', 'INTELLIGENCE', 'ANALYTICS', 'SYSTEM'] as const).map((section) => (
+          {NAV_SECTIONS.map((section) => (
             <div key={section}>
               <div className="nav-section">{section}</div>
               {NAV.filter((n) => n.section === section).map((n) => (
@@ -151,15 +196,15 @@ export function App() {
           ))}
         </nav>
         <div className="sidebar-foot">
-          <div className="sim-tag">● SIMULATION ENVIRONMENT</div>
-          <div>No real money · No live trading/payments</div>
+          <div className="sim-tag live">● SURVIVOR FINDS · YOU SEND &amp; CLOSE</div>
+          <div>Never messages anyone or spends without you</div>
           {backendConfigured ? (
             <div>
-              Data: LIVE backend
+              Live backend
               {backend.connected ? ' — connected' : backend.error ? ' — unreachable' : ' — connecting…'}
             </div>
           ) : (
-            <div>Data: LIVE backend required — no sample data</div>
+            <div>Live backend required — no sample data</div>
           )}
         </div>
       </aside>
@@ -197,10 +242,10 @@ export function App() {
             <AgentStatusPill />
             {backendConfigured ? (
               <span
-                className="badge-count"
+                className="badge-count live-badge"
                 title="The autonomous loop runs on the Cloudflare Worker's cron (every 30 minutes) — this dashboard only observes it."
               >
-                {backend.connected ? '● LIVE — cron-driven' : backend.error ? '○ backend unreachable' : '◌ connecting…'}
+                {backend.connected ? '● LIVE' : backend.error ? '○ offline' : '◌ …'}
               </span>
             ) : (
               <>
@@ -247,6 +292,7 @@ export function App() {
                 : 'Connecting to the live backend…'}
             </div>
           )}
+          {view === 'clients' && <Clients go={setView} />}
           {view === 'command' && <CommandCenter go={setView} />}
           {view === 'research' && <ResearchEngine onOpenOpp={openOpp} />}
           {view === 'explorer' && <OpportunityExplorer onOpenProspects={() => setView('prospects')} />}
@@ -267,6 +313,7 @@ export function App() {
         </main>
       </div>
 
+      <UnlockDialog />
       {drawerOpp && <OpportunityDrawer opp={drawerOpp} onClose={() => setDrawerId(null)} onOpenProspects={() => { setDrawerId(null); setView('prospects'); }} />}
     </div>
   );

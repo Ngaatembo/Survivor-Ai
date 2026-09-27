@@ -293,25 +293,88 @@ export class BackendError extends Error {
 
 const TIMEOUT_MS = 12_000;
 
-let operatorSessionToken: string | null = null;
+/* ----------------------------- operator login -----------------------------
+ * Every write (find clients, mark contacted, record revenue…) needs the
+ * operator's session. The old flow used window.prompt() on every page load:
+ * on a phone that box is easy to dismiss ("Operator authentication
+ * cancelled") and the session was forgotten on every reload. Now the app
+ * shows its own unlock box (setOperatorSecretPrompt) and the 8-hour session
+ * token — never the secret itself — is kept on this device until it expires.
+ * ------------------------------------------------------------------------ */
+const SESSION_STORAGE_KEY = 'survivor.operatorSession.v1';
+export const OPERATOR_LOCKED_MESSAGE = 'Locked — unlock Survivor to see this.';
+
+function readStoredSession(): { token: string; expiresAt: number } | null {
+  try {
+    const raw = globalThis.localStorage?.getItem(SESSION_STORAGE_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    if (typeof parsed?.token === 'string' && typeof parsed?.expiresAt === 'number' && parsed.expiresAt > Date.now() + 60_000) return parsed;
+  } catch { /* storage blocked — fall back to in-memory only */ }
+  return null;
+}
+
+let operatorSession: { token: string; expiresAt: number } | null = readStoredSession();
+let operatorSessionToken: string | null = operatorSession?.token ?? null;
+const sessionListeners = new Set<() => void>();
+
+function setOperatorSession(session: { token: string; expiresAt: number } | null): void {
+  operatorSession = session;
+  operatorSessionToken = session?.token ?? null;
+  try {
+    if (session) globalThis.localStorage?.setItem(SESSION_STORAGE_KEY, JSON.stringify(session));
+    else globalThis.localStorage?.removeItem(SESSION_STORAGE_KEY);
+  } catch { /* ignore */ }
+  sessionListeners.forEach((fn) => fn());
+}
+
+export function getOperatorSession(): { expiresAt: number } | null {
+  if (operatorSession && operatorSession.expiresAt <= Date.now()) setOperatorSession(null);
+  return operatorSession ? { expiresAt: operatorSession.expiresAt } : null;
+}
+
+export function onOperatorSessionChange(fn: () => void): () => void {
+  sessionListeners.add(fn);
+  return () => { sessionListeners.delete(fn); };
+}
+
+type SecretPrompt = () => Promise<string | null>;
+let secretPrompt: SecretPrompt | null = null;
+/** The app registers its own unlock dialog here; window.prompt is the fallback. */
+export function setOperatorSecretPrompt(fn: SecretPrompt | null): void {
+  secretPrompt = fn;
+}
+
+export async function loginOperatorWithSecret(secret: string): Promise<void> {
+  if (!env.apiBaseUrl) throw new BackendError('VITE_API_BASE_URL is not configured');
+  const res = await fetch(`${env.apiBaseUrl}/auth/login`, {
+    method: 'POST',
+    headers: { accept: 'application/json', 'content-type': 'application/json' },
+    body: JSON.stringify({ secret: secret.trim() }),
+  });
+  let body: any = null;
+  try { body = await res.json(); } catch {}
+  if (res.status === 401) throw new BackendError('That operator secret is not correct.');
+  if (!res.ok || typeof body?.token !== 'string') {
+    throw new BackendError(body?.error ?? `Operator login failed (HTTP ${res.status})`, body);
+  }
+  setOperatorSession({ token: body.token, expiresAt: typeof body.expiresAt === 'number' ? body.expiresAt : Date.now() + 8 * 60 * 60 * 1000 });
+}
+
+export function logoutOperator(): void {
+  setOperatorSession(null);
+}
 
 async function loginOperator(): Promise<void> {
   if (!env.apiBaseUrl) throw new BackendError('VITE_API_BASE_URL is not configured');
   if (operatorSessionToken) return;
-  if (typeof window === 'undefined') throw new BackendError('Operator authentication requires the browser dashboard');
-  const secret = window.prompt('Survivor operator secret (TRIGGER_SECRET):');
-  if (!secret) throw new BackendError('Operator authentication cancelled');
-  const res = await fetch(`${env.apiBaseUrl}/auth/login`, {
-    method: 'POST',
-    headers: { accept: 'application/json', 'content-type': 'application/json' },
-    body: JSON.stringify({ secret }),
-  });
-  let body: any = null;
-  try { body = await res.json(); } catch {}
-  if (!res.ok || typeof body?.token !== 'string') {
-    throw new BackendError(body?.error ?? `Operator login failed (HTTP ${res.status})`, body);
-  }
-  operatorSessionToken = body.token;
+  const secret = secretPrompt
+    ? await secretPrompt()
+    : typeof globalThis.prompt === 'function' ? globalThis.prompt('Survivor operator secret (TRIGGER_SECRET):') : null;
+  // The app's unlock dialog logs in by itself and just signals completion.
+  if (operatorSessionToken) return;
+  if (!secret) throw new BackendError('Unlock Survivor with your operator secret to do this.');
+  await loginOperatorWithSecret(secret);
 }
 
 function operatorHeaders(): Record<string, string> {
@@ -334,14 +397,12 @@ async function getJson<T>(path: string): Promise<T> {
     } catch {
       // fall through — body stays null, handled below
     }
-    if (res.status === 401 && (
-      path.startsWith('/actions/approvals') ||
-      path === '/survival-challenge' ||
-      path === '/real-revenue/first-dollar' ||
-      path === '/real-revenue/verifications'
-    )) {
-      await loginOperator();
-      return getJson<T>(path);
+    if (res.status === 401) {
+      // Background reads never pop the unlock box (they run on every page
+      // load and refresh); they just report "locked" until the operator
+      // unlocks from the Clients screen or a button that needs it.
+      if (operatorSessionToken) setOperatorSession(null);
+      throw new BackendError(OPERATOR_LOCKED_MESSAGE, body);
     }
     if (!res.ok) {
       throw new BackendError(body?.error ?? `Backend returned HTTP ${res.status}`, body);
@@ -369,10 +430,13 @@ export function fetchBackendState(): Promise<BackendState> {
   return getJson<BackendState>('/state');
 }
 
-async function postJson<T>(path: string, body: unknown): Promise<T> {
+async function postJson<T>(path: string, body: unknown, timeoutMs: number = TIMEOUT_MS): Promise<T> {
   if (!env.apiBaseUrl) throw new BackendError('VITE_API_BASE_URL is not configured');
+  // Log in BEFORE starting the request timer, so time spent typing the
+  // secret never counts against the request.
+  if (path !== '/auth/login' && OPERATOR_POST_PATHS.test(path) && !operatorSessionToken) await loginOperator();
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), TIMEOUT_MS);
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
     const res = await fetch(`${env.apiBaseUrl}${path}`, {
       method: 'POST',
@@ -387,9 +451,9 @@ async function postJson<T>(path: string, body: unknown): Promise<T> {
       // fall through — body stays null, handled below
     }
     if (res.status === 401 && path !== '/auth/login') {
-      operatorSessionToken = null;
+      setOperatorSession(null);
       await loginOperator();
-      return postJson<T>(path, body);
+      return postJson<T>(path, body, timeoutMs);
     }
     if (!res.ok) {
       throw new BackendError(responseBody?.error ?? `Backend returned HTTP ${res.status}`, responseBody);
@@ -401,13 +465,17 @@ async function postJson<T>(path: string, body: unknown): Promise<T> {
   } catch (e) {
     if (e instanceof BackendError) throw e;
     if ((e as Error)?.name === 'AbortError') {
-      throw new BackendError(`Backend request timed out after ${TIMEOUT_MS}ms (${path})`, e);
+      throw new BackendError(`Backend request timed out after ${Math.round(timeoutMs / 1000)}s (${path})`, e);
     }
     throw new BackendError(`Could not reach backend at ${env.apiBaseUrl}${path}: ${(e as Error).message}`, e);
   } finally {
     clearTimeout(timer);
   }
 }
+
+/** POST routes that always need the operator session (every write except
+ *  webhooks and the public income research). */
+const OPERATOR_POST_PATHS = /^\/(prospects|offers|outreach|projects|real-revenue|treasury|survival-challenge|actions|payments\/requests|payments\/finivex\/create-approved-link|income\/strategy|content\/state)/;
 
 export interface FirstDollarStatus {
   ok: true;
@@ -644,8 +712,11 @@ export interface ProspectDiscoveryResponse {
   region: string;
   searchQuery: string | null;
   discovered: number;
+  saved?: number;
   verified: number;
   rejectedUnverifiedOrConflicting: number;
+  rejectedNotABusiness?: number;
+  budgetExceeded?: number;
   queriesRun: number;
   sourcesCount: number;
   cacheHits: number;
@@ -653,7 +724,8 @@ export interface ProspectDiscoveryResponse {
 }
 
 export function discoverProspectsNow(input?: { opportunityId?: string; region?: string; searchQuery?: string }): Promise<ProspectDiscoveryResponse> {
-  return postJson('/prospects/discover', input ?? {});
+  // Live web search: allow up to 90s (the old 12s limit made every search fail).
+  return postJson('/prospects/discover', input ?? {}, 90_000);
 }
 
 export function fetchActionApprovals(): Promise<{ ok: true; approvals: ActionApproval[] }> {

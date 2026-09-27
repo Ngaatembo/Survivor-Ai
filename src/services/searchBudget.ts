@@ -87,14 +87,17 @@ export const SEARCH_POLICY: Record<SearchPurpose, SearchPurposePolicy> = {
     resultsPerQuery: 5,
   },
   PROSPECT_DISCOVERY: {
-    ttlMs: 2 * DAY_MS, // 24–72h band from the spec; 48h default
-    maxPerCycle: 3,
-    maxPerDay: 9,
-    maxPerMonth: 120,
+    // Every automatic search now targets a different (business type × town)
+    // pair (prospectDiscovery.ts rotation), so a longer cache costs nothing
+    // and the same slice is not re-searched for two weeks.
+    ttlMs: 14 * DAY_MS,
+    maxPerCycle: 2,
+    maxPerDay: 16, // automatic rotation uses ≤10 (prospectDiscovery.ts); the rest is kept for the "Find clients" button
+    maxPerMonth: 420, // ≈560 Tavily credits (Facebook-only searches use basic depth) — inside the free tier with the other purposes' real usage
     maxPerEntity: 2,
     primaryProvider: 'brave',
     fallbackProvider: 'tavily',
-    resultsPerQuery: 5,
+    resultsPerQuery: 10, // same search cost, twice the candidates
   },
   PROSPECT_INTELLIGENCE: {
     ttlMs: 7 * DAY_MS,

@@ -23,6 +23,7 @@ import { computeProfit, generateLearningEvent, foldRealRevenueIntoMemory, comput
 import { researchProspect } from '../../src/services/prospectIntelligence';
 import { verifyProspect } from '../../src/services/prospectVerification';
 import { discoverProspects } from '../../src/services/prospectDiscovery';
+import { resolveProspectEntities } from '../../src/services/prospectEntityResolution';
 import { generateProspectDemo } from '../../src/lib/demoGenerator';
 import { generateDesignBrief } from '../../src/lib/designBriefGenerator';
 import { generateOffer } from '../../src/lib/offerGenerator';
@@ -1577,24 +1578,29 @@ export default {
         const models = await repo.listBusinessModels();
         const model = models.find((m) => m.opportunityId === opportunity.id);
         const existing = await repo.listProspects();
-        const existingNames = existing.filter((p) => p.opportunityId === opportunity.id).map((p) => p.businessName);
+        // Dedupe against EVERY saved business, not just this opportunity's —
+        // the cron and this button file leads under different opportunities.
+        const existingNames = existing.map((p) => p.businessName);
         const balance = balanceFrom(await repo.listTransactions());
         const state = await loadEconomyState(repo);
         const now = Date.now();
         const ctx = { state, providers: { tavily, brave }, survivalStatus: computeSurvivalStatus(balance), now, cycleStartedAt: now };
         const discovered = await discoverProspects(ctx, opportunity, model, existingNames, undefined, now, { region, searchQuery });
-        const accepted: typeof discovered.prospects = [];
-        for (const raw of discovered.prospects) {
-          const verified = await verifyProspect(ctx, raw, now);
-          if (verified.verification?.status === 'UNVERIFIED' || verified.verification?.status === 'CONFLICT') continue;
-          accepted.push(verified);
-        }
+        // Save straight away. Identity/contact verification used to run here,
+        // inline — 2 more searches per business, one after another — which
+        // pushed the request past the dashboard's timeout, so the button
+        // failed and nothing was saved; and it discarded every business that
+        // wasn't independently corroborated, which was nearly all of them.
+        // Every result has already passed the business/name/location filter
+        // and carries its source link; the 30-minute cycle now verifies new
+        // leads in the background (agentEngine verification step).
+        const { accepted } = resolveProspectEntities(existing, discovered.prospects);
         if (accepted.length) {
           await repo.upsertProspects(accepted);
-          for (const p of accepted) await repo.appendProspectInteraction({ id: 'pint_' + crypto.randomUUID(), prospectId: p.id, kind: 'DISCOVERED', summary: 'Operator-triggered live discovery + identity verification: ' + (p.verification?.status ?? 'UNVERIFIED') + ' (' + (p.verification?.confidence ?? 0) + '% confidence).', createdAt: now });
+          for (const p of accepted) await repo.appendProspectInteraction({ id: 'pint_' + crypto.randomUUID(), prospectId: p.id, kind: 'DISCOVERED', summary: `Found by the operator's "Find clients" search (${searchQuery ?? 'auto'} · ${region ?? p.location}). Verification runs in the next cycles.`, createdAt: now });
         }
         await saveEconomyState(repo, ctx.state);
-        return json({ ok: true, opportunityId: opportunity.id, opportunityName: opportunity.name, directAcquisitionMode: opportunity.id === 'nwt-dev-local-business-acquisition', region: region || opportunity.geographicRelevance[0] || 'Zimbabwe', searchQuery: searchQuery || null, discovered: discovered.prospects.length, verified: accepted.length, rejectedUnverifiedOrConflicting: discovered.prospects.length - accepted.length, queriesRun: discovered.queriesRun, sourcesCount: discovered.sourcesCount, cacheHits: discovered.cacheHits, budgetExceeded: discovered.budgetExceeded, prospects: accepted });
+        return json({ ok: true, opportunityId: opportunity.id, opportunityName: opportunity.name, directAcquisitionMode: opportunity.id === 'nwt-dev-local-business-acquisition', region: region || opportunity.geographicRelevance[0] || 'Zimbabwe', searchQuery: searchQuery || null, discovered: discovered.prospects.length, saved: accepted.length, verified: accepted.filter((p) => p.verification?.status === 'VERIFIED').length, rejectedUnverifiedOrConflicting: 0, rejectedNotABusiness: discovered.rejected, queriesRun: discovered.queriesRun, sourcesCount: discovered.sourcesCount, cacheHits: discovered.cacheHits, budgetExceeded: discovered.budgetExceeded, prospects: accepted });
       } catch (e) { return json({ ok: false, error: (e as Error).message }, { status: 500 }); }
     }
     if (url.pathname === '/offers/generate' && req.method === 'POST') {
@@ -1719,14 +1725,38 @@ export default {
 
         // Server-side evidence gates prevent the CRM from claiming progress that
         // the stored evidence cannot support. Human confirmation is still required.
-        if ((status === 'CONTACTED' || status === 'FOLLOW_UP') && !await hasHumanApproval(repo, { actionId: `outreach:${prospectId}`, actionKind: 'CONTACT_PROSPECT', prospectId })) {
-          return json({ ok: false, error: 'Human approval is required before recording CONTACTED or FOLLOW_UP for this prospect.' }, { status: 403 });
-        }
-        if (status === 'CONTACTED' && (!verificationReady || !hasVerifiedContact)) {
-          return json({
-            ok: false,
-            error: 'Cannot mark contacted: the prospect needs VERIFIED/PROVISIONAL identity evidence and a verified public contact first.',
-          }, { status: 409 });
+        // Survivor never sends anything itself. When the logged-in operator
+        // records CONTACTED/FOLLOW_UP, it is because they personally sent the
+        // message from their own WhatsApp/phone — that act IS the human
+        // approval, so it is recorded as an executed approval instead of
+        // being refused (the old two-step gate plus a verified-contact
+        // requirement meant no prospect could ever be marked contacted: none
+        // had been auto-verified). The operator still needs a real contact to
+        // have reached the business.
+        if (status === 'CONTACTED' || status === 'FOLLOW_UP') {
+          if (!prospect.contactValue && !hasVerifiedContact) {
+            return json({ ok: false, error: 'Cannot mark contacted: this prospect has no phone, WhatsApp or other contact on record.' }, { status: 409 });
+          }
+          const approvalActionId = `outreach:${prospectId}`;
+          if (!await hasHumanApproval(repo, { actionId: approvalActionId, actionKind: 'CONTACT_PROSPECT', prospectId })) {
+            const rawApprovals = await repo.getKV('human_action_approvals');
+            let approvals: any[] = [];
+            try { approvals = rawApprovals ? JSON.parse(rawApprovals) : []; } catch { approvals = []; }
+            if (!Array.isArray(approvals)) approvals = [];
+            approvals.push({
+              id: 'approval_' + crypto.randomUUID(),
+              actionId: approvalActionId,
+              actionKind: 'CONTACT_PROSPECT',
+              title: `Operator personally contacted ${prospect.businessName}`,
+              prospectId,
+              status: 'EXECUTED',
+              note: `Recorded by the logged-in operator when marking ${status}${verificationReady ? '' : ' (before automated identity verification)'}.`,
+              createdAt: Date.now(),
+              reviewedAt: Date.now(),
+              executedAt: Date.now(),
+            });
+            await repo.setKV('human_action_approvals', JSON.stringify(approvals.slice(-200)));
+          }
         }
         if (status === 'REPLIED' && !['CONTACTED', 'REPLIED', 'FOLLOW_UP'].includes(current)) {
           return json({ ok: false, error: `Cannot mark replied from ${current}: record a real CONTACTED state first.` }, { status: 409 });

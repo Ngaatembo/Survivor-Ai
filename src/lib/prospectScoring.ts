@@ -9,6 +9,7 @@
 
 import type { BusinessModel, ContactChannel, LeadScoreBreakdown, Prospect, WebsitePresence } from '../types';
 import { blendWithReal, type CategoryRealWorldStats } from './realRevenue';
+import { marketPriceForProspect } from './zimWebsitePricing';
 
 /** How strongly each observed web-presence state signals real need for the
  *  website-service offer. ADEQUATE means the business likely already has a
@@ -37,6 +38,10 @@ export interface ScoreProspectInput {
   sourcesCount: number;
   hasCommercialSignals: boolean; // e.g. snippet mentions hours/reviews/address/pricing
   hasUrgencySignal: boolean; // e.g. "now open", "new location", "hiring"
+  /** What the business is, so the deal value is the real Zimbabwe market
+   *  quote for THIS kind of business (zimWebsitePricing.ts) rather than a
+   *  generic model price or the old $25 placeholder. */
+  pricing?: { category: string; businessName: string; evidenceNotes: string };
 }
 
 /**
@@ -97,8 +102,12 @@ export function scoreProspect(
   // Economics: derived from the linked business model when one exists;
   // otherwise a conservative placeholder that keeps priority capped until
   // a real offer/price is generated for this opportunity.
-  const expectedDealValue = businessModel?.suggestedPrice ?? 25;
-  const deliveryCost = businessModel?.deliveryCostEstimate ?? expectedDealValue * 0.3;
+  const market = input.pricing ? marketPriceForProspect(input.pricing) : undefined;
+  const expectedDealValue = market?.quote ?? businessModel?.suggestedPrice ?? 25;
+  if (market) factors.push(`Quote $${market.quote} — ${market.label}; Zimbabwe market $${market.marketMin}–$${market.marketMax}`);
+  // Delivery cost: first-year domain + hosting and tools, roughly 15% of a
+  // small site's price (market packages bundle both into the once-off fee).
+  const deliveryCost = businessModel?.deliveryCostEstimate || Math.round(expectedDealValue * 0.15);
   // Acquisition cost here is nominal effort, not cash spend — outreach is a
   // free message; this represents the small time/opportunity cost of
   // researching + contacting one prospect, so it never dominates the model.

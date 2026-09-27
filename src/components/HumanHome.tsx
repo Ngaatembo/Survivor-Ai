@@ -7,6 +7,7 @@
  * POST /offers/status). Nothing is ever sent to a prospect from here.
  * ========================================================================== */
 import { useState } from 'react';
+import { marketPriceForProspect } from '../lib/zimWebsitePricing';
 import { useStore, useWalletTotals, backendConfigured } from '../store';
 import { demoUrl, requestActionApproval, reviewActionApproval, markActionExecuted, BackendError, type ActionApproval, updateProspectStatus as apiUpdateProspectStatus, updateOfferStatus as apiUpdateOfferStatus } from '../services/backendApi';
 import { approvalActionId } from '../lib/approvalQueue';
@@ -105,10 +106,12 @@ function ActionButtons({ a, go, compact }: { a: RecommendedAction; go: (v: View)
   const doConfirm = async () => {
     setBusy(true);
     try {
-      if (!approved || !approval) return;
-      if (confirm === 'contacted' && prospect) { await updateProspectStatus(prospect.id, 'CONTACTED'); await markActionExecuted(approval.id); }
-      if (confirm === 'followup' && prospect) { await updateProspectStatus(prospect.id, 'FOLLOW_UP'); await markActionExecuted(approval.id); }
-      if (confirm === 'sent' && prep?.offer) { await updateOfferStatus(prep.offer.id, 'SENT'); await markActionExecuted(approval.id); }
+      // Contacting a business is something the operator does themselves, so
+      // recording it needs no separate approval step (the backend records the
+      // operator's own action as the approval). Sending an offer still does.
+      if (confirm === 'contacted' && prospect) { await updateProspectStatus(prospect.id, 'CONTACTED'); if (approval?.status === 'APPROVED') await markActionExecuted(approval.id); }
+      if (confirm === 'followup' && prospect) { await updateProspectStatus(prospect.id, 'FOLLOW_UP'); if (approval?.status === 'APPROVED') await markActionExecuted(approval.id); }
+      if (confirm === 'sent' && prep?.offer) { if (!approved || !approval) return; await updateOfferStatus(prep.offer.id, 'SENT'); await markActionExecuted(approval.id); }
       await syncFromBackend();
     } finally {
       setBusy(false);
@@ -138,27 +141,33 @@ function ActionButtons({ a, go, compact }: { a: RecommendedAction; go: (v: View)
   return (
     <div className="act-row">
       {approvalError && <span className="muted small" role="alert">Approval failed: {approvalError}</span>}
-      <button className="btn big" onClick={() => go(target)}>
-        {openLabel}
-      </button>
+      {a.prospectId && (a.kind === 'CONTACT_PROSPECT' || a.kind === 'FOLLOW_UP_PROSPECT') ? (
+        <button className="btn big primary" onClick={() => go('clients')}>
+          Message on WhatsApp →
+        </button>
+      ) : (
+        <button className="btn big" onClick={() => go(target)}>
+          {openLabel}
+        </button>
+      )}
       {prep?.demo && backendConfigured && a.prospectId && (
         <a className="btn big" href={demoUrl(a.prospectId)} target="_blank" rel="noopener noreferrer">
           View demo
         </a>
       )}
-      <button className="btn big" disabled={approvalBusy || approval?.status === 'APPROVED' || approval?.status === 'EXECUTED'} onClick={async () => { setApprovalBusy(true); setApprovalError(null); try { await requestActionApproval(a, prep?.offer?.id); await syncFromBackend(); } catch (e) { const message = e instanceof BackendError ? e.message : (e as Error).message; setApprovalError(message || 'Could not create approval request.'); } finally { setApprovalBusy(false); } }}>{approvalBusy ? 'Requesting…' : approval?.status === 'APPROVED' ? 'Approved' : approval?.status === 'EXECUTED' ? 'Executed' : 'Request approval'}</button>
+      {a.kind !== 'CONTACT_PROSPECT' && a.kind !== 'FOLLOW_UP_PROSPECT' && <button className="btn big" disabled={approvalBusy || approval?.status === 'APPROVED' || approval?.status === 'EXECUTED'} onClick={async () => { setApprovalBusy(true); setApprovalError(null); try { await requestActionApproval(a, prep?.offer?.id); await syncFromBackend(); } catch (e) { const message = e instanceof BackendError ? e.message : (e as Error).message; setApprovalError(message || 'Could not create approval request.'); } finally { setApprovalBusy(false); } }}>{approvalBusy ? 'Requesting…' : approval?.status === 'APPROVED' ? 'Approved' : approval?.status === 'EXECUTED' ? 'Executed' : 'Request approval'}</button>}
       {prep?.outreach && (
         <button className="btn big" onClick={copyMessage}>
           {copied ? 'Copied' : 'Copy message'}
         </button>
       )}
       {canMarkFollowUp && a.kind === 'FOLLOW_UP_PROSPECT' && (
-        <button className="btn primary big" disabled={!approved} onClick={() => setConfirm('followup')}>
+        <button className="btn big" onClick={() => setConfirm('followup')}>
           Mark follow-up
         </button>
       )}
       {canMarkContacted && a.kind === 'CONTACT_PROSPECT' && (
-        <button className="btn primary big" disabled={!approved} onClick={() => setConfirm('contacted')}>
+        <button className="btn big" onClick={() => setConfirm('contacted')}>
           Mark contacted
         </button>
       )}
@@ -188,6 +197,7 @@ function Why({ text }: { text: string }) {
 
 function NextMoneyAction({ go }: { go: (v: View) => void }) {
   const q = useStore((s) => s.economicEfficiency?.humanActionQueue);
+  const prospects = useStore((s) => s.prospects);
   const a = q?.topAction ?? null;
   const live = useLiveState();
 
@@ -218,6 +228,8 @@ function NextMoneyAction({ go }: { go: (v: View) => void }) {
   }
 
   const who = a.prospectName ?? a.opportunityName;
+  const quoteProspect = a.prospectId ? prospects.find((p) => p.id === a.prospectId) : undefined;
+  const quote = quoteProspect ? marketPriceForProspect(quoteProspect) : null;
   return (
     <section className="money-card">
       <div className="card-head">
@@ -229,10 +241,17 @@ function NextMoneyAction({ go }: { go: (v: View) => void }) {
           <div className="money-title">{a.title}</div>
           {who && <div className="muted">{who}</div>}
         </div>
-        <div className="money-value" title="Modeled expected value, not a promise of revenue">
-          {usd(a.expectedValue)}
-          <small>expected value</small>
-        </div>
+        {quote ? (
+          <div className="money-value" title={`Real Zimbabwe market price for this kind of business (checked against published agency prices)`}>
+            ${quote.quote}
+            <small>quote · market ${quote.marketMin}–${quote.marketMax}</small>
+          </div>
+        ) : (
+          <div className="money-value" title="Modeled expected value, not a promise of revenue">
+            {usd(a.expectedValue)}
+            <small>expected value</small>
+          </div>
+        )}
       </div>
       <Why text={a.description} />
       <div className="money-meta">

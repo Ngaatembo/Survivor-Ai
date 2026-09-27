@@ -20,15 +20,22 @@ class TavilyProvider implements SearchProvider {
 
   async search(query: string, max = 5): Promise<SearchResult[]> {
     try {
+      // Tavily ignores Google-style "site:" operators; turn a leading
+      // "site:domain" into its include_domains filter instead (Brave
+      // understands "site:" natively, so the query text stays portable).
+      const site = query.match(/^\s*site:(\S+)\s+(.*)$/i);
       const res = await fetch('https://api.tavily.com/search', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({
           api_key: this.apiKey,
-          query,
-          max_results: max,
-          search_depth: 'advanced',
+          query: site ? site[2] : query,
+          max_results: Math.min(20, max),
+          // Domain-filtered searches (Facebook pages) don't need the 2-credit
+          // advanced depth — the page title/intro carries the name and number.
+          search_depth: site ? 'basic' : 'advanced',
           include_raw_content: true,
+          ...(site ? { include_domains: [site[1]] } : {}),
         }),
       });
       if (!res.ok) throw new Error(`tavily ${res.status}`);

@@ -21,22 +21,77 @@ import { uid } from '../lib/format';
 import { scoreProspect, priorityFromScore } from '../lib/prospectScoring';
 import type { CategoryRealWorldStats } from '../lib/realRevenue';
 import { runSearch, type SearchEconomyContext } from './searchEconomy';
-import { extractDomain, judgeSearchResult, isSocialDomain } from '../lib/prospectResultFilter';
+import { extractDomain, judgeSearchResult, isSocialDomain, isWhatsAppDomain } from '../lib/prospectResultFilter';
 
-/** Rotated across cycles (by day) rather than all searched every cycle, to
- *  keep the query budget bounded alongside opportunity discovery's own
- *  searches in the same cycle. */
-const CATEGORY_SEEDS: { label: string; terms: string }[] = [
-  { label: 'Local service business (plumbing/electrical)', terms: 'plumber OR electrician' },
-  { label: 'Local retail / boutique', terms: 'boutique clothing shop OR retail store' },
-  { label: 'Local food & hospitality', terms: 'restaurant OR bakery OR cafe' },
-  { label: 'Local trades & auto', terms: 'auto repair garage OR construction contractor' },
-  { label: 'Local personal services', terms: 'hair salon OR tutoring service OR photographer' },
+/* ----------------------------------------------------------------------------
+ * What to search for, and where.
+ * ----------------------------------------------------------------------------
+ * Root cause this replaces (live D1, 27 Sept 2026): five seeds rotated once a
+ * DAY and always searched "in Zimbabwe", with a 48h cache — so every cycle
+ * after the first re-read the same cached results and found nothing new
+ * (16 real prospect searches in two weeks, 2 prospects). Now every fresh
+ * search moves to the next (business type × town) pair, so each one looks at
+ * a different slice of the market. Labels keep the words zimWebsitePricing's
+ * tier detection keys on (salon, restaurant, lodge, car hire, …).
+ * -------------------------------------------------------------------------- */
+export const CATEGORY_SEEDS: { label: string; terms: string }[] = [
+  { label: 'Auto repair & panel beaters', terms: 'panel beaters OR auto repair garage OR mechanic workshop' },
+  { label: 'Hair salons & barbers', terms: 'hair salon OR barber shop OR beauty salon' },
+  { label: 'Restaurants & takeaways (food)', terms: 'restaurant OR takeaway OR fast food' },
+  { label: 'Plumbing, electrical & solar', terms: 'plumber OR electrician OR solar installation company' },
+  { label: 'Lodges & guest houses', terms: 'lodge OR guest house OR B&B accommodation' },
+  { label: 'Construction & builders', terms: 'construction company OR builders OR building contractor' },
+  { label: 'Clothing boutiques & tailors', terms: 'boutique OR clothing shop OR tailor' },
+  { label: 'Car hire & tours', terms: 'car hire OR car rental OR shuttle and tours' },
+  { label: 'Bakeries & catering (food)', terms: 'bakery OR cakes OR catering services' },
+  { label: 'Hardware & building supplies', terms: 'hardware store OR building materials supplier' },
+  { label: 'Schools, colleges & tutors', terms: 'driving school OR private college OR tutoring centre' },
+  { label: 'Events, venues & photography', terms: 'events venue OR photographer OR decor hire' },
+  { label: 'Furniture & carpentry', terms: 'furniture shop OR carpentry OR kitchen units' },
+  { label: 'Printing, signage & branding', terms: 'printing and branding OR signage company' },
+  { label: 'Clinics, pharmacies & gyms', terms: 'pharmacy OR dental clinic OR gym' },
 ];
 
-const MAX_QUERIES_PER_CYCLE = 3;
-const MAX_RESULTS_PER_QUERY = 5;
-const MAX_NEW_PROSPECTS_PER_CYCLE = 8;
+/** Towns, nearest to WebAura (Marondera) first. An odd count, so the
+ *  Facebook-only / open-web alternation below never locks to one town. */
+export const TARGET_TOWNS = [
+  'Marondera', 'Harare', 'Ruwa', 'Chitungwiza', 'Mutare', 'Bulawayo', 'Gweru',
+  'Kwekwe', 'Masvingo', 'Kadoma', 'Norton', 'Bindura', 'Rusape',
+];
+
+/** Entity-id prefix for automatic (rotating) discovery searches — also how
+ *  the rotation cursor is recovered from the search log. */
+const AUTO_ENTITY_PREFIX = 'auto-prospect::';
+
+/** The k-th search in the rotation: towns change every search, business
+ *  type changes after each full round of towns; 2 of every 3 searches are
+ *  restricted to Facebook pages (the businesses most likely to need a site). */
+export function rotationPair(k: number): { seed: (typeof CATEGORY_SEEDS)[number]; town: string; facebookOnly: boolean } {
+  const town = TARGET_TOWNS[k % TARGET_TOWNS.length];
+  const seed = CATEGORY_SEEDS[Math.floor(k / TARGET_TOWNS.length) % CATEGORY_SEEDS.length];
+  return { seed, town, facebookOnly: k % 3 !== 2 };
+}
+
+/** How many fresh rotation searches have already run — the next pair to
+ *  search. Derived from the persisted search log, so it needs no extra
+ *  state and survives restarts. */
+function rotationCursor(ctx: SearchEconomyContext): number {
+  return ctx.state.log.filter((e) => !e.cacheHit && e.purpose === 'PROSPECT_DISCOVERY' && e.entityId?.startsWith(AUTO_ENTITY_PREFIX)).length;
+}
+
+/** Automatic searches allowed per rolling 24h. The purpose's daily budget
+ *  (searchBudget.ts, 16/day) keeps the rest free for the operator's own
+ *  "Find clients" button, which would otherwise find the budget used up. */
+const MAX_AUTO_SEARCHES_PER_DAY = 10;
+
+function autoSearchesLast24h(ctx: SearchEconomyContext): number {
+  const since = ctx.now - 24 * 60 * 60 * 1000;
+  return ctx.state.log.filter((e) => !e.cacheHit && e.ts >= since && e.purpose === 'PROSPECT_DISCOVERY' && e.entityId?.startsWith(AUTO_ENTITY_PREFIX)).length;
+}
+
+const MAX_QUERIES_PER_CYCLE = 2;
+const MAX_RESULTS_PER_QUERY = 10;
+const MAX_NEW_PROSPECTS_PER_CYCLE = 12;
 
 // Phone separators are spaces, hyphens, or parens — deliberately excludes
 // '.' as a separator: a period followed by digits reads as a decimal
@@ -54,7 +109,7 @@ function looksLikeRealPhoneNumber(candidate: string): boolean {
   const digits = candidate.replace(/\D/g, '');
   return digits.length >= MIN_PHONE_DIGITS && digits.length <= MAX_PHONE_DIGITS;
 }
-const COMMERCIAL_HINTS = ['open', 'hours', 'call us', 'order', 'book now', 'service', 'contact us', 'located', 'price', 'quote'];
+const COMMERCIAL_HINTS = ['open', 'hours', 'call us', 'call or whatsapp', 'whatsapp us', 'order', 'book now', 'booking', 'service', 'contact us', 'located', 'price', 'quote', 'deliver', 'visit us', 'followers', 'we offer', 'we specialise', 'we specialize'];
 const URGENCY_HINTS = ['now open', 'new location', 'hiring', 'grand opening', 'coming soon', 'newly opened'];
 
 function classifyPresence(domain: string, snippet: string): { presence: WebsitePresence; note: string } {
@@ -64,6 +119,9 @@ function classifyPresence(domain: string, snippet: string): { presence: WebsiteP
   }
   if (domain.includes('instagram.com')) {
     return { presence: 'SOCIAL_ONLY', note: 'Primary public result is an Instagram profile, not an independent website.' };
+  }
+  if (isWhatsAppDomain(domain)) {
+    return { presence: 'SOCIAL_ONLY', note: 'Primary public presence is a WhatsApp Business link, not an independent website.' };
   }
   if (isSocialDomain(domain)) {
     return { presence: 'SOCIAL_ONLY', note: `Primary public result is a social profile (${domain}), not an independent website.` };
@@ -103,12 +161,6 @@ function classifyContact(
   return { channel: 'UNKNOWN' };
 }
 
-function rotatedSeeds(now: number): typeof CATEGORY_SEEDS {
-  const dayIndex = Math.floor(now / 86_400_000);
-  const offset = dayIndex % CATEGORY_SEEDS.length;
-  return [...CATEGORY_SEEDS.slice(offset), ...CATEGORY_SEEDS.slice(0, offset)].slice(0, MAX_QUERIES_PER_CYCLE);
-}
-
 export async function discoverProspects(
   ctx: SearchEconomyContext,
   opportunity: Opportunity,
@@ -118,37 +170,60 @@ export async function discoverProspects(
   now: number = Date.now(),
   options: { region?: string; searchQuery?: string } = {},
 ): Promise<{ prospects: Prospect[]; queriesRun: number; sourcesCount: number; cacheHits: number; budgetExceeded: number; rejected: number }> {
-  const region = options.region?.trim() || opportunity.geographicRelevance[0] || 'Zimbabwe';
-  const seeds = options.searchQuery?.trim()
-    ? [
-        { label: 'Targeted local business search', terms: options.searchQuery.trim() },
-        { label: 'Targeted local business contact search', terms: `${options.searchQuery.trim()} phone WhatsApp contact` },
-        { label: 'Targeted local business web/social search', terms: `${options.searchQuery.trim()} official website Facebook Instagram` },
-      ]
-    : rotatedSeeds(now);
+  const explicitRegion = options.region?.trim();
+  // Each planned search: what to search for, where, and how.
+  type PlannedSearch = { label: string; query: string; region: string; entityId: string };
+  let plan: PlannedSearch[];
+  if (options.searchQuery?.trim()) {
+    const q = options.searchQuery.trim();
+    const region = explicitRegion || opportunity.geographicRelevance[0] || 'Zimbabwe';
+    plan = [
+      { label: 'Targeted local business search', query: `${q} in ${region} phone WhatsApp`, region, entityId: `${opportunity.id}::targeted::${q}::${region}` },
+      { label: 'Targeted local business (Facebook pages)', query: `site:facebook.com ${q} ${region}`, region, entityId: `${opportunity.id}::targeted-fb::${q}::${region}` },
+    ];
+  } else {
+    const cursor = rotationCursor(ctx);
+    const remainingToday = Math.max(0, MAX_AUTO_SEARCHES_PER_DAY - autoSearchesLast24h(ctx));
+    plan = Array.from({ length: Math.min(MAX_QUERIES_PER_CYCLE, remainingToday) }, (_, i) => {
+      const { seed, town, facebookOnly } = rotationPair(cursor + i);
+      const region = explicitRegion || town;
+      return {
+        label: seed.label,
+        query: facebookOnly ? `site:facebook.com ${seed.terms} ${region} Zimbabwe` : `${seed.terms} in ${region} Zimbabwe phone WhatsApp`,
+        region,
+        entityId: `${AUTO_ENTITY_PREFIX}${seed.label}::${region}::${facebookOnly ? 'fb' : 'web'}`,
+      };
+    });
+  }
   const found: Prospect[] = [];
   let queriesRun = 0;
   let sourcesCount = 0;
   let cacheHits = 0;
   let budgetExceeded = 0;
   let rejected = 0;
-  const zimRegion = /zimbabwe|harare|bulawayo|mutare|gweru|marondera|masvingo|chitungwiza|kwekwe|kadoma|ruwa|norton/i.test(region);
 
-  for (const seed of seeds) {
+  // Run the planned searches in parallel: sequential searches (plus inline
+  // verification) took longer than the dashboard's request timeout, so the
+  // "Find clients" button timed out and saved nothing (27 Sept 2026).
+  const outcomes = await Promise.all(
+    plan.map((seed) =>
+      runSearch(ctx, {
+        purpose: 'PROSPECT_DISCOVERY',
+        // "site:facebook.com …" is turned into a Facebook-only domain filter by
+        // the search provider; the other phrasing asks for business pages with
+        // contact details, not guides or listicles.
+        query: seed.query,
+        entityId: seed.entityId,
+        max: MAX_RESULTS_PER_QUERY,
+      }),
+    ),
+  );
+
+  for (const [planIndex, seed] of plan.entries()) {
     if (found.length >= MAX_NEW_PROSPECTS_PER_CYCLE) break;
-    // entityId scopes the cache/budget per (opportunity, seed) pair — the
-    // same local-business seed for the same opportunity is not re-searched
-    // within its TTL, but different opportunities/seeds are tracked
-    // independently.
-    const entityId = `${opportunity.id}::${seed.label}`;
-    const searchOutcome = await runSearch(ctx, {
-      purpose: 'PROSPECT_DISCOVERY',
-      // Ask for business pages with contact details, not "small business" content
-      // — the old phrasing mostly returned guides, news and listicles.
-      query: `${seed.terms} in ${region} phone WhatsApp`,
-      entityId,
-      max: MAX_RESULTS_PER_QUERY,
-    });
+    const region = seed.region;
+    const zimRegion = /zimbabwe|harare|bulawayo|mutare|gweru|marondera|masvingo|chitungwiza|kwekwe|kadoma|ruwa|norton|bindura|rusape|chinhoyi/i.test(region);
+    const searchOutcome = outcomes[planIndex];
     if (searchOutcome.budgetExceeded) {
       budgetExceeded += 1;
       continue;
@@ -186,7 +261,9 @@ export async function discoverProspects(
       const text = `${r.title} ${r.snippet}`;
       const { presence, note } = classifyPresence(domain, r.snippet);
       const { channel, value } = classifyContact(domain, r.url, text, zimRegion, judged.zimPhone);
-      const hasCommercialSignals = COMMERCIAL_HINTS.some((h) => text.toLowerCase().includes(h));
+      // A real Zimbabwe phone number in the business's own listing is itself a
+      // sign of an operating business.
+      const hasCommercialSignals = COMMERCIAL_HINTS.some((h) => text.toLowerCase().includes(h)) || Boolean(judged.zimPhone);
       const hasUrgencySignal = URGENCY_HINTS.some((h) => text.toLowerCase().includes(h));
 
       // Require some real evidence this is an actual business, not a news
@@ -200,6 +277,13 @@ export async function discoverProspects(
       // 74/100 and marked HIGH priority despite not being a business at
       // all. Skip rather than create a low-confidence prospect from it.
       if (!hasCommercialSignals && presence !== 'ADEQUATE') continue;
+
+      // Already has its own website → not a lead for the website offer.
+      // These used to be saved as DO_NOT_CONTACT rows that cluttered the CRM.
+      if (presence === 'ADEQUATE') {
+        rejected += 1;
+        continue;
+      }
 
       const sources: ResearchSource[] = [
         {
@@ -218,6 +302,7 @@ export async function discoverProspects(
           sourcesCount: 1,
           hasCommercialSignals,
           hasUrgencySignal,
+          pricing: { category: seed.label, businessName, evidenceNotes: note },
         },
         businessModel,
         categoryStats,
@@ -233,8 +318,10 @@ export async function discoverProspects(
         category: seed.label,
         location: judged.location,
         websitePresence: presence,
-        websiteUrl: presence === 'ADEQUATE' ? r.url : undefined,
-        socialLinks: channel === 'FACEBOOK' || channel === 'INSTAGRAM' ? [r.url] : [],
+        websiteUrl: undefined,
+        // Keep the Facebook/Instagram/WhatsApp page so the operator can look
+        // at it before messaging.
+        socialLinks: isSocialDomain(domain) ? [r.url] : [],
         contactChannel: channel,
         contactValue: value,
         sources,

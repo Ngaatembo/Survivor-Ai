@@ -280,8 +280,12 @@ console.log('--- End-to-end discovery: fake search results -> real prospects -> 
   assert(facebookOne?.contactChannel === 'PHONE' && facebookOne?.contactValue?.includes('0771234567'), 'extracted a real phone number actually present in the snippet');
 
   const ownDomain = prospects.find((p) => p.businessName.toLowerCase().includes('marimba motors'));
-  assert(ownDomain?.websitePresence === 'ADEQUATE', 'a result indexed under its own domain is treated as already having a website');
-  assert(ownDomain?.priority === 'DO_NOT_CONTACT', 'a business that already has a website is not recommended for the website offer');
+  assert(!ownDomain, 'a business indexed under its own domain (already has a website) is not saved as a website lead');
+  assert(prospects.every((p) => p.websitePresence !== 'ADEQUATE'), 'no ADEQUATE-website businesses clutter the CRM');
+  assert(
+    (facebookOne?.score.expectedDealValue ?? 0) >= 150,
+    `deal value comes from the Zimbabwe market price table, not the old $25 placeholder (got $${facebookOne?.score.expectedDealValue})`,
+  );
 
   const groupMisattribution = prospects.find((p) => p.businessName.toLowerCase().includes('market place zimbabwe'));
   assert(
