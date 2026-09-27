@@ -12,6 +12,7 @@
 
 import type { BusinessModel, MemoryEntry, Opportunity } from '../types';
 import { dayRange, uid } from './format';
+import { TIER_PRICES, describeTierPrice, tierForOpportunityText } from './zimWebsitePricing';
 
 const CHANNEL_BY_CATEGORY: Record<Opportunity['category'], string> = {
   'Local / Real-World':
@@ -24,31 +25,17 @@ const CHANNEL_BY_CATEGORY: Record<Opportunity['category'], string> = {
   Finance: 'N/A — finance-category opportunities are research-only and are never taken to market by this system.',
 };
 
-const WEBSITE_PRICE_LADDER = {
-  starter: 150,
-  standard: 250,
-  advanced: 350,
-  custom: 450,
-} as const;
-
 function isWebsiteOpportunity(opp: Opportunity): boolean {
   const text = [opp.name, opp.description, opp.howMoneyMade, ...(opp.tags ?? [])].join(' ').toLowerCase();
-  return /website|web design|web development|landing page|business site|web site|online presence|booking site|restaurant site|company site/.test(text);
+  return /website|web design|web development|landing page|business site|web site|online presence|booking site|restaurant site|company site|e-?commerce|online store|online shop/.test(text);
 }
 
+/** Opportunity-level default only — each prospect's actual offer is priced
+ *  by what that business is (offerGenerator → zimWebsitePricing). */
 function websitePrice(opp: Opportunity): { price: number; rationale: string } {
-  const text = [opp.name, opp.description, opp.howMoneyMade, ...(opp.tags ?? [])].join(' ').toLowerCase();
-
-  if (/e-?commerce|online store|shop|payment gateway|custom app|advanced booking|admin panel/.test(text)) {
-    return { price: WEBSITE_PRICE_LADDER.custom, rationale: 'Configured NWT Dev pricing ladder: $450 for custom, e-commerce, advanced booking, payment or admin-panel scope.' };
-  }
-  if (/booking|reservation|restaurant|hotel|guest house|car rental|multi-page|5-page|cms|dashboard/.test(text)) {
-    return { price: WEBSITE_PRICE_LADDER.advanced, rationale: 'Configured NWT Dev pricing ladder: $350 for an advanced business website with richer functionality or larger scope.' };
-  }
-  if (/business|company|contractor|service|4-page|four-page|5-page/.test(text)) {
-    return { price: WEBSITE_PRICE_LADDER.standard, rationale: 'Configured NWT Dev pricing ladder: $250 for a standard business website.' };
-  }
-  return { price: WEBSITE_PRICE_LADDER.starter, rationale: 'Configured NWT Dev pricing ladder: $150 starter price for a smaller/basic web presence.' };
+  const text = [opp.name, opp.description, opp.howMoneyMade, ...(opp.tags ?? [])].join(' ');
+  const tier = TIER_PRICES[tierForOpportunityText(text)];
+  return { price: tier.quote, rationale: describeTierPrice(tier) };
 }
 
 function estimatePrice(opp: Opportunity): { price: number; rationale: string } {

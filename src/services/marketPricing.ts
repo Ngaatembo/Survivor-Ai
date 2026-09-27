@@ -15,6 +15,10 @@ import type { MarketPriceResearch, Opportunity, ResearchSource } from '../types'
 import { uid } from '../lib/format';
 import type { LLMProvider } from './providers/types';
 import { runSearch, type SearchEconomyContext } from './searchEconomy';
+import { TIER_PRICES, describeTierPrice, tierForOpportunityText } from '../lib/zimWebsitePricing';
+import { isZimbabwePlace } from '../lib/prospectResultFilter';
+
+const WEBSITE_OPP_RE = /website|web design|web development|landing page|online presence|digital service|e-?commerce|online (store|shop)/i;
 
 const MAX_SNIPPETS = 8;
 const PRICE_RE = /(?:US\$|USD\s*|\$|ZAR\s*|R\s*|ZWL\s*|ZW\$)\s*([0-9]{1,6}(?:[.,][0-9]{1,2})?)/gi;
@@ -134,7 +138,11 @@ export async function researchMarketPrice(
   now: number = Date.now(),
   opts: { offerPending?: boolean } = {},
 ): Promise<MarketPriceResearch> {
-  const service = opp.howMoneyMade || opp.name;
+  const oppText = `${opp.name} ${opp.description} ${opp.howMoneyMade}`;
+  const isWebsite = WEBSITE_OPP_RE.test(oppText);
+  // Search for the SERVICE, not the opportunity's long "how money is made"
+  // sentence (that produced queries nobody publishes prices for).
+  const service = isWebsite ? 'website design' : opp.name.replace(/\s*\(.*?\)\s*/g, ' ').trim();
   const region = opp.geographicRelevance[0] ?? 'Zimbabwe';
   const { snippets, sources } = await gatherPricingSnippets(ctx, service, region, opp.id, opts.offerPending ?? true);
   const observed = extractObservedPrices(snippets);
@@ -179,6 +187,22 @@ export async function researchMarketPrice(
     } catch {
       body = null; // fall through to digest
     }
+  }
+
+  if (!body && isWebsite && isZimbabwePlace(region)) {
+    // No LLM synthesis available — use the sourced Zimbabwe price table
+    // instead of storing a useless $0–$0 range.
+    const tier = TIER_PRICES[tierForOpportunityText(oppText)];
+    body = {
+      service,
+      region,
+      priceMin: tier.marketMin,
+      priceMax: tier.marketMax,
+      currency: 'USD',
+      rationale: describeTierPrice(tier),
+      confidence: 'MEDIUM',
+      generator: 'snippet-digest',
+    };
   }
 
   if (!body) {

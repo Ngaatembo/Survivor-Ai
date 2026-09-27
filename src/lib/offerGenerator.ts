@@ -15,20 +15,34 @@
 
 import type { BusinessModel, MarketPriceResearch, Offer, Prospect, ProspectIntelligence, WebsiteBrief } from '../types';
 import { uid } from './format';
+import { marketPriceForProspect } from './zimWebsitePricing';
+import { isZimbabwePlace } from './prospectResultFilter';
 
-/** Real market research (§ "underpricing fix") always wins over the
- *  formula-based BusinessModel.suggestedPrice when it's genuinely
- *  evidence-backed (LLM-synthesized from real snippets, not a LOW-
- *  confidence digest) — the formula price was never grounded in what the
- *  market actually charges, only a generic monthly-revenue-model guess. */
-function priceFor(model: BusinessModel | undefined, marketPrice: MarketPriceResearch | undefined): { price: number; rationale?: string } {
+/** Price order of trust:
+ *  1. Live market research synthesized by an LLM and bounded by prices
+ *     actually observed in the sources (non-LOW confidence).
+ *  2. For Zimbabwe prospects: the sourced Zimbabwe market table, by what
+ *     THIS business is (salon vs garage vs restaurant) — see zimWebsitePricing.ts.
+ *  3. The business model's own estimate (last resort, flagged as such). */
+function priceFor(
+  prospect: Prospect,
+  model: BusinessModel | undefined,
+  marketPrice: MarketPriceResearch | undefined,
+): { price: number; rationale?: string; monthlyCare?: number; scope?: string } {
   if (marketPrice && marketPrice.generator === 'llm' && marketPrice.confidence !== 'LOW' && marketPrice.priceMax > 0) {
     // Quote at the midpoint of the real researched range — a starting
     // point grounded in evidence, still adjustable in the real conversation.
     const price = Math.round((marketPrice.priceMin + marketPrice.priceMax) / 2);
     return { price, rationale: `Based on real market research: ${marketPrice.rationale}` };
   }
-  return { price: model?.suggestedPrice ?? 25, rationale: model?.priceRationale };
+  if (isZimbabwePlace(`${prospect.location} ${model?.targetCustomer ?? ''}`)) {
+    const t = marketPriceForProspect(prospect);
+    return { price: t.quote, rationale: t.rationale, monthlyCare: t.monthlyCare, scope: t.scope };
+  }
+  return {
+    price: model?.suggestedPrice ?? 150,
+    rationale: `${model?.priceRationale ?? 'Formula estimate.'} Not checked against local market prices — confirm before quoting.`,
+  };
 }
 
 function gapAnalysis(p: Prospect, intelligence?: ProspectIntelligence): string | undefined {
@@ -100,7 +114,7 @@ export function generateOffer(
   marketPrice?: MarketPriceResearch,
   now: number = Date.now(),
 ): Offer {
-  const { price, rationale: priceRationale } = priceFor(model, marketPrice);
+  const { price, rationale: priceRationale, monthlyCare, scope } = priceFor(prospect, model, marketPrice);
   const timelineDaysMax = Math.max(3, model?.timeToFirstSaleDaysEstimate ?? 14);
   const timelineDaysMin = Math.min(timelineDaysMax, Math.max(3, Math.round(timelineDaysMax * 0.5)));
 
@@ -111,7 +125,12 @@ export function generateOffer(
     `Contact/${prospect.contactChannel !== 'UNKNOWN' ? String(prospect.contactChannel).toLowerCase() : 'enquiry'} path on every page`,
     'One round of revisions before final delivery',
   ];
-  if (model?.upsells?.length) deliverables.push(...model.upsells.slice(0, 2));
+  if (scope) deliverables.unshift(`Scope: ${scope}`);
+  if (monthlyCare) {
+    deliverables.push(`Optional care plan: $${monthlyCare}/month (hosting, domain renewal, updates, small changes)`);
+  } else if (model?.upsells?.length) {
+    deliverables.push(...model.upsells.slice(0, 2));
+  }
 
   return {
     id: uid('offer'),

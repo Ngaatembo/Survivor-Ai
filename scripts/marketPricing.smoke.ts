@@ -108,16 +108,24 @@ console.log('--- researchMarketPrice: no search results -> honest LOW-confidence
     const opp = baseOpp();
     const emptySearch = new MockSearchProvider([]);
     const research = await researchMarketPrice(mkCtx(emptySearch), null, opp);
-    assert(research.confidence === 'LOW', 'no results -> LOW confidence');
+    // Zimbabwe website opportunity: falls back to the SOURCED Zimbabwe price
+    // table (zimWebsitePricing.ts) instead of a useless $0 range.
     assert(research.generator === 'snippet-digest', 'no LLM connected -> snippet-digest generator');
-    assert(research.priceMax === 0, 'no evidence -> $0 range, never a fabricated number');
+    assert(research.priceMin > 0 && research.priceMax >= research.priceMin, `Zimbabwe website opp -> sourced market range (got $${research.priceMin}-$${research.priceMax})`);
+    assert(/Sources checked/.test(research.rationale), 'the range cites the published sources it came from');
     assert(research.opportunityId === opp.id, 'research links back to the correct opportunity');
+
+    // Anywhere without a sourced table: still honest $0 / LOW, never invented.
+    const foreignOpp = { ...opp, geographicRelevance: ['Kenya'] };
+    const foreign = await researchMarketPrice(mkCtx(emptySearch), null, foreignOpp);
+    assert(foreign.confidence === 'LOW', 'no results outside Zimbabwe -> LOW confidence');
+    assert(foreign.priceMax === 0, 'no evidence outside Zimbabwe -> $0 range, never a fabricated number');
 
     console.log('--- researchMarketPrice: real snippets, no LLM -> honest digest, no fabricated price ---');
     const snippetSearch = new MockSearchProvider([
       { title: 'Freelance website designer Harare', url: 'https://example.com/1', snippet: 'Rates from $150 for a basic small business website, $300+ for e-commerce.', source: 'stub' },
     ]);
-    const digestResearch = await researchMarketPrice(mkCtx(snippetSearch), null, opp);
+    const digestResearch = await researchMarketPrice(mkCtx(snippetSearch), null, { ...opp, geographicRelevance: ['Kenya'] });
     assert(digestResearch.generator === 'snippet-digest', 'no LLM -> digest, never claims synthesis');
     assert(digestResearch.priceMax === 0, 'digest never invents a price range even when snippets mention real numbers');
     assert(digestResearch.sources.length > 0, 'sources are still captured for manual review');

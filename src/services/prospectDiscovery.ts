@@ -21,6 +21,7 @@ import { uid } from '../lib/format';
 import { scoreProspect, priorityFromScore } from '../lib/prospectScoring';
 import type { CategoryRealWorldStats } from '../lib/realRevenue';
 import { runSearch, type SearchEconomyContext } from './searchEconomy';
+import { extractDomain, judgeSearchResult, isSocialDomain } from '../lib/prospectResultFilter';
 
 /** Rotated across cycles (by day) rather than all searched every cycle, to
  *  keep the query budget bounded alongside opportunity discovery's own
@@ -56,23 +57,6 @@ function looksLikeRealPhoneNumber(candidate: string): boolean {
 const COMMERCIAL_HINTS = ['open', 'hours', 'call us', 'order', 'book now', 'service', 'contact us', 'located', 'price', 'quote'];
 const URGENCY_HINTS = ['now open', 'new location', 'hiring', 'grand opening', 'coming soon', 'newly opened'];
 
-function extractDomain(url: string): string {
-  try {
-    return new URL(url).hostname.replace(/^www\./, '').toLowerCase();
-  } catch {
-    return '';
-  }
-}
-
-function cleanBusinessName(title: string): string {
-  return title
-    .split(/[|·]| - Facebook| - Instagram| on Instagram| \(@[^)]*\)/i)[0]
-    .replace(/\s*\|\s*Facebook.*$/i, '')
-    .replace(/\s*-\s*Home$/i, '')
-    .trim()
-    .slice(0, 80);
-}
-
 function classifyPresence(domain: string, snippet: string): { presence: WebsitePresence; note: string } {
   const s = snippet.toLowerCase();
   if (domain.includes('facebook.com')) {
@@ -80,6 +64,9 @@ function classifyPresence(domain: string, snippet: string): { presence: WebsiteP
   }
   if (domain.includes('instagram.com')) {
     return { presence: 'SOCIAL_ONLY', note: 'Primary public result is an Instagram profile, not an independent website.' };
+  }
+  if (isSocialDomain(domain)) {
+    return { presence: 'SOCIAL_ONLY', note: `Primary public result is a social profile (${domain}), not an independent website.` };
   }
   const isDirectory = /(yellowpages|brabys|finder\.|listings?\.|directory)/.test(domain);
   if (isDirectory) {
@@ -94,8 +81,18 @@ function classifyPresence(domain: string, snippet: string): { presence: WebsiteP
   return { presence: 'UNKNOWN', note: 'Website status not determinable from available sources.' };
 }
 
-function classifyContact(domain: string, url: string, text: string): { channel: ContactChannel; value?: string } {
-  const phoneMatch = text.match(PHONE_RE);
+function classifyContact(
+  domain: string,
+  url: string,
+  text: string,
+  zimRegion: boolean,
+  zimPhone: string | undefined,
+): { channel: ContactChannel; value?: string } {
+  if (zimPhone) return { channel: 'PHONE', value: zimPhone };
+  // Outside Zimbabwe fall back to the generic pattern; inside Zimbabwe only a
+  // real Zimbabwe number counts (years like "2011-2026", ranges like
+  // "150 - 2000" and UK numbers were previously saved as phone numbers).
+  const phoneMatch = zimRegion ? null : text.match(PHONE_RE);
   if (phoneMatch && looksLikeRealPhoneNumber(phoneMatch[1])) {
     return { channel: 'PHONE', value: phoneMatch[1].trim() };
   }
@@ -120,7 +117,7 @@ export async function discoverProspects(
   categoryStats?: CategoryRealWorldStats,
   now: number = Date.now(),
   options: { region?: string; searchQuery?: string } = {},
-): Promise<{ prospects: Prospect[]; queriesRun: number; sourcesCount: number; cacheHits: number; budgetExceeded: number }> {
+): Promise<{ prospects: Prospect[]; queriesRun: number; sourcesCount: number; cacheHits: number; budgetExceeded: number; rejected: number }> {
   const region = options.region?.trim() || opportunity.geographicRelevance[0] || 'Zimbabwe';
   const seeds = options.searchQuery?.trim()
     ? [
@@ -134,6 +131,8 @@ export async function discoverProspects(
   let sourcesCount = 0;
   let cacheHits = 0;
   let budgetExceeded = 0;
+  let rejected = 0;
+  const zimRegion = /zimbabwe|harare|bulawayo|mutare|gweru|marondera|masvingo|chitungwiza|kwekwe|kadoma|ruwa|norton/i.test(region);
 
   for (const seed of seeds) {
     if (found.length >= MAX_NEW_PROSPECTS_PER_CYCLE) break;
@@ -144,7 +143,9 @@ export async function discoverProspects(
     const entityId = `${opportunity.id}::${seed.label}`;
     const searchOutcome = await runSearch(ctx, {
       purpose: 'PROSPECT_DISCOVERY',
-      query: `${seed.terms} small business in ${region}`,
+      // Ask for business pages with contact details, not "small business" content
+      // — the old phrasing mostly returned guides, news and listicles.
+      query: `${seed.terms} in ${region} phone WhatsApp`,
       entityId,
       max: MAX_RESULTS_PER_QUERY,
     });
@@ -169,15 +170,22 @@ export async function discoverProspects(
       // group. Never a reliable prospect source; skip entirely.
       if (/facebook\.com\/groups\//i.test(r.url)) continue;
 
-      const businessName = cleanBusinessName(r.title);
-      if (!businessName || businessName.length < 3) continue;
+      // Is this ONE real local business, and what is its actual name? Rejects
+      // articles, listicles, guides, directories, review/aggregator sites,
+      // foreign results and unattributable social posts (prospectResultFilter.ts).
+      const judged = judgeSearchResult(r, region);
+      if (!judged.ok) {
+        rejected += 1;
+        continue;
+      }
+      const businessName = judged.businessName;
       if (existingBusinessNames.some((n) => n.toLowerCase() === businessName.toLowerCase())) continue;
       if (found.some((p) => p.businessName.toLowerCase() === businessName.toLowerCase())) continue;
 
       const domain = extractDomain(r.url);
       const text = `${r.title} ${r.snippet}`;
       const { presence, note } = classifyPresence(domain, r.snippet);
-      const { channel, value } = classifyContact(domain, r.url, text);
+      const { channel, value } = classifyContact(domain, r.url, text, zimRegion, judged.zimPhone);
       const hasCommercialSignals = COMMERCIAL_HINTS.some((h) => text.toLowerCase().includes(h));
       const hasUrgencySignal = URGENCY_HINTS.some((h) => text.toLowerCase().includes(h));
 
@@ -223,7 +231,7 @@ export async function discoverProspects(
         opportunityName: opportunity.name,
         businessName,
         category: seed.label,
-        location: region,
+        location: judged.location,
         websitePresence: presence,
         websiteUrl: presence === 'ADEQUATE' ? r.url : undefined,
         socialLinks: channel === 'FACEBOOK' || channel === 'INSTAGRAM' ? [r.url] : [],
@@ -247,5 +255,5 @@ export async function discoverProspects(
     }
   }
 
-  return { prospects: found, queriesRun, sourcesCount, cacheHits, budgetExceeded };
+  return { prospects: found, queriesRun, sourcesCount, cacheHits, budgetExceeded, rejected };
 }
