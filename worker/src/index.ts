@@ -21,6 +21,7 @@ import type { EngineRepository } from '../../src/engine/repository';
 import type { ProspectStatus, OfferStatus, ProjectMilestoneKey, RealRevenueEntry, Opportunity, BusinessModel } from '../../src/types';
 import { computeProfit, generateLearningEvent, foldRealRevenueIntoMemory, computeCategoryRealWorldStats, statsForCategory } from '../../src/lib/realRevenue';
 import { researchProspect } from '../../src/services/prospectIntelligence';
+import { computeProblemOutcomeStats } from '../../src/lib/prospectLearning';
 import { verifyProspect } from '../../src/services/prospectVerification';
 import { discoverProspects } from '../../src/services/prospectDiscovery';
 import { resolveProspectEntities } from '../../src/services/prospectEntityResolution';
@@ -1706,6 +1707,8 @@ export default {
       try {
         const { repo } = buildEngine(env);
         const prospects = await repo.listProspects();
+        const prospectIntelligence = await repo.listProspectIntelligence();
+        const problemOutcomeStats = computeProblemOutcomeStats(prospects, prospectIntelligence);
         const prospect = prospects.find((p) => p.id === prospectId);
         if (!prospect) return json({ ok: false, error: `no prospect found with id ${prospectId}` }, { status: 404 });
 
@@ -1951,7 +1954,7 @@ export default {
         try {
           verified = await verifyProspect(ctx, prospect, now);
           await repo.upsertProspects([verified]);
-          intel = await researchProspect(ctx, llm, verified, now, { statusChanged: true });
+          intel = await researchProspect(ctx, llm, verified, now, { statusChanged: true, outcomeStats: problemOutcomeStats });
         } finally {
           await closeManualCostSession(repo, llm, meter, `deep research of ${prospect.businessName}`);
         }
