@@ -604,6 +604,30 @@ export interface ProspectInteraction {
  */
 export type IntelligenceConfidence = 'HIGH' | 'MEDIUM' | 'LOW';
 
+export type ProspectProblemType =
+  | 'DISCOVERABILITY'
+  | 'TRUST'
+  | 'CONVERSION'
+  | 'BOOKING'
+  | 'ORDERING'
+  | 'LEAD_CAPTURE'
+  | 'FOLLOW_UP'
+  | 'CUSTOMER_EXPERIENCE'
+  | 'COMPETITIVE_POSITION'
+  | 'WEBSITE_QUALITY'
+  | 'OTHER';
+
+export interface ProspectProblem {
+  type: ProspectProblemType;
+  evidence: string;
+  businessFriction: string;
+  likelyConsequence: string;
+  solvableOpportunity: string;
+  outreachClaim: string;
+  confidence: IntelligenceConfidence;
+  sourceIds: string[];
+}
+
 export interface ProspectIntelligence {
   id: string;
   prospectId: string;
@@ -613,6 +637,7 @@ export interface ProspectIntelligence {
   competitiveNote: string;
   specificProblemEvidence: string;
   recommendedAngle: string;
+  primaryProblem?: ProspectProblem;
   confidence: IntelligenceConfidence;
   generator: 'llm' | 'snippet-digest';
   sources: ResearchSource[];
