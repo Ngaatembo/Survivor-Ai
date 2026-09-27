@@ -1595,43 +1595,26 @@ export default {
         // Every result has already passed the business/name/location filter
         // and carries its source link; the 30-minute cycle now verifies new
         // leads in the background (agentEngine verification step).
-        const { accepted: resolved } = resolveProspectEntities(existing, discovered.prospects);
-        let accepted = resolved;
-        let verifiedCount = 0;
-        let conflictCount = 0;
+        const { accepted } = resolveProspectEntities(existing, discovered.prospects);
+        // Discovery must remain fast: save candidates immediately, then let the
+        // capped verification phase in agentEngine corroborate identity/contact
+        // asynchronously. Doing verification inline makes the user-facing
+        // request wait on two extra external searches and can time out before
+        // anything is persisted.
         if (accepted.length) {
-          // Keep discovery fast enough for the dashboard, but do not return a
-          // fresh batch as contact-ready. Verify the two strongest candidates
-          // immediately; the cron continues the remaining verification work.
-          const verificationTargets = [...accepted]
-            .filter((p) => !p.verification?.status || p.verification.status === 'UNVERIFIED' || p.verification.status === 'CONFLICT')
-            .filter((p) => p.priority !== 'DO_NOT_CONTACT')
-            .sort((a, b) => b.score.expectedValue - a.score.expectedValue || b.score.total - a.score.total)
-            .slice(0, 2);
-
-          const verified = new Map<string, typeof accepted[number]>();
-          for (const target of verificationTargets) {
-            const checked = await verifyProspect(ctx, target, now);
-            verified.set(checked.id, checked);
-          }
-          accepted = accepted.map((p) => verified.get(p.id) ?? p);
-          verifiedCount = accepted.filter((p) => ['VERIFIED', 'PROVISIONAL'].includes(p.verification?.status ?? '')).length;
-          conflictCount = accepted.filter((p) => p.verification?.status === 'CONFLICT').length;
-
           await repo.upsertProspects(accepted);
           for (const p of accepted) {
-            const status = p.verification?.status ?? 'UNVERIFIED';
             await repo.appendProspectInteraction({
               id: 'pint_' + crypto.randomUUID(),
               prospectId: p.id,
               kind: 'DISCOVERED',
-              summary: `Found by the operator's "Find clients" search (${searchQuery ?? 'auto'} · ${region ?? p.location}). Identity verification: ${status}.`,
+              summary: `Found by the operator's "Find clients" search (${searchQuery ?? 'auto'} · ${region ?? p.location}). Identity/contact verification queued.`,
               createdAt: now,
             });
           }
         }
         await saveEconomyState(repo, ctx.state);
-        return json({ ok: true, opportunityId: opportunity.id, opportunityName: opportunity.name, directAcquisitionMode: opportunity.id === 'nwt-dev-local-business-acquisition', region: region || opportunity.geographicRelevance[0] || 'Zimbabwe', searchQuery: searchQuery || null, discovered: discovered.prospects.length, saved: accepted.length, verified: verifiedCount, rejectedUnverifiedOrConflicting: conflictCount, rejectedNotABusiness: discovered.rejected, queriesRun: discovered.queriesRun, sourcesCount: discovered.sourcesCount, cacheHits: discovered.cacheHits, budgetExceeded: discovered.budgetExceeded, prospects: accepted });
+        return json({ ok: true, opportunityId: opportunity.id, opportunityName: opportunity.name, directAcquisitionMode: opportunity.id === 'nwt-dev-local-business-acquisition', region: region || opportunity.geographicRelevance[0] || 'Zimbabwe', searchQuery: searchQuery || null, discovered: discovered.prospects.length, saved: accepted.length, verified: 0, verificationQueued: accepted.length, rejectedUnverifiedOrConflicting: 0, rejectedNotABusiness: discovered.rejected, queriesRun: discovered.queriesRun, sourcesCount: discovered.sourcesCount, cacheHits: discovered.cacheHits, budgetExceeded: discovered.budgetExceeded, prospects: accepted });
       } catch (e) { return json({ ok: false, error: (e as Error).message }, { status: 500 }); }
     }
     if (url.pathname === '/offers/generate' && req.method === 'POST') {
