@@ -14,7 +14,7 @@
  * that says so, never a fabricated one.
  * ========================================================================== */
 
-import type { Prospect, ProspectIntelligence, ResearchSource } from '../types';
+import type { Prospect, ProspectIntelligence, ProspectProblemType, ResearchSource } from '../types';
 import { uid } from '../lib/format';
 import type { LLMProvider } from './providers/types';
 import { runSearch, type SearchEconomyContext } from './searchEconomy';
@@ -141,7 +141,7 @@ export async function researchProspect(
           recommendedAngle: analysis.recommendedAngle ?? 'Not addressed by the model.',
           primaryProblem: analysis.primaryProblem && typeof analysis.primaryProblem === 'object'
             ? {
-                type: analysis.primaryProblem.type || 'OTHER',
+                type: (analysis.primaryProblem.type || 'OTHER') as ProspectProblemType,
                 evidence: analysis.primaryProblem.evidence || '',
                 businessFriction: analysis.primaryProblem.businessFriction || '',
                 likelyConsequence: analysis.primaryProblem.likelyConsequence || '',
