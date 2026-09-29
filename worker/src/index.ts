@@ -55,6 +55,7 @@ import {
   type SpendRequest,
 } from '../../src/lib/treasury';
 import type { Env } from './env';
+import { handleSalesRoute } from './sales';
 import {
   ecoCashStatus,
   createEcoCashSandboxCharge,
@@ -580,6 +581,17 @@ export default {
       }
     }
 
+
+    // Sales & client-acquisition layer (operator-only; see worker/src/sales.ts).
+    if (url.pathname.startsWith('/sales/')) {
+      const { repo: salesRepo } = buildEngine(env);
+      const salesResponse = await handleSalesRoute(req, env, url, {
+        repo: salesRepo,
+        json,
+        isOperator: () => requireOperator(req, env),
+      });
+      if (salesResponse) return salesResponse;
+    }
 
     if (url.pathname === '/admin/discovery/reset' && req.method === 'POST') {
       // Administrative maintenance uses the existing deployment trigger
