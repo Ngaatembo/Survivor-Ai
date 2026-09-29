@@ -422,6 +422,9 @@ async function getJson<T>(path: string): Promise<T> {
   }
 }
 
+/** Generic operator-authenticated helpers for the Sales screen. */
+export const salesGet = <T>(path: string): Promise<T> => getJson<T>(path);
+
 export function fetchBackendHealth(): Promise<BackendHealth> {
   return getJson<BackendHealth>('/health');
 }
@@ -475,7 +478,7 @@ async function postJson<T>(path: string, body: unknown, timeoutMs: number = TIME
 
 /** POST routes that always need the operator session (every write except
  *  webhooks and the public income research). */
-const OPERATOR_POST_PATHS = /^\/(prospects|offers|outreach|projects|real-revenue|treasury|survival-challenge|actions|payments\/requests|payments\/finivex\/create-approved-link|income\/strategy|content\/state)/;
+const OPERATOR_POST_PATHS = /^\/(sales|prospects|offers|outreach|projects|real-revenue|treasury|survival-challenge|actions|payments\/requests|payments\/finivex\/create-approved-link|income\/strategy|content\/state)/;
 
 export interface FirstDollarStatus {
   ok: true;
@@ -877,3 +880,4 @@ export interface WindsorIncomeSummary {
 export function fetchWindsorIncomeSummary(): Promise<{ ok: true } & WindsorIncomeSummary> {
   return getJson('/integrations/windsor/summary');
 }
+export const salesPost = <T>(path: string, body: unknown, timeoutMs?: number): Promise<T> => postJson<T>(path, body, timeoutMs);

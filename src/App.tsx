@@ -21,9 +21,11 @@ import { Reports } from './components/Reports';
 import { Architecture } from './components/Architecture';
 import { OpportunityDrawer } from './components/OpportunityDrawer';
 import { Clients, UnlockForm } from './components/Clients';
+import { Sales } from './components/Sales';
 import { setOperatorSecretPrompt } from './services/backendApi';
 
 export type View =
+  | 'sales'
   | 'clients'
   | 'command'
   | 'research'
@@ -45,6 +47,7 @@ export type View =
   | 'architecture';
 
 const NAV: { id: View; label: string; icon: string; section: string }[] = [
+  { id: 'sales', label: 'Sales Cockpit', icon: '◆', section: 'CLIENTS' },
   { id: 'clients', label: 'Get Clients', icon: '☎', section: 'CLIENTS' },
   { id: 'prospects', label: 'All leads (CRM)', icon: '▤', section: 'CLIENTS' },
   { id: 'projects', label: 'Delivery', icon: '🛠', section: 'CLIENTS' },
@@ -107,6 +110,7 @@ function UnlockDialog() {
 }
 
 const TITLES: Record<View, string> = {
+  sales: 'Sales Cockpit',
   clients: 'Get Clients',
   command: 'Command Center',
   research: 'AI Research Engine',
@@ -129,7 +133,7 @@ const TITLES: Record<View, string> = {
 };
 
 export function App() {
-  const [view, setView] = useState<View>('clients');
+  const [view, setView] = useState<View>('sales');
   const [drawerId, setDrawerId] = useState<string | null>(null);
   const [confirmReset, setConfirmReset] = useState(false);
   const [navOpen, setNavOpen] = useState(false);
@@ -296,6 +300,7 @@ export function App() {
                 : 'Connecting to the live backend…'}
             </div>
           )}
+          {view === 'sales' && <Sales />}
           {view === 'clients' && <Clients go={setView} />}
           {view === 'command' && <CommandCenter go={setView} />}
           {view === 'research' && <ResearchEngine onOpenOpp={openOpp} />}
