@@ -80,12 +80,27 @@ export function qualifyLead(ctx: LeadContext): QualificationResult {
 
   if (p.priority === 'DO_NOT_CONTACT') blockers.push('Marked DO_NOT_CONTACT by discovery scoring.');
   if (p.verification?.status === 'CONFLICT') blockers.push('Business identity/contact evidence conflicts — resolve it before contacting.');
-  else if (!isVerified(p)) blockers.push('Business identity is not verified yet (run verification on the lead).');
-  if (p.websitePresence === 'ADEQUATE' && audit(p)?.verdict === 'HEALTHY') {
-    reasons.push('Existing website audits as healthy — opportunity is smaller (automation/maintenance only).');
+  else if (p.verification?.status !== 'VERIFIED') {
+    blockers.push('Business identity is not fully verified — provisional identity is not sufficient for contact approval.');
+  } else {
+    reasons.push(`Identity verified from ${p.verification?.independentSources ?? 0} independent source(s).`);
   }
 
-  if (isVerified(p)) reasons.push(`Identity ${p.verification?.status?.toLowerCase()} from ${p.verification?.independentSources ?? 0} independent source(s).`);
+  // A healthy/adequate existing website must never be treated as a new-website
+  // opportunity. The offer/angle gate below must be backed by an actual audit
+  // or stored research evidence.
+  if (p.websitePresence === 'ADEQUATE' && audit(p)?.verdict === 'HEALTHY') {
+    reasons.push('Existing website audits as healthy — opportunity is limited to a separately evidenced improvement/automation need.');
+  }
+
+  if (p.websitePresence === 'NONE_FOUND' || p.websitePresence === 'SOCIAL_ONLY') {
+    if (!websiteClaimAllowed(p)) {
+      blockers.push('No-website/social-only claim lacks sufficient independent evidence.');
+    } else {
+      reasons.push('No own website claim is supported by independent discovery evidence.');
+    }
+  }
+
   if (p.priority === 'HIGH' || p.priority === 'MEDIUM') reasons.push(`Discovery priority ${p.priority} (score ${p.score.total}/100).`);
   else if (p.score.total >= 40) reasons.push(`Lead score ${p.score.total}/100.`);
   else blockers.push(`Low lead score (${p.score.total}/100) and LOW priority.`);
