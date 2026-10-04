@@ -52,6 +52,7 @@ import { verifyProspect } from '../services/prospectVerification';
 import { resolveProspectEntities } from '../services/prospectEntityResolution';
 import { CostMeter, type CostPolicy } from '../lib/costMeter';
 import { APPROVALS_KV_KEY, queueApprovals, type QueuedApproval } from '../lib/approvalQueue';
+import { commercialActionAllowed } from '../sales/intelligence';
 
 export const STEP_ORDER: CycleStepKey[] = [
   'RESEARCH',
@@ -801,9 +802,11 @@ export class AgentEngine {
         // per cycle; messages are prepared for human approval only — nothing
         // here sends anything.
         const existingOutreach = await this.repo.listOutreachMessages();
+        const outreachIntelligence = await this.repo.listProspectIntelligence();
         const needsOutreach = revenueCandidates
           .map((candidate) => candidate.prospect)
           .filter((p) => p.verification?.status === 'VERIFIED')
+          .filter((p) => commercialActionAllowed(p, outreachIntelligence.find((i) => i.prospectId === p.id)))
           .filter((p) => !existingOutreach.some((m) => m.prospectId === p.id))
           .slice(0, 5);
         for (const p of needsOutreach) {
@@ -839,6 +842,7 @@ export class AgentEngine {
               !existingOffers.some((o) => o.prospectId === p.id) &&
               (
                 p.verification?.status === 'VERIFIED' &&
+                commercialActionAllowed(p, latestIntelligence.find((i) => i.prospectId === p.id)) &&
                 (
                   ENGAGED_STATUSES.has(p.status) ||
                   (p.status === 'QUALIFIED' && (p.priority === 'HIGH' || p.priority === 'MEDIUM') && p.score.total >= 60)
