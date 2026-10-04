@@ -71,6 +71,10 @@ const unsafeReady = await call('POST', '/sales/stage', { prospectId: unsafe.id, 
 ok(!unsafeReady.ok, 'provisional identity cannot reach READY_TO_CONTACT');
 const unsafeForced = await call('POST', '/sales/stage', { prospectId: unsafe.id, stage: 'READY_TO_CONTACT', force: true });
 ok(!unsafeForced.ok, 'force cannot bypass evidence gate');
+const unsafeOffer = await call('POST', '/sales/offer/generate', { prospectId: unsafe.id });
+ok(!unsafeOffer.ok, 'provisional identity cannot generate an offer');
+const unsafeMessage = await call('POST', '/sales/message/generate', { prospectId: unsafe.id });
+ok(!unsafeMessage.ok, 'provisional identity cannot generate outreach');
 
 console.log('research + brief');
 const rs = await call('POST', '/sales/research', P);
