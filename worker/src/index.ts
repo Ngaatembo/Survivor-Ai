@@ -1805,7 +1805,7 @@ export default {
         const prospect = prospects.find((p) => p.id === prospectId);
         if (!prospect) return json({ ok: false, error: `no prospect found with id ${prospectId}` }, { status: 404 });
         if (prospect.verification?.status !== 'VERIFIED') {
-          return json({ ok: false, error: 'outreach generation requires VERIFIED or PROVISIONAL prospect verification' }, { status: 409 });
+          return json({ ok: false, error: 'outreach generation requires VERIFIED prospect verification' }, { status: 409 });
         }
         if (outreach.some((o) => o.prospectId === prospectId)) {
           return json({ ok: false, error: 'outreach already exists for this prospect' }, { status: 409 });
