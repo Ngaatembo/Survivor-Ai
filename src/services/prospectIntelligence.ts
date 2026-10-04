@@ -148,7 +148,7 @@ async function gatherSnippets(
         title: r.title.slice(0, 140),
         url: r.url,
         kind: 'web',
-        note: `Deep research query: "${q}"`,
+        note: `Deep research query: "${q}" | Source snippet: ${r.snippet.slice(0, 500)}`,
       });
     }
   }
