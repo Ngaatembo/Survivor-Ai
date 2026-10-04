@@ -5,6 +5,7 @@ import { readFileSync, readdirSync } from 'node:fs';
 import { D1Repository } from '../src/engine/d1Repository';
 import { handleSalesRoute } from '../worker/src/sales';
 import type { Prospect } from '../src/types';
+import { offerFitsProblem } from '../src/sales/intelligence';
 
 let failed = 0;
 const ok = (c: unknown, m: string) => { if (!c) { failed++; console.log('  FAIL', m); } else console.log('  ok  ', m); };
@@ -80,6 +81,26 @@ console.log('research + brief');
 const rs = await call('POST', '/sales/research', P);
 ok(rs.ok && rs.brief.channel.status === 'RECOMMENDED', 'channel recommended: ' + rs.brief?.channel?.channel);
 ok(rs.brief.evidence.every((f: any) => ['VERIFIED', 'INFERENCE', 'UNKNOWN'].includes(f.kind)), 'evidence tagged');
+
+const healthySite = {
+  ...prospect,
+  websitePresence: 'ADEQUATE',
+  verification: {
+    ...prospect.verification,
+    websiteAudit: { status: 'AUDITED', verdict: 'HEALTHY', score: 94, criticalIssues: [], opportunities: [] },
+  },
+} as Prospect;
+const problemIntel = {
+  primaryProblem: {
+    type: 'DISCOVERABILITY',
+    confidence: 'HIGH',
+    solvableOpportunity: 'Improve search visibility',
+    outreachClaim: 'Customers may have difficulty finding the business in search.',
+    sourceIds: ['s1', 's2'],
+  },
+} as any;
+ok(!offerFitsProblem(healthySite, problemIntel, 'Build a new professional website'), 'healthy existing website blocks a new-website offer');
+ok(offerFitsProblem(healthySite, problemIntel, 'Improve SEO and Google visibility'), 'healthy existing website can receive an evidence-matched SEO offer');
 
 console.log('messages');
 const g = await call('POST', '/sales/message/generate', P);
