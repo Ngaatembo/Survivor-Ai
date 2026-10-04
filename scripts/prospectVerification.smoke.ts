@@ -143,6 +143,48 @@ console.log('--- Prospect verification: same name but conflicting city fails clo
   assert(!verified.websiteUrl, 'wrong-city website URL is not retained');
 }
 
+console.log('--- Prospect verification: duplicate pages on one domain cannot corroborate contact ---');
+{
+  const p = baseProspect({ id: 'verification-test-same-domain' });
+  const results: Result[] = [
+    {
+      title: 'Chido Cuts Hair Salon | Home',
+      url: 'https://chidocuts.co.zw/',
+      snippet: 'Chido Cuts Hair Salon, Harare. Call 0771234567.',
+      source: 'stub',
+    },
+    {
+      title: 'Chido Cuts Hair Salon | Contact',
+      url: 'https://chidocuts.co.zw/contact',
+      snippet: 'Chido Cuts Hair Salon, Harare. WhatsApp 0771234567.',
+      source: 'stub',
+    },
+  ];
+  const verified = await verifyProspect(ctx(results), p);
+  assert(verified.verification?.status !== 'VERIFIED', 'same-domain duplicates do not create independent corroboration');
+}
+
+console.log('--- Prospect verification: directory-only contact evidence remains provisional ---');
+{
+  const p = baseProspect({ id: 'verification-test-directories' });
+  const results: Result[] = [
+    {
+      title: 'Chido Cuts Hair Salon',
+      url: 'https://www.africabizinfo.com/ZW/chido-cuts',
+      snippet: 'Chido Cuts Hair Salon, Harare. Call 0771234567.',
+      source: 'stub',
+    },
+    {
+      title: 'Chido Cuts Hair Salon',
+      url: 'https://www.cybo.com/ZW-biz/chido-cuts',
+      snippet: 'Chido Cuts Hair Salon, Harare. WhatsApp 0771234567.',
+      source: 'stub',
+    },
+  ];
+  const verified = await verifyProspect(ctx(results), p);
+  assert(verified.verification?.status !== 'VERIFIED', 'directory-only contact evidence cannot establish first-party ownership');
+}
+
 console.log('--- Prospect verification: no evidence remains unverified ---');
 {
   const p = baseProspect({ id: 'verification-test-3' });

@@ -44,6 +44,7 @@ import { scoreOpportunity } from './lib/scoring';
 import { recordResult, lessonFromExperiment } from './services/memory';
 import { decide, strategyFromMemory } from './services/ai';
 import { AgentEngine } from './engine/agentEngine';
+import { commercialActionAllowed } from './sales/intelligence';
 import { createStoreRepository } from './engine/storeRepository';
 import { createSeedSnapshot, computeSurvivalStatus } from './engine/seed';
 import { createLLMProvider } from './services/providers/llm';
@@ -396,14 +397,16 @@ export const useStore = create<SurviveState>()(
             repo.listProspects(), repo.listBusinessModels(), repo.listProspectIntelligence(), repo.listMarketPriceResearch(),
           ]);
           const prospect = prospects.find((p) => p.id === prospectId);
-          if (!prospect || !['VERIFIED', 'PROVISIONAL'].includes(prospect.verification?.status ?? '')) throw new Error('Offer generation requires a verified prospect.');
+          const intel = intelligence.find((i) => i.prospectId === prospectId);
+          if (!prospect || !commercialActionAllowed(prospect, intel)) throw new Error('Offer generation requires VERIFIED identity and current evidence-backed problem research.');
           if ((await repo.listOffers()).some((o) => o.prospectId === prospectId)) throw new Error('An offer already exists for this prospect.');
           const model = models.find((m) => m.opportunityId === prospect.opportunityId);
-          const intel = intelligence.find((i) => i.prospectId === prospectId);
           const market = pricing.find((p) => p.opportunityId === prospect.opportunityId);
           const { generateOffer } = await import('./lib/offerGenerator');
           const { generateDesignBrief } = await import('./lib/designBriefGenerator');
           const offer = generateOffer(prospect, model, intel, market);
+          const offerText = [model?.offer ?? '', offer.deliverables.join(' '), offer.gapAnalysis ?? ''].join(' ');
+          if (!commercialActionAllowed(prospect, intel, offerText)) throw new Error('Offer generation blocked: proposed service does not fit the evidence-backed problem.');
           await repo.upsertOffer(offer);
           await repo.upsertDesignBrief(generateDesignBrief(offer, prospect));
           set({ offers: await repo.listOffers(), designBriefs: await repo.listDesignBriefs() } as any);
@@ -423,10 +426,13 @@ export const useStore = create<SurviveState>()(
           }
           const [prospects, models, intelligence] = await Promise.all([repo.listProspects(), repo.listBusinessModels(), repo.listProspectIntelligence()]);
           const prospect = prospects.find((p) => p.id === prospectId);
-          if (!prospect || !['VERIFIED', 'PROVISIONAL'].includes(prospect.verification?.status ?? '')) throw new Error('Outreach generation requires a verified prospect.');
+          const intel = intelligence.find((i) => i.prospectId === prospectId);
+          if (!prospect || !commercialActionAllowed(prospect, intel)) throw new Error('Outreach generation requires VERIFIED identity and current evidence-backed problem research.');
           if ((await repo.listOutreachMessages()).some((o) => o.prospectId === prospectId)) throw new Error('Outreach already exists for this prospect.');
           const { generateOutreachMessages } = await import('./lib/outreachGenerator');
-          await repo.upsertOutreachMessages(generateOutreachMessages(prospect, models.find((m) => m.opportunityId === prospect.opportunityId), intelligence.find((i) => i.prospectId === prospectId)));
+          const model = models.find((m) => m.opportunityId === prospect.opportunityId);
+          if (!commercialActionAllowed(prospect, intel, model?.offer ?? '')) throw new Error('Outreach generation blocked: proposed service does not fit the evidence-backed problem.');
+          await repo.upsertOutreachMessages(generateOutreachMessages(prospect, model, intel));
           set({ outreachMessages: await repo.listOutreachMessages() } as any);
         },
 

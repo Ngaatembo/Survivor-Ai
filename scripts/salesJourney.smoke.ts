@@ -5,6 +5,7 @@ import { readFileSync, readdirSync } from 'node:fs';
 import { D1Repository } from '../src/engine/d1Repository';
 import { handleSalesRoute } from '../worker/src/sales';
 import type { Prospect } from '../src/types';
+import { offerFitsProblem } from '../src/sales/intelligence';
 
 let failed = 0;
 const ok = (c: unknown, m: string) => { if (!c) { failed++; console.log('  FAIL', m); } else console.log('  ok  ', m); };
@@ -24,7 +25,7 @@ const prospect: Prospect = {
   websitePresence: 'SOCIAL_ONLY', socialLinks: ['https://facebook.com/maronderaautobody'],
   contactChannel: 'WHATSAPP', contactValue: '0772 123 456',
   verification: { status: 'VERIFIED', confidence: 82, businessNameMatchScore: 0.95, contactMatchScore: 0.9, independentSources: 2, contactSources: 2 } as any,
-  sources: [{ id: 's1', title: 'Facebook page', url: 'https://facebook.com/maronderaautobody', kind: 'web' }],
+  sources: [{ id: 's1', title: 'Facebook page', url: 'https://facebook.com/maronderaautobody', kind: 'web' }, { id: 's2', title: 'Business directory', url: 'https://example.com/maronderaautobody', kind: 'web' }],
   evidenceNotes: 'Active Facebook page with photos of repairs.', priority: 'HIGH',
   score: { total: 74, factors: ['Active social presence', 'No website found'], expectedDealValue: 250, expectedAcquisitionCost: 5, expectedProfit: 200, expectedTimeToRevenueDays: 10, probabilityOfClose: 0.2, expectedValue: 40, scoredAt: now },
   status: 'QUALIFIED', dataSource: 'LIVE', dateDiscovered: now, messagesSentCount: 0, responsesReceivedCount: 0,
@@ -54,10 +55,52 @@ pl = await call('GET', '/sales/pipeline');
 ok(pl.leads.length === 1, 'second load does not duplicate');
 ok((await repo.listProspects()).length === before, 'discovery prospects untouched');
 
+console.log('safety gates');
+const unsafe: Prospect = {
+  ...prospect,
+  id: 'p-unsafe-1',
+  businessName: 'Unverified Auto Body',
+  verification: { status: 'PROVISIONAL', confidence: 78, businessNameMatchScore: 0.94, contactMatchScore: 0.9, independentSources: 2, contactSources: 2 } as any,
+  contactValue: '0772 999 888',
+  sources: [{ id: 's-unsafe', title: 'Search result', url: 'https://example.com/unsafe', kind: 'web' }],
+  status: 'DISCOVERED',
+};
+await repo.upsertProspects([unsafe]);
+const unsafePipeline = await call('GET', '/sales/pipeline');
+ok(unsafePipeline.leads.some((l: any) => l.prospectId === unsafe.id), 'unsafe test lead imported');
+const unsafeReady = await call('POST', '/sales/stage', { prospectId: unsafe.id, stage: 'READY_TO_CONTACT' });
+ok(!unsafeReady.ok, 'provisional identity cannot reach READY_TO_CONTACT');
+const unsafeForced = await call('POST', '/sales/stage', { prospectId: unsafe.id, stage: 'READY_TO_CONTACT', force: true });
+ok(!unsafeForced.ok, 'force cannot bypass evidence gate');
+const unsafeOffer = await call('POST', '/sales/offer/generate', { prospectId: unsafe.id });
+ok(!unsafeOffer.ok, 'provisional identity cannot generate an offer');
+const unsafeMessage = await call('POST', '/sales/message/generate', { prospectId: unsafe.id });
+ok(!unsafeMessage.ok, 'provisional identity cannot generate outreach');
+
 console.log('research + brief');
 const rs = await call('POST', '/sales/research', P);
 ok(rs.ok && rs.brief.channel.status === 'RECOMMENDED', 'channel recommended: ' + rs.brief?.channel?.channel);
 ok(rs.brief.evidence.every((f: any) => ['VERIFIED', 'INFERENCE', 'UNKNOWN'].includes(f.kind)), 'evidence tagged');
+
+const healthySite = {
+  ...prospect,
+  websitePresence: 'ADEQUATE',
+  verification: {
+    ...prospect.verification,
+    websiteAudit: { status: 'AUDITED', verdict: 'HEALTHY', score: 94, criticalIssues: [], opportunities: [] },
+  },
+} as Prospect;
+const problemIntel = {
+  primaryProblem: {
+    type: 'DISCOVERABILITY',
+    confidence: 'HIGH',
+    solvableOpportunity: 'Improve search visibility',
+    outreachClaim: 'Customers may have difficulty finding the business in search.',
+    sourceIds: ['s1', 's2'],
+  },
+} as any;
+ok(!offerFitsProblem(healthySite, problemIntel, 'Build a new professional website'), 'healthy existing website blocks a new-website offer');
+ok(offerFitsProblem(healthySite, problemIntel, 'Improve SEO and Google visibility'), 'healthy existing website can receive an evidence-matched SEO offer');
 
 console.log('messages');
 const g = await call('POST', '/sales/message/generate', P);

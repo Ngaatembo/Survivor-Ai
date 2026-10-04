@@ -58,9 +58,29 @@ export function classifyBusiness(p: Pick<Prospect, 'category' | 'businessName'>)
 }
 
 const audit = (p: Prospect) => (p.verification?.websiteAudit?.status === 'AUDITED' ? p.verification.websiteAudit : undefined);
-const isVerified = (p: Prospect) => p.verification?.status === 'VERIFIED' || p.verification?.status === 'PROVISIONAL';
+const isVerified = (p: Prospect) => p.verification?.status === 'VERIFIED';
 const facebookLink = (p: Prospect) => p.socialLinks.find((u) => /facebook\.com/i.test(u));
 const instagramLink = (p: Prospect) => p.socialLinks.find((u) => /instagram\.com/i.test(u));
+
+function sourceDomain(url?: string): string | null {
+  if (!url) return null;
+  try { return new URL(url).hostname.replace(/^www\./i, '').toLowerCase(); } catch { return null; }
+}
+
+/** Customer-facing problem claims must trace to real, current research sources.
+ * Two source IDs from the same domain are not independent corroboration. */
+export function problemEvidenceAllowed(p: Prospect, intelligence?: ProspectIntelligence): boolean {
+  const pp = intelligence?.primaryProblem;
+  if (!pp || pp.confidence === 'LOW' || !pp.evidence?.trim() || !pp.outreachClaim?.trim()) return false;
+  // Research is time-sensitive. Do not let an old diagnosis become a fresh sales claim.
+  const ageMs = Date.now() - (intelligence.updatedAt || intelligence.generatedAt || 0);
+  if (!Number.isFinite(ageMs) || ageMs < 0 || ageMs > 7 * 86_400_000) return false;
+  const stored = new Map((intelligence?.sources ?? []).map((s) => [s.id, s]));
+  const cited = pp.sourceIds.map((id) => stored.get(id)).filter(Boolean) as NonNullable<ProspectIntelligence['sources'][number]>[];
+  const domains = new Set(cited.map((s) => sourceDomain(s.url)).filter(Boolean));
+  if (cited.length < 2 || domains.size < 2) return false;
+  return cited.every((s) => Boolean(sourceDomain(s.url)));
+}
 
 /** Is there enough independent evidence to say "I couldn't find a website" to
  *  the business itself? Requires verified/provisional identity plus at least
@@ -68,7 +88,43 @@ const instagramLink = (p: Prospect) => p.socialLinks.find((u) => /instagram\.com
 export function websiteClaimAllowed(p: Prospect): boolean {
   if (!isVerified(p)) return false;
   if (p.websitePresence !== 'NONE_FOUND' && p.websitePresence !== 'SOCIAL_ONLY') return false;
-  return (p.verification?.independentSources ?? 0) >= 1 || p.sources.length >= 1;
+  const domains = new Set(p.sources.map((s) => sourceDomain(s.url)).filter(Boolean));
+  return (p.verification?.independentSources ?? 0) >= 2 && domains.size >= 2;
+}
+
+/** Final gate before Survivor may generate customer-facing commercial material.
+ * Verification alone is not enough: the current business-specific diagnosis and
+ * any negative website claim must also be evidence-backed. */
+export function commercialActionAllowed(p: Prospect, intelligence?: ProspectIntelligence): boolean {
+  if (!isVerified(p)) return false;
+  if (!problemEvidenceAllowed(p, intelligence)) return false;
+  if (!offerFitsProblem(p, intelligence)) return false;
+  if ((p.websitePresence === 'NONE_FOUND' || p.websitePresence === 'SOCIAL_ONLY') && !websiteClaimAllowed(p)) return false;
+  return true;
+}
+
+const PROBLEM_OFFER_FIT: Record<ProspectProblem['type'], RegExp> = {
+  DISCOVERABILITY: /website|seo|online presence|google|listing|visibility|landing/i,
+  TRUST: /website|brand|testimonial|review|trust|portfolio|online presence/i,
+  CONVERSION: /website|landing|conversion|cta|sales page|funnel/i,
+  BOOKING: /booking|reservation|website|calendar|appointment/i,
+  ORDERING: /ordering|order|e-?commerce|online store|menu|website/i,
+  LEAD_CAPTURE: /lead|form|website|landing|crm|whatsapp/i,
+  FOLLOW_UP: /follow.?up|crm|automation|whatsapp|email/i,
+  CUSTOMER_EXPERIENCE: /website|booking|ordering|portal|automation|customer/i,
+  COMPETITIVE_POSITION: /website|seo|branding|online presence|digital/i,
+  WEBSITE_QUALITY: /website|web|site|landing/i,
+  OTHER: /website|web|digital|automation|software/i,
+};
+
+export function offerFitsProblem(p: Prospect, intelligence?: ProspectIntelligence, offerText?: string): boolean {
+  const pp = intelligence?.primaryProblem;
+  if (!pp || pp.confidence === 'LOW' || !pp.solvableOpportunity?.trim()) return false;
+  const text = offerText?.trim() || [pp.solvableOpportunity, pp.outreachClaim, p.opportunityId ?? ''].join(' ');
+  const auditRecord = audit(p);
+  const proposesNewWebsite = /\b(?:new|professional|business|custom|mobile-friendly|modern)\s+(?:website|site)\b|\b(?:build|building|design|develop|development|redesign)\s+(?:a\s+)?(?:new\s+)?website\b/i.test(text);
+  if (p.websitePresence === 'ADEQUATE' && auditRecord?.verdict === 'HEALTHY' && proposesNewWebsite) return false;
+  return PROBLEM_OFFER_FIT[pp.type].test(text);
 }
 
 /* ------------------------------- qualification ------------------------------ */
@@ -80,12 +136,27 @@ export function qualifyLead(ctx: LeadContext): QualificationResult {
 
   if (p.priority === 'DO_NOT_CONTACT') blockers.push('Marked DO_NOT_CONTACT by discovery scoring.');
   if (p.verification?.status === 'CONFLICT') blockers.push('Business identity/contact evidence conflicts — resolve it before contacting.');
-  else if (!isVerified(p)) blockers.push('Business identity is not verified yet (run verification on the lead).');
-  if (p.websitePresence === 'ADEQUATE' && audit(p)?.verdict === 'HEALTHY') {
-    reasons.push('Existing website audits as healthy — opportunity is smaller (automation/maintenance only).');
+  else if (p.verification?.status !== 'VERIFIED') blockers.push('Business identity is not fully verified — provisional identity is not sufficient for contact approval.');
+  else reasons.push(`Identity verified from ${p.verification?.independentSources ?? 0} independent source(s).`);
+
+  const pp = ctx.intelligence?.primaryProblem;
+  if (!ctx.intelligence) {
+    blockers.push('Business intelligence has not been completed — do not invent a problem or sales angle.');
+  } else if (!problemEvidenceAllowed(p, ctx.intelligence)) {
+    blockers.push('No sufficiently evidenced business-specific problem exists for a customer-facing claim.');
+  } else {
+    reasons.push(`Evidence-backed problem: ${pp.type} from ${pp.sourceIds.length} independent source(s), confidence ${pp.confidence}.`);
   }
 
-  if (isVerified(p)) reasons.push(`Identity ${p.verification?.status?.toLowerCase()} from ${p.verification?.independentSources ?? 0} independent source(s).`);
+  if (p.websitePresence === 'ADEQUATE' && audit(p)?.verdict === 'HEALTHY') {
+    reasons.push('Existing website audits as healthy — a new-website pitch is not justified; use only a separately evidenced improvement/automation need.');
+  }
+
+  if (p.websitePresence === 'NONE_FOUND' || p.websitePresence === 'SOCIAL_ONLY') {
+    if (!websiteClaimAllowed(p)) blockers.push('No-website/social-only claim lacks sufficient independent evidence.');
+    else reasons.push('No own website claim is supported by at least two independent discovery sources.');
+  }
+
   if (p.priority === 'HIGH' || p.priority === 'MEDIUM') reasons.push(`Discovery priority ${p.priority} (score ${p.score.total}/100).`);
   else if (p.score.total >= 40) reasons.push(`Lead score ${p.score.total}/100.`);
   else blockers.push(`Low lead score (${p.score.total}/100) and LOW priority.`);

@@ -99,10 +99,13 @@ export function checkTransition(t: TransitionInput): { ok: true } | { ok: false;
   if (!NEXT[t.from].includes(t.to)) {
     return { ok: false, error: `Cannot move a lead from ${t.from} to ${t.to}. Allowed next stages: ${NEXT[t.from].join(', ') || 'none'}.` };
   }
-  if (t.to === 'QUALIFIED' && t.from === 'DISCOVERED' && !t.force && t.qualification && !t.qualification.qualified) {
+  // Evidence gates are safety-critical and cannot be bypassed with the
+  // operator "force" flag. Force may only affect non-safety workflow rules.
+  const preContactStages: SalesStage[] = ['QUALIFIED', 'RESEARCHED', 'READY_TO_CONTACT', 'CONTACTED', 'FOLLOW_UP_1', 'FOLLOW_UP_2'];
+  if (preContactStages.includes(t.to) && t.qualification && !t.qualification.qualified) {
     return { ok: false, error: `Not qualified yet: ${t.qualification.blockers.join(' ')}` };
   }
-  if ((t.to === 'READY_TO_CONTACT' || t.to === 'CONTACTED') && !t.hasChannel && !t.force) {
+  if ((t.to === 'READY_TO_CONTACT' || t.to === 'CONTACTED') && !t.hasChannel) {
     return { ok: false, error: 'NO_DIRECT_CHANNEL: no reliable contact channel is on record. Find decision-maker/contact information manually and add it to the lead first.' };
   }
   if (t.to === 'LOST' && !(LOST_REASONS as readonly string[]).includes(t.lostReason ?? '')) {

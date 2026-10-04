@@ -52,6 +52,7 @@ import { verifyProspect } from '../services/prospectVerification';
 import { resolveProspectEntities } from '../services/prospectEntityResolution';
 import { CostMeter, type CostPolicy } from '../lib/costMeter';
 import { APPROVALS_KV_KEY, queueApprovals, type QueuedApproval } from '../lib/approvalQueue';
+import { commercialActionAllowed } from '../sales/intelligence';
 
 export const STEP_ORDER: CycleStepKey[] = [
   'RESEARCH',
@@ -801,14 +802,17 @@ export class AgentEngine {
         // per cycle; messages are prepared for human approval only — nothing
         // here sends anything.
         const existingOutreach = await this.repo.listOutreachMessages();
+        const outreachIntelligence = await this.repo.listProspectIntelligence();
         const needsOutreach = revenueCandidates
           .map((candidate) => candidate.prospect)
-          .filter((p) => ['VERIFIED', 'PROVISIONAL'].includes(p.verification?.status ?? ''))
+          .filter((p) => p.verification?.status === 'VERIFIED')
+          .filter((p) => commercialActionAllowed(p, outreachIntelligence.find((i) => i.prospectId === p.id)))
           .filter((p) => !existingOutreach.some((m) => m.prospectId === p.id))
           .slice(0, 5);
         for (const p of needsOutreach) {
           const model = businessModels.find((m) => m.opportunityId === p.opportunityId);
           const intel = (await this.repo.listProspectIntelligence()).find((i) => i.prospectId === p.id);
+          if (!commercialActionAllowed(p, intel, model?.offer ?? '')) continue;
           await this.repo.upsertOutreachMessages(generateOutreachMessages(p, model, intel));
           await this.repo.appendProspectInteraction({
             id: uid('pint'),
@@ -838,7 +842,8 @@ export class AgentEngine {
             (p) =>
               !existingOffers.some((o) => o.prospectId === p.id) &&
               (
-                ['VERIFIED', 'PROVISIONAL'].includes(p.verification?.status ?? '') &&
+                p.verification?.status === 'VERIFIED' &&
+                commercialActionAllowed(p, latestIntelligence.find((i) => i.prospectId === p.id)) &&
                 (
                   ENGAGED_STATUSES.has(p.status) ||
                   (p.status === 'QUALIFIED' && (p.priority === 'HIGH' || p.priority === 'MEDIUM') && p.score.total >= 60)
@@ -870,6 +875,8 @@ export class AgentEngine {
           const intel = latestIntelligence.find((i) => i.prospectId === p.id);
           const marketPrice = latestPricing.find((mp) => mp.opportunityId === p.opportunityId);
           const offer = generateOffer(p, model, intel, marketPrice);
+          const offerText = [model?.offer ?? '', offer.deliverables.join(' '), offer.gapAnalysis ?? ''].join(' ');
+          if (!commercialActionAllowed(p, intel, offerText)) continue;
           await this.repo.upsertOffer(offer);
           const brief = generateDesignBrief(offer, p);
           await this.repo.upsertDesignBrief(brief);

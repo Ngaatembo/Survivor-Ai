@@ -65,7 +65,7 @@ export function whatsappUrl(phone: string | undefined, text: string): string | u
  *  and a verified public contact, so only those are worth queueing. */
 export function contactReady(p: Prospect): boolean {
   const v = p.verification;
-  return Boolean(v && (v.status === 'VERIFIED' || v.status === 'PROVISIONAL') && (v.verifiedContactValue || v.verifiedEmail));
+  return Boolean(v && v.status === 'VERIFIED' && (v.verifiedContactValue || v.verifiedEmail));
 }
 
 function phoneLike(value?: string): boolean {

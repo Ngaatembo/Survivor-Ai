@@ -65,6 +65,7 @@ import {
 import { finivexStatus, createFinivexPaymentLink, getFinivexPaymentStatus } from './finivexProvider';
 import { getWindsorIncomeSummary } from './windsorProvider';
 import { INCOME_CHANNEL_STRATEGIES, decideIncomeChannel } from '../../src/lib/incomeChannelBrain';
+import { commercialActionAllowed } from '../../src/sales/intelligence';
 import { buildForexResearchPackage, classifyForexSource, type ForexResearchFinding } from '../../src/lib/forexResearch';
 import { runUnifiedProspectResearch } from '../../src/services/unifiedProspectResearch';
 import { decideFinivexVerification, extractFinivexFacts } from '../../src/lib/revenueVerification';
@@ -1770,16 +1771,20 @@ export default {
         ]);
         const prospect = prospects.find((p) => p.id === prospectId);
         if (!prospect) return json({ ok: false, error: `no prospect found with id ${prospectId}` }, { status: 404 });
-        if (!['VERIFIED', 'PROVISIONAL'].includes(prospect.verification?.status ?? '')) {
-          return json({ ok: false, error: 'offer generation requires VERIFIED or PROVISIONAL prospect verification' }, { status: 409 });
+        const intel = intelligence.find((i) => i.prospectId === prospectId);
+        if (!commercialActionAllowed(prospect, intel)) {
+          return json({ ok: false, error: 'offer generation requires VERIFIED identity and current evidence-backed problem research' }, { status: 409 });
         }
         if (offers.some((o) => o.prospectId === prospectId)) {
           return json({ ok: false, error: 'an offer already exists for this prospect' }, { status: 409 });
         }
         const model = models.find((m) => m.opportunityId === prospect.opportunityId);
-        const intel = intelligence.find((i) => i.prospectId === prospectId);
         const marketPrice = pricing.find((p) => p.opportunityId === prospect.opportunityId);
         const offer = generateOffer(prospect, model, intel, marketPrice);
+        const offerText = [model?.offer ?? '', offer.deliverables.join(' '), offer.gapAnalysis ?? ''].join(' ');
+        if (!commercialActionAllowed(prospect, intel, offerText)) {
+          return json({ ok: false, error: 'offer generation blocked: proposed service does not fit the evidence-backed problem' }, { status: 409 });
+        }
         await repo.upsertOffer(offer);
         const brief = generateDesignBrief(offer, prospect);
         await repo.upsertDesignBrief(brief);
@@ -1804,14 +1809,17 @@ export default {
         ]);
         const prospect = prospects.find((p) => p.id === prospectId);
         if (!prospect) return json({ ok: false, error: `no prospect found with id ${prospectId}` }, { status: 404 });
-        if (!['VERIFIED', 'PROVISIONAL'].includes(prospect.verification?.status ?? '')) {
-          return json({ ok: false, error: 'outreach generation requires VERIFIED or PROVISIONAL prospect verification' }, { status: 409 });
+        const intel = intelligence.find((i) => i.prospectId === prospectId);
+        if (!commercialActionAllowed(prospect, intel)) {
+          return json({ ok: false, error: 'outreach generation requires VERIFIED identity and current evidence-backed problem research' }, { status: 409 });
         }
         if (outreach.some((o) => o.prospectId === prospectId)) {
           return json({ ok: false, error: 'outreach already exists for this prospect' }, { status: 409 });
         }
         const model = models.find((m) => m.opportunityId === prospect.opportunityId);
-        const intel = intelligence.find((i) => i.prospectId === prospectId);
+        if (!commercialActionAllowed(prospect, intel, model?.offer ?? '')) {
+          return json({ ok: false, error: 'outreach generation blocked: proposed service does not fit the evidence-backed problem' }, { status: 409 });
+        }
         const messages = generateOutreachMessages(prospect, model, intel);
         await repo.upsertOutreachMessages(messages);
         await repo.appendProspectInteraction({
@@ -1867,8 +1875,7 @@ export default {
 
         const current = prospect.status;
         const verificationReady =
-          prospect.verification?.status === 'VERIFIED' ||
-          prospect.verification?.status === 'PROVISIONAL';
+          prospect.verification?.status === 'VERIFIED';
         const hasVerifiedContact = Boolean(
           prospect.verification?.verifiedContactValue || prospect.verification?.verifiedEmail,
         );
