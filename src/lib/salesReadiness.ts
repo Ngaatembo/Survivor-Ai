@@ -48,7 +48,7 @@ export function salesReadiness(
     return { state: 'CONTACTED', label: 'Contacted', complete: 0, total: 0, missing: [] };
   }
 
-  const verificationReady = prospect.verification?.status === 'VERIFIED' || prospect.verification?.status === 'PROVISIONAL';
+  const verificationReady = prospect.verification?.status === 'VERIFIED';
   const pricingReady = Boolean(marketPrice && marketPrice.sources.length > 0);
   const checks = [
     ['Identity/contact verified', verificationReady],
