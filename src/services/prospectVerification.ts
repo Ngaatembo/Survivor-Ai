@@ -296,11 +296,11 @@ export async function verifyProspect(
     .map((c) => c.raw)
     .filter((v, i, arr) => arr.indexOf(v) === i);
 
-  const verifiedContact = bestContact && (
-    bestContact.sources >= 2 ||
-    (bestContact.sources >= 1 && bestContact.bestScore >= 0.82)
-  );
-  const verifiedEmail = bestEmail && (bestEmail.sources >= 2 || (bestEmail.sources >= 1 && bestEmail.bestScore >= 0.82));
+  // A contact is VERIFIED only when the exact same value is corroborated by
+  // at least two independent source domains. A high match score on one
+  // directory/search result is not enough to prove ownership of a phone/email.
+  const verifiedContact = Boolean(bestContact && bestContact.sources >= 2 && bestContact.bestScore >= 0.72);
+  const verifiedEmail = Boolean(bestEmail && bestEmail.sources >= 2 && bestEmail.bestScore >= 0.72);
   const verifiedWebsite = bestWebsite && bestWebsite.bestScore >= 0.72;
   const websiteAudit = verifiedWebsite ? await auditWebsite(bestWebsite.url) : undefined;
   const auditedPresence = websiteAudit?.status === 'AUDITED' && websiteAudit.verdict === 'NEEDS_WORK'
@@ -343,7 +343,7 @@ export async function verifyProspect(
 
   const status: ProspectVerification['status'] =
     (contactConflict || locationConflict) ? 'CONFLICT' :
-    (identityScore >= 0.72 && sourceKeys.size >= 2 && (verifiedContact || verifiedEmail)) ? 'VERIFIED' :
+    (identityScore >= 0.82 && sourceKeys.size >= 2 && (verifiedContact || verifiedEmail)) ? 'VERIFIED' :
     (identityScore >= 0.55 && (sourceKeys.size >= 1 || existingNormalized) && (verifiedContact || verifiedEmail || verifiedWebsite || verifiedLocation || existingNormalized)) ? 'PROVISIONAL' :
     'UNVERIFIED';
 
@@ -359,11 +359,11 @@ export async function verifyProspect(
   if (sourceKeys.size >= 2) notes.push(`${sourceKeys.size} independent public source domains support the business identity.`);
   else if (sourceKeys.size === 1) notes.push('Only one independent source domain matched the business; identity remains provisional.');
   if (bestContact?.sources >= 2) notes.push('The same phone number appears on multiple independent public sources.');
-  else if (bestContact) notes.push('A phone number was found on a matching source, but it is not corroborated across multiple domains.');
+  else if (bestContact) notes.push('A phone number was found on a matching source, but it is not corroborated across multiple domains; it cannot be VERIFIED.');
   if (rankedContacts.length > 1) notes.push(`Multiple contact numbers were found: ${rankedContacts.map((c) => c.raw).join(', ')}. Keep the conflict visible for human review.`);
   if (locationConflict) notes.push(`Location conflict: the discovery record says ${prospect.location}, while strong independent evidence points to ${[...strongSourceCities].join(', ')}. Do not merge or contact automatically.`);
   if (bestEmail?.sources >= 2) notes.push('The same email appears on multiple independent public sources.');
-  else if (bestEmail) notes.push('An email was found on a matching source, but it is not corroborated across multiple domains.');
+  else if (bestEmail) notes.push('An email was found on a matching source, but it is not corroborated across multiple domains; it cannot be VERIFIED.');
   if (verifiedWebsite) notes.push('A matching business website was found: ' + bestWebsite.url);
   if (websiteAudit?.status === 'AUDITED') notes.push(...websiteAudit.criticalIssues, ...websiteAudit.opportunities.slice(0, 6));
   if (websiteAssessment.note) notes.push(websiteAssessment.note);
