@@ -125,7 +125,7 @@ export function OpportunityDrawer({ opp, onClose, onOpenProspects }: { opp: Oppo
           ) : (
             <div className="small">
               {prospects.map((prospect) => {
-                const verified = prospect.verification?.status === 'VERIFIED' || prospect.verification?.status === 'PROVISIONAL';
+                const verified = prospect.verification?.status === 'VERIFIED';
                 const intelligence = prospectIntelligence.some((i) => i.prospectId === prospect.id);
                 const offer = offers.find((o) => o.prospectId === prospect.id);
                 const demo = prospectDemos.some((d) => d.prospectId === prospect.id);
