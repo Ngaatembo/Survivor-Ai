@@ -396,7 +396,7 @@ export const useStore = create<SurviveState>()(
             repo.listProspects(), repo.listBusinessModels(), repo.listProspectIntelligence(), repo.listMarketPriceResearch(),
           ]);
           const prospect = prospects.find((p) => p.id === prospectId);
-          if (!prospect || !['VERIFIED', 'PROVISIONAL'].includes(prospect.verification?.status ?? '')) throw new Error('Offer generation requires a verified prospect.');
+          if (!prospect || prospect.verification?.status !== 'VERIFIED') throw new Error('Offer generation requires a verified prospect.');
           if ((await repo.listOffers()).some((o) => o.prospectId === prospectId)) throw new Error('An offer already exists for this prospect.');
           const model = models.find((m) => m.opportunityId === prospect.opportunityId);
           const intel = intelligence.find((i) => i.prospectId === prospectId);
@@ -423,7 +423,7 @@ export const useStore = create<SurviveState>()(
           }
           const [prospects, models, intelligence] = await Promise.all([repo.listProspects(), repo.listBusinessModels(), repo.listProspectIntelligence()]);
           const prospect = prospects.find((p) => p.id === prospectId);
-          if (!prospect || !['VERIFIED', 'PROVISIONAL'].includes(prospect.verification?.status ?? '')) throw new Error('Outreach generation requires a verified prospect.');
+          if (!prospect || prospect.verification?.status !== 'VERIFIED') throw new Error('Outreach generation requires a verified prospect.');
           if ((await repo.listOutreachMessages()).some((o) => o.prospectId === prospectId)) throw new Error('Outreach already exists for this prospect.');
           const { generateOutreachMessages } = await import('./lib/outreachGenerator');
           await repo.upsertOutreachMessages(generateOutreachMessages(prospect, models.find((m) => m.opportunityId === prospect.opportunityId), intelligence.find((i) => i.prospectId === prospectId)));
