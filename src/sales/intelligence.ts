@@ -58,7 +58,7 @@ export function classifyBusiness(p: Pick<Prospect, 'category' | 'businessName'>)
 }
 
 const audit = (p: Prospect) => (p.verification?.websiteAudit?.status === 'AUDITED' ? p.verification.websiteAudit : undefined);
-const isVerified = (p: Prospect) => p.verification?.status === 'VERIFIED' || p.verification?.status === 'PROVISIONAL';
+const isVerified = (p: Prospect) => p.verification?.status === 'VERIFIED';
 const facebookLink = (p: Prospect) => p.socialLinks.find((u) => /facebook\.com/i.test(u));
 const instagramLink = (p: Prospect) => p.socialLinks.find((u) => /instagram\.com/i.test(u));
 
@@ -68,7 +68,7 @@ const instagramLink = (p: Prospect) => p.socialLinks.find((u) => /instagram\.com
 export function websiteClaimAllowed(p: Prospect): boolean {
   if (!isVerified(p)) return false;
   if (p.websitePresence !== 'NONE_FOUND' && p.websitePresence !== 'SOCIAL_ONLY') return false;
-  return (p.verification?.independentSources ?? 0) >= 1 || p.sources.length >= 1;
+  return (p.verification?.independentSources ?? 0) >= 2 && p.sources.length >= 2;
 }
 
 /* ------------------------------- qualification ------------------------------ */
@@ -80,25 +80,25 @@ export function qualifyLead(ctx: LeadContext): QualificationResult {
 
   if (p.priority === 'DO_NOT_CONTACT') blockers.push('Marked DO_NOT_CONTACT by discovery scoring.');
   if (p.verification?.status === 'CONFLICT') blockers.push('Business identity/contact evidence conflicts — resolve it before contacting.');
-  else if (p.verification?.status !== 'VERIFIED') {
-    blockers.push('Business identity is not fully verified — provisional identity is not sufficient for contact approval.');
+  else if (p.verification?.status !== 'VERIFIED') blockers.push('Business identity is not fully verified — provisional identity is not sufficient for contact approval.');
+  else reasons.push(`Identity verified from ${p.verification?.independentSources ?? 0} independent source(s).`);
+
+  const pp = ctx.intelligence?.primaryProblem;
+  if (!ctx.intelligence) {
+    blockers.push('Business intelligence has not been completed — do not invent a problem or sales angle.');
+  } else if (!pp || pp.confidence === 'LOW' || !pp.evidence?.trim() || pp.sourceIds.length === 0 || !pp.outreachClaim?.trim()) {
+    blockers.push('No sufficiently evidenced business-specific problem exists for a customer-facing claim.');
   } else {
-    reasons.push(`Identity verified from ${p.verification?.independentSources ?? 0} independent source(s).`);
+    reasons.push(`Evidence-backed problem: ${pp.type} from ${pp.sourceIds.length} source(s), confidence ${pp.confidence}.`);
   }
 
-  // A healthy/adequate existing website must never be treated as a new-website
-  // opportunity. The offer/angle gate below must be backed by an actual audit
-  // or stored research evidence.
   if (p.websitePresence === 'ADEQUATE' && audit(p)?.verdict === 'HEALTHY') {
-    reasons.push('Existing website audits as healthy — opportunity is limited to a separately evidenced improvement/automation need.');
+    reasons.push('Existing website audits as healthy — a new-website pitch is not justified; use only a separately evidenced improvement/automation need.');
   }
 
   if (p.websitePresence === 'NONE_FOUND' || p.websitePresence === 'SOCIAL_ONLY') {
-    if (!websiteClaimAllowed(p)) {
-      blockers.push('No-website/social-only claim lacks sufficient independent evidence.');
-    } else {
-      reasons.push('No own website claim is supported by independent discovery evidence.');
-    }
+    if (!websiteClaimAllowed(p)) blockers.push('No-website/social-only claim lacks sufficient independent evidence.');
+    else reasons.push('No own website claim is supported by at least two independent discovery sources.');
   }
 
   if (p.priority === 'HIGH' || p.priority === 'MEDIUM') reasons.push(`Discovery priority ${p.priority} (score ${p.score.total}/100).`);
