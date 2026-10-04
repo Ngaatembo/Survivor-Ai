@@ -34,7 +34,7 @@ const NEXT_STATUS_OPTIONS: Partial<Record<ProspectStatus, ProspectStatus[]>> = {
 };
 
 export function ProspectDrawer({ prospect, onClose }: { prospect: Prospect; onClose: () => void }) {
-  const verifiedReady = prospect.verification?.status === 'VERIFIED' || prospect.verification?.status === 'PROVISIONAL';
+  const verifiedReady = prospect.verification?.status === 'VERIFIED';
   const outreach = useStore((s) =>
     verifiedReady ? s.outreachMessages.find((m) => m.prospectId === prospect.id) : undefined,
   );
