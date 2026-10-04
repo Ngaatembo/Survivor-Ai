@@ -24,7 +24,7 @@ const prospect: Prospect = {
   businessName: 'Marondera Auto Body', category: 'Auto body repair', location: 'Marondera',
   websitePresence: 'SOCIAL_ONLY', socialLinks: ['https://facebook.com/maronderaautobody'],
   contactChannel: 'WHATSAPP', contactValue: '0772 123 456',
-  verification: { status: 'VERIFIED', confidence: 82, businessNameMatchScore: 0.95, contactMatchScore: 0.9, independentSources: 2, contactSources: 2 } as any,
+  verification: { status: 'VERIFIED', confidence: 82, businessNameMatchScore: 0.95, contactMatchScore: 0.9, independentSources: 2, contactSources: 2, verifiedAt: now } as any,
   sources: [{ id: 's1', title: 'Facebook page', url: 'https://facebook.com/maronderaautobody', kind: 'web' }, { id: 's2', title: 'Business directory', url: 'https://example.com/maronderaautobody', kind: 'web' }],
   evidenceNotes: 'Active Facebook page with photos of repairs.', priority: 'HIGH',
   score: { total: 74, factors: ['Active social presence', 'No website found'], expectedDealValue: 250, expectedAcquisitionCost: 5, expectedProfit: 200, expectedTimeToRevenueDays: 10, probabilityOfClose: 0.2, expectedValue: 40, scoredAt: now },
@@ -76,6 +76,18 @@ const unsafeOffer = await call('POST', '/sales/offer/generate', { prospectId: un
 ok(!unsafeOffer.ok, 'provisional identity cannot generate an offer');
 const unsafeMessage = await call('POST', '/sales/message/generate', { prospectId: unsafe.id });
 ok(!unsafeMessage.ok, 'provisional identity cannot generate outreach');
+
+const stale: Prospect = {
+  ...prospect,
+  id: 'p-stale-1',
+  verification: { ...prospect.verification!, verifiedAt: now - 31 * 86_400_000 } as any,
+  status: 'DISCOVERED',
+};
+await repo.upsertProspects([stale]);
+const staleReady = await call('POST', '/sales/stage', { prospectId: stale.id, stage: 'READY_TO_CONTACT' });
+ok(!staleReady.ok, 'stale verification cannot reach READY_TO_CONTACT');
+const staleOffer = await call('POST', '/sales/offer/generate', { prospectId: stale.id });
+ok(!staleOffer.ok, 'stale verification cannot generate an offer');
 
 console.log('research + brief');
 const rs = await call('POST', '/sales/research', P);
