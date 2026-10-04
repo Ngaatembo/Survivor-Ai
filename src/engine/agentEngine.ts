@@ -803,7 +803,7 @@ export class AgentEngine {
         const existingOutreach = await this.repo.listOutreachMessages();
         const needsOutreach = revenueCandidates
           .map((candidate) => candidate.prospect)
-          .filter((p) => ['VERIFIED', 'PROVISIONAL'].includes(p.verification?.status ?? ''))
+          .filter((p) => p.verification?.status === 'VERIFIED')
           .filter((p) => !existingOutreach.some((m) => m.prospectId === p.id))
           .slice(0, 5);
         for (const p of needsOutreach) {
