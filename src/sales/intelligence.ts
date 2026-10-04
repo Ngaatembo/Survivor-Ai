@@ -64,7 +64,7 @@ const instagramLink = (p: Prospect) => p.socialLinks.find((u) => /instagram\.com
 
 function sourceDomain(url?: string): string | null {
   if (!url) return null;
-  try { return new URL(url).hostname.replace(/^www\\./i, '').toLowerCase(); } catch { return null; }
+  try { return new URL(url).hostname.replace(/^www\./i, '').toLowerCase(); } catch { return null; }
 }
 
 /** Customer-facing problem claims must trace to real, current research sources.
