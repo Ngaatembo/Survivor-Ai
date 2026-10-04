@@ -92,6 +92,16 @@ export function websiteClaimAllowed(p: Prospect): boolean {
   return (p.verification?.independentSources ?? 0) >= 2 && domains.size >= 2;
 }
 
+/** Final gate before Survivor may generate customer-facing commercial material.
+ * Verification alone is not enough: the current business-specific diagnosis and
+ * any negative website claim must also be evidence-backed. */
+export function commercialActionAllowed(p: Prospect, intelligence?: ProspectIntelligence): boolean {
+  if (!isVerified(p)) return false;
+  if (!problemEvidenceAllowed(p, intelligence)) return false;
+  if ((p.websitePresence === 'NONE_FOUND' || p.websitePresence === 'SOCIAL_ONLY') && !websiteClaimAllowed(p)) return false;
+  return true;
+}
+
 /* ------------------------------- qualification ------------------------------ */
 
 export function qualifyLead(ctx: LeadContext): QualificationResult {
