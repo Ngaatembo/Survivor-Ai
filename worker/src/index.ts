@@ -1781,6 +1781,10 @@ export default {
         const model = models.find((m) => m.opportunityId === prospect.opportunityId);
         const marketPrice = pricing.find((p) => p.opportunityId === prospect.opportunityId);
         const offer = generateOffer(prospect, model, intel, marketPrice);
+        const offerText = [model?.offer ?? '', offer.deliverables.join(' '), offer.gapAnalysis ?? ''].join(' ');
+        if (!commercialActionAllowed(prospect, intel, offerText)) {
+          return json({ ok: false, error: 'offer generation blocked: proposed service does not fit the evidence-backed problem' }, { status: 409 });
+        }
         await repo.upsertOffer(offer);
         const brief = generateDesignBrief(offer, prospect);
         await repo.upsertDesignBrief(brief);
@@ -1813,6 +1817,9 @@ export default {
           return json({ ok: false, error: 'outreach already exists for this prospect' }, { status: 409 });
         }
         const model = models.find((m) => m.opportunityId === prospect.opportunityId);
+        if (!commercialActionAllowed(prospect, intel, model?.offer ?? '')) {
+          return json({ ok: false, error: 'outreach generation blocked: proposed service does not fit the evidence-backed problem' }, { status: 409 });
+        }
         const messages = generateOutreachMessages(prospect, model, intel);
         await repo.upsertOutreachMessages(messages);
         await repo.appendProspectInteraction({
