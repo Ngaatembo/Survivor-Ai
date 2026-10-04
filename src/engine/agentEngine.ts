@@ -838,7 +838,7 @@ export class AgentEngine {
             (p) =>
               !existingOffers.some((o) => o.prospectId === p.id) &&
               (
-                ['VERIFIED', 'PROVISIONAL'].includes(p.verification?.status ?? '') &&
+                p.verification?.status === 'VERIFIED' &&
                 (
                   ENGAGED_STATUSES.has(p.status) ||
                   (p.status === 'QUALIFIED' && (p.priority === 'HIGH' || p.priority === 'MEDIUM') && p.score.total >= 60)
