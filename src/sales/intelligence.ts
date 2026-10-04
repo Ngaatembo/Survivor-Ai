@@ -62,13 +62,31 @@ const isVerified = (p: Prospect) => p.verification?.status === 'VERIFIED';
 const facebookLink = (p: Prospect) => p.socialLinks.find((u) => /facebook\.com/i.test(u));
 const instagramLink = (p: Prospect) => p.socialLinks.find((u) => /instagram\.com/i.test(u));
 
+function sourceDomain(url?: string): string | null {
+  if (!url) return null;
+  try { return new URL(url).hostname.replace(/^www\\./i, '').toLowerCase(); } catch { return null; }
+}
+
+/** Customer-facing problem claims must trace to real, current research sources.
+ * Two source IDs from the same domain are not independent corroboration. */
+export function problemEvidenceAllowed(p: Prospect, intelligence?: ProspectIntelligence): boolean {
+  const pp = intelligence?.primaryProblem;
+  if (!pp || pp.confidence === 'LOW' || !pp.evidence?.trim() || !pp.outreachClaim?.trim()) return false;
+  const stored = new Map((intelligence?.sources ?? []).map((s) => [s.id, s]));
+  const cited = pp.sourceIds.map((id) => stored.get(id)).filter(Boolean) as NonNullable<ProspectIntelligence['sources'][number]>[];
+  const domains = new Set(cited.map((s) => sourceDomain(s.url)).filter(Boolean));
+  if (cited.length < 2 || domains.size < 2) return false;
+  return cited.every((s) => Boolean(sourceDomain(s.url)));
+}
+
 /** Is there enough independent evidence to say "I couldn't find a website" to
  *  the business itself? Requires verified/provisional identity plus at least
  *  one independent source. Anything less → ask, don't assert. */
 export function websiteClaimAllowed(p: Prospect): boolean {
   if (!isVerified(p)) return false;
   if (p.websitePresence !== 'NONE_FOUND' && p.websitePresence !== 'SOCIAL_ONLY') return false;
-  return (p.verification?.independentSources ?? 0) >= 2 && p.sources.length >= 2;
+  const domains = new Set(p.sources.map((s) => sourceDomain(s.url)).filter(Boolean));
+  return (p.verification?.independentSources ?? 0) >= 2 && domains.size >= 2;
 }
 
 /* ------------------------------- qualification ------------------------------ */
@@ -86,10 +104,10 @@ export function qualifyLead(ctx: LeadContext): QualificationResult {
   const pp = ctx.intelligence?.primaryProblem;
   if (!ctx.intelligence) {
     blockers.push('Business intelligence has not been completed — do not invent a problem or sales angle.');
-  } else if (!pp || pp.confidence === 'LOW' || !pp.evidence?.trim() || pp.sourceIds.length === 0 || !pp.outreachClaim?.trim()) {
+  } else if (!problemEvidenceAllowed(p, ctx.intelligence)) {
     blockers.push('No sufficiently evidenced business-specific problem exists for a customer-facing claim.');
   } else {
-    reasons.push(`Evidence-backed problem: ${pp.type} from ${pp.sourceIds.length} source(s), confidence ${pp.confidence}.`);
+    reasons.push(`Evidence-backed problem: ${pp.type} from ${pp.sourceIds.length} independent source(s), confidence ${pp.confidence}.`);
   }
 
   if (p.websitePresence === 'ADEQUATE' && audit(p)?.verdict === 'HEALTHY') {
