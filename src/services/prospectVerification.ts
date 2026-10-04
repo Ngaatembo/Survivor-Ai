@@ -71,6 +71,21 @@ function independentKey(url: string): string {
   return d;
 }
 
+const NON_FIRST_PARTY_DOMAINS = [
+  'google.com','yelp.com','tripadvisor.com','yellowpages.com','businesslist.co.zw',
+  'africabizinfo.com','cybo.com','foursquare.com','hotfrog.com','zaubee.com',
+  'hararelife.com','zimbabwedirectory.co.zw','zimbabweyp.com',
+];
+
+function isLikelyFirstPartySource(url: string, prospect: Prospect, score: number): boolean {
+  if (score < 0.82) return false;
+  const domain = domainOf(url);
+  if (!domain || NON_FIRST_PARTY_DOMAINS.some((d) => domain === d || domain.endsWith('.' + d))) return false;
+  if (/facebook\.com|instagram\.com|linkedin\.com/i.test(domain)) return true;
+  const businessTokens = normalizeName(prospect.businessName);
+  return businessTokens.some((token) => token.length >= 4 && domain.includes(token));
+}
+
 function isBusinessResult(prospect: Prospect, result: SearchResult): number {
   const title = result.title || '';
   const text = `${title} ${result.snippet || ''}`.toLowerCase();
@@ -299,8 +314,32 @@ export async function verifyProspect(
   // A contact is VERIFIED only when the exact same value is corroborated by
   // at least two independent source domains. A high match score on one
   // directory/search result is not enough to prove ownership of a phone/email.
-  const verifiedContact = Boolean(bestContact && bestContact.sources >= 2 && bestContact.bestScore >= 0.72);
-  const verifiedEmail = Boolean(bestEmail && bestEmail.sources >= 2 && bestEmail.bestScore >= 0.72);
+  const contactHasFirstPartyEvidence = Boolean(
+    bestContact &&
+    identityResults.some(({ r, score }) =>
+      isLikelyFirstPartySource(r.url, prospect, score) &&
+      extractPhones(r.title + ' ' + r.snippet).some((raw) => normalizePhone(raw) === bestContact.normalized),
+    ),
+  );
+  const emailHasFirstPartyEvidence = Boolean(
+    bestEmail &&
+    identityResults.some(({ r, score }) =>
+      isLikelyFirstPartySource(r.url, prospect, score) &&
+      extractEmails(r.title + ' ' + r.snippet).includes(bestEmail.value),
+    ),
+  );
+  const verifiedContact = Boolean(
+    bestContact &&
+    bestContact.sources >= 2 &&
+    bestContact.bestScore >= 0.72 &&
+    contactHasFirstPartyEvidence,
+  );
+  const verifiedEmail = Boolean(
+    bestEmail &&
+    bestEmail.sources >= 2 &&
+    bestEmail.bestScore >= 0.72 &&
+    emailHasFirstPartyEvidence,
+  );
   const verifiedWebsite = bestWebsite && bestWebsite.bestScore >= 0.72;
   const websiteAudit = verifiedWebsite ? await auditWebsite(bestWebsite.url) : undefined;
   const auditedPresence = websiteAudit?.status === 'AUDITED' && websiteAudit.verdict === 'NEEDS_WORK'
@@ -314,6 +353,11 @@ export async function verifyProspect(
         : 'Existing website was verified, but its homepage could not be fully audited.' }
     : classifyVerifiedWebsitePresence(verifiedWebsite ? bestWebsite.url : undefined, identityResults);
   const verifiedLocation = bestLocation && (bestLocation.sources >= 2 || (bestLocation.sources >= 1 && bestLocation.bestScore >= 0.82));
+  const locationEvidenceMatchesLead = Boolean(
+    !prospectCity ||
+    verifiedLocation ||
+    strongSourceCities.has(prospectCity),
+  );
 
   // A name match alone is not enough when the discovery record says Mutare but
   // the strongest independent evidence consistently places the business in
@@ -343,7 +387,7 @@ export async function verifyProspect(
 
   const status: ProspectVerification['status'] =
     (contactConflict || locationConflict) ? 'CONFLICT' :
-    (identityScore >= 0.82 && sourceKeys.size >= 2 && (verifiedContact || verifiedEmail)) ? 'VERIFIED' :
+    (identityScore >= 0.82 && sourceKeys.size >= 2 && locationEvidenceMatchesLead && (verifiedContact || verifiedEmail)) ? 'VERIFIED' :
     (identityScore >= 0.55 && (sourceKeys.size >= 1 || existingNormalized) && (verifiedContact || verifiedEmail || verifiedWebsite || verifiedLocation || existingNormalized)) ? 'PROVISIONAL' :
     'UNVERIFIED';
 
@@ -358,11 +402,13 @@ export async function verifyProspect(
   const notes: string[] = [];
   if (sourceKeys.size >= 2) notes.push(`${sourceKeys.size} independent public source domains support the business identity.`);
   else if (sourceKeys.size === 1) notes.push('Only one independent source domain matched the business; identity remains provisional.');
-  if (bestContact?.sources >= 2) notes.push('The same phone number appears on multiple independent public sources.');
+  if (bestContact?.sources >= 2 && contactHasFirstPartyEvidence) notes.push('The same phone number appears on multiple independent sources, including a likely first-party source.');
+  else if (bestContact?.sources >= 2) notes.push('The same phone number appears on multiple public sources, but none is strong enough to establish first-party ownership; it cannot be VERIFIED.');
   else if (bestContact) notes.push('A phone number was found on a matching source, but it is not corroborated across multiple domains; it cannot be VERIFIED.');
   if (rankedContacts.length > 1) notes.push(`Multiple contact numbers were found: ${rankedContacts.map((c) => c.raw).join(', ')}. Keep the conflict visible for human review.`);
   if (locationConflict) notes.push(`Location conflict: the discovery record says ${prospect.location}, while strong independent evidence points to ${[...strongSourceCities].join(', ')}. Do not merge or contact automatically.`);
-  if (bestEmail?.sources >= 2) notes.push('The same email appears on multiple independent public sources.');
+  if (bestEmail?.sources >= 2 && emailHasFirstPartyEvidence) notes.push('The same email appears on multiple independent sources, including a likely first-party source.');
+  else if (bestEmail?.sources >= 2) notes.push('The same email appears on multiple public sources, but none is strong enough to establish first-party ownership; it cannot be VERIFIED.');
   else if (bestEmail) notes.push('An email was found on a matching source, but it is not corroborated across multiple domains; it cannot be VERIFIED.');
   if (verifiedWebsite) notes.push('A matching business website was found: ' + bestWebsite.url);
   if (websiteAudit?.status === 'AUDITED') notes.push(...websiteAudit.criticalIssues, ...websiteAudit.opportunities.slice(0, 6));
