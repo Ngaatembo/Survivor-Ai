@@ -117,14 +117,10 @@ const PROBLEM_OFFER_FIT: Record<ProspectProblem['type'], RegExp> = {
   OTHER: /website|web|digital|automation|software/i,
 };
 
-function offerFitsProblem(p: Prospect, intelligence?: ProspectIntelligence): boolean {
+export function offerFitsProblem(p: Prospect, intelligence?: ProspectIntelligence, offerText?: string): boolean {
   const pp = intelligence?.primaryProblem;
   if (!pp || pp.confidence === 'LOW' || !pp.solvableOpportunity?.trim()) return false;
-  const text = [
-    pp.solvableOpportunity,
-    pp.outreachClaim,
-    p.opportunityId ?? '',
-  ].join(' ');
+  const text = [pp.solvableOpportunity, pp.outreachClaim, offerText ?? p.opportunityId ?? ''].join(' ');
   return PROBLEM_OFFER_FIT[pp.type].test(text);
 }
 
