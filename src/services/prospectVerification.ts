@@ -353,11 +353,6 @@ export async function verifyProspect(
         : 'Existing website was verified, but its homepage could not be fully audited.' }
     : classifyVerifiedWebsitePresence(verifiedWebsite ? bestWebsite.url : undefined, identityResults);
   const verifiedLocation = bestLocation && (bestLocation.sources >= 2 || (bestLocation.sources >= 1 && bestLocation.bestScore >= 0.82));
-  const locationEvidenceMatchesLead = Boolean(
-    !prospectCity ||
-    verifiedLocation ||
-    strongSourceCities.has(prospectCity),
-  );
 
   // A name match alone is not enough when the discovery record says Mutare but
   // the strongest independent evidence consistently places the business in
@@ -369,6 +364,11 @@ export async function verifyProspect(
       .filter(({ score }) => score >= 0.72)
       .map(({ r }) => extractCity(`${r.title} ${r.snippet}`))
       .filter((city): city is string => Boolean(city)),
+  );
+  const locationEvidenceMatchesLead = Boolean(
+    !prospectCity ||
+    verifiedLocation ||
+    strongSourceCities.has(prospectCity),
   );
   const locationConflict = Boolean(
     prospectCity &&
