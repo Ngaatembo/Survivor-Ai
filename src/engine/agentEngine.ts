@@ -812,6 +812,7 @@ export class AgentEngine {
         for (const p of needsOutreach) {
           const model = businessModels.find((m) => m.opportunityId === p.opportunityId);
           const intel = (await this.repo.listProspectIntelligence()).find((i) => i.prospectId === p.id);
+          if (!commercialActionAllowed(p, intel, model?.offer ?? '')) continue;
           await this.repo.upsertOutreachMessages(generateOutreachMessages(p, model, intel));
           await this.repo.appendProspectInteraction({
             id: uid('pint'),
@@ -874,6 +875,8 @@ export class AgentEngine {
           const intel = latestIntelligence.find((i) => i.prospectId === p.id);
           const marketPrice = latestPricing.find((mp) => mp.opportunityId === p.opportunityId);
           const offer = generateOffer(p, model, intel, marketPrice);
+          const offerText = [model?.offer ?? '', offer.deliverables.join(' '), offer.gapAnalysis ?? ''].join(' ');
+          if (!commercialActionAllowed(p, intel, offerText)) continue;
           await this.repo.upsertOffer(offer);
           const brief = generateDesignBrief(offer, p);
           await this.repo.upsertDesignBrief(brief);
