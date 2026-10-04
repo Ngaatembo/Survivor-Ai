@@ -120,7 +120,7 @@ const PROBLEM_OFFER_FIT: Record<ProspectProblem['type'], RegExp> = {
 export function offerFitsProblem(p: Prospect, intelligence?: ProspectIntelligence, offerText?: string): boolean {
   const pp = intelligence?.primaryProblem;
   if (!pp || pp.confidence === 'LOW' || !pp.solvableOpportunity?.trim()) return false;
-  const text = [pp.solvableOpportunity, pp.outreachClaim, offerText ?? p.opportunityId ?? ''].join(' ');
+  const text = offerText?.trim() || [pp.solvableOpportunity, pp.outreachClaim, p.opportunityId ?? ''].join(' ');
   const auditRecord = audit(p);
   const proposesNewWebsite = /\b(?:new|professional|business|custom|mobile-friendly|modern)\s+(?:website|site)\b|\b(?:build|building|design|develop|development|redesign)\s+(?:a\s+)?(?:new\s+)?website\b/i.test(text);
   if (p.websitePresence === 'ADEQUATE' && auditRecord?.verdict === 'HEALTHY' && proposesNewWebsite) return false;
