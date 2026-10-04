@@ -88,6 +88,17 @@ console.log('--- Prospect verification: corroborated business + contact ---');
   assert(verified.priority === 'DO_NOT_CONTACT', 'adequate website prospect is removed from the website-offer contact queue');
 }
 
+console.log('--- Prospect verification: unrelated custom domain is not official ---');
+{
+  const p = baseProspect({ id: 'verification-test-unrelated-domain' });
+  const results: Result[] = [
+    { title: 'Chido Cuts Hair Salon', url: 'https://chido-example.co.zw/', snippet: 'Chido Cuts Hair Salon, Harare. Call 0771234567.', source: 'stub' },
+    { title: 'Chido Cuts Hair Salon | Facebook', url: 'https://facebook.com/chidocuts', snippet: 'Chido Cuts Hair Salon Harare. WhatsApp 0771234567.', source: 'stub' },
+  ];
+  const verified = await verifyProspect(ctx(results), p);
+  assert(!verified.verification?.verifiedWebsiteUrl, 'unrelated custom domain is not accepted as the official website');
+}
+
 console.log('--- Prospect verification: conflicting contacts fail closed ---');
 {
   const p = baseProspect({ id: 'verification-test-2', contactValue: '0770000000' });
