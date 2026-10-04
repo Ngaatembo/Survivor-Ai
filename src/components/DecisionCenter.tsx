@@ -62,7 +62,7 @@ export function DecisionCenter() {
         strongest candidate. Reasoning is rule-based in v1 (LLM connector not attached).
       </div>
 
-      {dead && <div className="dead-banner">DORMANT — no paid AI or search until revenue or a top-up lifts the treasury above $10. Free work continues.</div>}
+      {dead && <div className="dead-banner">DEAD — this run's balance reached its death threshold. The experiment is over: no cycles, no spending, no revival. Starting again means an admin creates a new run.</div>}
 
       {!livePick ? (
         <Panel>

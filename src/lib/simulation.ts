@@ -1,7 +1,12 @@
 /* ============================================================================
- * SURVIVE AI — Experiment simulation engine
+ * SURVIVE AI — Experiment simulation engine   [SIMULATION / LEGACY]
  * ----------------------------------------------------------------------------
  * ALL OUTPUTS ARE SIMULATED. No real transaction, trade or payment ever occurs.
+ * Outcomes come from Math.random(); they are not evidence of anything.
+ * Quarantine (Phase 1, Oct 2026): the production Worker never runs this
+ * (AgentEngine simulateForecasts is off), results never reach the ledger,
+ * and memory built from them is tagged SIMULATED and ignored by decisions.
+ * Kept only for the local browser demo.
  * The model turns an opportunity's scored attributes + the agent's memory
  * into a plausible first-attempt result, so the loop can learn.
  * ========================================================================== */

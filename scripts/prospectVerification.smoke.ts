@@ -4,6 +4,32 @@ import type { Prospect } from '../src/types';
 import type { SearchEconomyContext } from '../src/services/searchEconomy';
 import type { SearchProvider as Provider, SearchResult as Result } from '../src/services/providers/types';
 
+// Website verification performs a live homepage audit (services/websiteAudit.ts).
+// Tests must not depend on the network or on fictional domains resolving, so
+// fetch is replaced with a deterministic fixture: the official test domain
+// serves a healthy homepage, every other host is unreachable.
+const FIXTURE_HOMEPAGES: Record<string, string> = {
+  'chidocuts.co.zw': `<!doctype html><html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Chido Cuts Hair Salon | Harare</title>
+<meta name="description" content="Chido Cuts Hair Salon in Harare. Haircuts, braids and styling. Book on WhatsApp.">
+</head><body><header><nav><a href="/">Home</a><a href="/services">Services</a><a href="/contact">Contact</a></nav></header>
+<main><h1>Chido Cuts Hair Salon</h1><p>Professional haircuts, braids and styling in Harare.</p>
+<a href="https://wa.me/263771234567">WhatsApp us</a><a href="tel:+263771234567">Call 0771234567</a>
+<a href="/book">Book now</a><form action="/contact"><input name="name"><button>Send</button></form>
+<img src="/salon.jpg" alt="Salon interior"><p>Testimonials: "Best salon in Harare" — Rudo</p>
+<p>Open Mon–Sat 8am–6pm, 12 Samora Machel Ave, Harare.</p></main><footer>© 2026 Chido Cuts</footer></body></html>`,
+};
+// The unrelated domain is reachable and healthy too, so the test proves it is
+// rejected on ownership evidence rather than because the fetch failed.
+FIXTURE_HOMEPAGES['chido-example.co.zw'] = FIXTURE_HOMEPAGES['chidocuts.co.zw'];
+globalThis.fetch = (async (input: string | URL | Request) => {
+  const host = new URL(typeof input === 'string' ? input : input instanceof URL ? input.href : input.url).hostname.replace(/^www\./, '');
+  const html = FIXTURE_HOMEPAGES[host];
+  if (!html) throw new TypeError('fetch failed (test fixture: host not reachable)');
+  return new Response(html, { status: 200, headers: { 'content-type': 'text/html; charset=utf-8' } });
+}) as typeof fetch;
+
 let failures = 0;
 const assert = (ok: boolean, label: string) => {
   if (ok) console.log(`  OK: ${label}`);
@@ -84,7 +110,7 @@ console.log('--- Prospect verification: corroborated business + contact ---');
   assert(verified.contactChannel === 'PHONE', 'verified phone is exposed as PHONE');
   assert((verified.verification?.contactSources ?? 0) >= 2, 'contact is corroborated across independent sources');
   assert(verified.websitePresence === 'ADEQUATE', 'independent website evidence upgrades website presence to ADEQUATE');
-  assert(verified.websiteUrl === 'https://chidocuts.co.zw/', 'verified independent website URL is retained');
+  assert(verified.websiteUrl === 'https://chidocuts.co.zw', 'verified independent website URL is retained (normalized, no trailing slash)');
   assert(verified.priority === 'DO_NOT_CONTACT', 'adequate website prospect is removed from the website-offer contact queue');
 }
 

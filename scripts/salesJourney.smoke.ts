@@ -34,6 +34,37 @@ const prospect: Prospect = {
 import { SAMPLE_OPPORTUNITIES } from '../src/data/sampleData';
 await repo.upsertOpportunities([{ ...SAMPLE_OPPORTUNITIES[0], id: 'opp-1' }]);
 await repo.upsertProspects([prospect]);
+// Since the lead-contact safety gates (#67), a lead can only reach
+// READY_TO_CONTACT with fresh, evidence-backed business intelligence whose
+// primary problem cites two sources on two different domains.
+await repo.upsertProspectIntelligence({
+  id: 'intel-p-test-1',
+  prospectId: prospect.id,
+  businessOverview: 'Auto body repair shop in Marondera with an active Facebook page.',
+  apparentServices: ['Panel beating', 'Spray painting'],
+  socialPresenceSummary: 'Facebook page with recent repair photos.',
+  competitiveNote: 'No competitor evidence in sources.',
+  specificProblemEvidence: 'Customers ask for quotes in Facebook comments; no booking or quote path exists.',
+  recommendedAngle: 'Offer a simple quote-request page.',
+  primaryProblem: {
+    type: 'LEAD_CAPTURE',
+    evidence: 'Customers ask for quotes in Facebook comments and the directory listing has no contact form.',
+    businessFriction: 'Quote requests are scattered across comments.',
+    likelyConsequence: 'Some enquiries may go unanswered.',
+    solvableOpportunity: 'A quote-request form and WhatsApp lead capture page',
+    outreachClaim: 'I saw customers asking for quotes in your Facebook comments.',
+    confidence: 'HIGH',
+    sourceIds: ['i1', 'i2'],
+  },
+  confidence: 'HIGH',
+  generator: 'llm',
+  sources: [
+    { id: 'i1', title: 'Facebook page', url: 'https://facebook.com/maronderaautobody', kind: 'web' },
+    { id: 'i2', title: 'Business directory', url: 'https://example.com/maronderaautobody', kind: 'web' },
+  ],
+  generatedAt: now,
+  updatedAt: now,
+});
 const before = (await repo.listProspects()).length;
 
 const env: any = { DB: db, DB_BACKEND: 'd1', TRIGGER_SECRET: 's' };

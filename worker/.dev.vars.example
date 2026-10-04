@@ -7,5 +7,8 @@ OPENAI_API_KEY=
 TAVILY_API_KEY=
 BRAVE_API_KEY=
 
-# Shared secret required to trigger a cycle over HTTP (POST /cycles/run).
+# Operator password (POST /auth/login → 8-hour session token).
 TRIGGER_SECRET=choose-a-long-random-string
+# Admin credential (x-admin-secret): cycles, runs, kill-switch release. Use a
+# different value from TRIGGER_SECRET; falls back to it when unset.
+ADMIN_SECRET=choose-a-different-long-random-string

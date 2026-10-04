@@ -30,9 +30,9 @@ export function Wallet() {
         <Panel title="Survival meter">
           <SurvivalMeter />
           <div className="faint small" style={{ marginTop: 14, lineHeight: 1.7 }}>
-            Below $25 → <span className="badge amber">AT RISK</span>. Below $15 → CRITICAL.
-            At or below {usd(DEFAULT_COST_POLICY.floorUsd)} → <span className="badge">DORMANT</span>: no paid AI or
-            search, free work only; it wakes when revenue or a top-up lifts the balance.
+            Below half the starting capital → <span className="badge amber">AT RISK</span>. At or below the
+            depleted threshold → CRITICAL. At or below the death threshold ({usd(DEFAULT_COST_POLICY.floorUsd)}) →{' '}
+            <span className="badge">DEAD</span>: the run ends permanently; capital only enters a new run.
           </div>
         </Panel>
 

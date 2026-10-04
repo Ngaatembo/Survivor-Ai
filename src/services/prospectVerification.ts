@@ -54,7 +54,27 @@ function nameSimilarity(a: string, b: string): number {
   if (!aa.size || !bb.size) return 0;
   let common = 0;
   for (const token of aa) if (bb.has(token)) common += 1;
-  return common / Math.max(aa.size, bb.size);
+  const overlap = common / Math.max(aa.size, bb.size);
+  // A discovery label is often a shortened form of the trading name
+  // ("Chido Cuts" vs "Chido Cuts Hair Salon"). When every distinctive token of
+  // a multi-token name appears in the other, treat it as a strong match;
+  // plain overlap would score 0.5 and the business could never be VERIFIED.
+  // Location and contact-conflict checks still apply on top of this.
+  const shorter = Math.min(aa.size, bb.size);
+  if (shorter >= 2 && common === shorter) return Math.max(overlap, 0.85);
+  return overlap;
+}
+
+/** A custom domain only counts as the business's own when its name carries the
+ *  business's distinctive tokens: at least two of them (or the only one, for a
+ *  one-word name). A single shared word is not ownership evidence —
+ *  "chido-example.co.zw" is not "Chido Cuts". */
+function domainMatchesBusinessName(domain: string, businessName: string): boolean {
+  const label = domain.replace(/[^a-z0-9]+/g, '');
+  const tokens = [...new Set(normalizeName(businessName))].filter((t) => t.length >= 3);
+  if (!label || tokens.length === 0) return false;
+  const matched = tokens.filter((t) => label.includes(t)).length;
+  return matched >= Math.min(2, tokens.length);
 }
 
 function domainOf(url: string): string {
@@ -83,8 +103,7 @@ function isLikelyFirstPartySource(url: string, prospect: Prospect, score: number
   if (!domain || NON_FIRST_PARTY_DOMAINS.some((d) => domain === d || domain.endsWith('.' + d))) return false;
   if (officialDomain && domain === officialDomain) return true;
   if (/facebook\.com|instagram\.com|linkedin\.com/i.test(domain)) return true;
-  const businessTokens = normalizeName(prospect.businessName);
-  return businessTokens.some((token) => token.length >= 4 && domain.includes(token));
+  return domainMatchesBusinessName(domain, prospect.businessName);
 }
 
 function isBusinessResult(prospect: Prospect, result: SearchResult): number {
@@ -326,7 +345,7 @@ export async function verifyProspect(
     ? identityResults.find(({ r }) => cleanUrl(r.url) === bestWebsite.url)
     : undefined;
   const websiteNameSignal = websiteDomain
-    ? normalizeName(prospect.businessName).some((token) => token.length >= 4 && websiteDomain.includes(token))
+    ? domainMatchesBusinessName(websiteDomain, prospect.businessName)
     : false;
   const websiteAuditResult = bestWebsite ? await auditWebsite(bestWebsite.url) : undefined;
   const verifiedWebsiteCandidate = Boolean(

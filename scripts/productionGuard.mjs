@@ -24,6 +24,9 @@ const paymentProvider = read('worker/src/paymentProvider.ts');
 const workflow = read('.github/workflows/deploy.yml');
 const backendApi = read('src/services/backendApi.ts');
 const challengePanel = read('src/components/SurvivalChallengePanel.tsx');
+const security = read('worker/src/security.ts');
+const d1Repo = read('src/engine/d1Repository.ts');
+const ledgerMigration = read('migrations/0022_truthful_ledger.sql');
 
 const checks = [
   {
@@ -105,15 +108,37 @@ const checks = [
       has(paymentProvider, "EcoCash payment execution is restricted to the sandbox endpoint"),
   },
   {
-    name: 'manual cycle execution requires the trigger secret',
+    name: 'every route passes the central route policy gate; cycles are admin-only',
     ok:
-      has(worker, "req.headers.get('x-trigger-secret')") &&
-      has(worker, "if (!env.TRIGGER_SECRET || secret !== env.TRIGGER_SECRET)") &&
-      has(worker, "if (url.pathname === '/cycles/run' && req.method === 'POST')") &&
+      has(security, "{ method: 'POST', path: '/cycles/run', access: 'ADMIN', paid: true }") &&
+      has(security, "{ method: 'GET', path: '/health', access: 'PUBLIC'") &&
+      has(security, "if (isApiPath(path)) return { method, path, access: 'OPERATOR' };") &&
+      has(worker, 'const policy = routePolicy(req.method, url.pathname);') &&
       has(worker, "if (url.pathname === '/auth/login' && req.method === 'POST')") &&
       has(worker, "requireOperator(req, env)") &&
-      has(worker, "url.pathname === '/actions/approvals/review' && req.method === 'POST'") &&
-      has(worker, "operator authentication required"),
+      has(worker, "operator authentication required") &&
+      lacks(worker, "secret !== env.TRIGGER_SECRET"),
+  },
+  {
+    name: 'every Worker search/AI context is metered (openPaidSession or the engine)',
+    ok:
+      (worker.match(/cycleStartedAt:/g) ?? []).length === 1 &&
+      has(worker, 'requireMeter: true') &&
+      lacks(worker, 'openManualCostSession'),
+  },
+  {
+    name: 'money moves only through Treasury; no deposits into a run',
+    ok:
+      lacks(worker, 'appendTransaction(') &&
+      lacks(agentEngine, 'appendTransaction(snap.transactions') &&
+      has(d1Repo, 'D1Repository.appendTransaction is disabled') &&
+      has(worker, "code: 'CAPITAL_ONLY_VIA_NEW_RUN'") &&
+      has(ledgerMigration, 'trg_tx_run_must_be_open') &&
+      has(ledgerMigration, 'trg_run_terminal_is_final'),
+  },
+  {
+    name: 'Math.random() experiments never run in the production Worker',
+    ok: has(worker, 'simulateForecasts: false') && has(agentEngine, 'realExperience(await this.repo.listMemory())'),
   },
   {
     name: 'deployment does not expose frontend provider secrets',
@@ -143,6 +168,7 @@ const checks = [
       has(worker, "'kv_store'") &&
       has(worker, "'payment_intents'") &&
       has(worker, "'payment_provider_events'") &&
+      has(worker, "'survivor_runs'") &&
       has(worker, 'ready: schemaReady'),
   },
 ];

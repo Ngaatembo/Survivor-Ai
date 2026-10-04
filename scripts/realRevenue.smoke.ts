@@ -87,24 +87,27 @@ console.log('--- Learning event: compares real numbers, never fabricates a missi
   assert(noModelEvent.deltaPct === undefined, 'no predicted price -> no fabricated delta');
 }
 
-console.log('--- Memory folding: real $ never touches simulated tests/spent/revenue/conclusion ---');
+console.log('--- Memory folding: real $ never touches simulated memory ---');
 {
   const opp = baseOpp();
   const entry = baseEntry(opp);
-  const memory: MemoryEntry[] = [
-    { id: 'mem-opp-1', kind: 'opportunity', refId: opp.id, title: opp.name, tests: 2, spent: 2, revenue: 20, conclusion: 'VIABLE', notes: ['old note'], updatedAt: Date.now() },
-  ];
-  const updated = foldRealRevenueIntoMemory(memory, entry, opp);
+  const simulated: MemoryEntry = { id: 'mem-opp-1', kind: 'opportunity', refId: opp.id, title: opp.name, tests: 2, spent: 2, revenue: 20, conclusion: 'VIABLE', notes: ['old note'], updatedAt: Date.now(), provenance: 'SIMULATED_LEGACY' };
+  const snapshot = JSON.stringify(simulated);
+  const updated = foldRealRevenueIntoMemory([simulated], entry, opp);
+  assert(JSON.stringify(simulated) === snapshot, 'the simulated entry is not modified');
+  assert(!updated.some((m) => m.id === 'mem-opp-1'), 'simulated memory is not carried into real experience');
   const oppMem = updated.find((m) => m.kind === 'opportunity' && m.refId === opp.id)!;
-  assert(oppMem.tests === 2, 'simulated tests count untouched by real revenue');
-  assert(oppMem.spent === 2, 'simulated spent untouched');
-  assert(oppMem.revenue === 20, 'simulated revenue untouched (real $ never mixed in)');
-  assert(oppMem.conclusion === 'VIABLE', 'conclusion untouched');
+  assert(oppMem.provenance === 'REAL_VERIFIED', 'real revenue lands in a REAL_VERIFIED entry');
+  assert(oppMem.revenue === entry.amountReceived, 'the real entry carries the real amount received (no simulated $20 mixed in)');
+  assert(oppMem.conclusion === 'UNTESTED', 'no conclusion is invented from one payment');
   assert(oppMem.notes[0].startsWith('[REAL]'), 'a [REAL]-tagged note was prepended');
-  assert(oppMem.notes.includes('old note'), 'existing notes preserved');
+
+  const again = foldRealRevenueIntoMemory(updated, { ...entry, id: 'rr-2', amountReceived: 50 }, opp);
+  const accumulated = again.find((m) => m.kind === 'opportunity' && m.refId === opp.id)!;
+  assert(accumulated.revenue === entry.amountReceived + 50 && accumulated.notes.length === 2, 'a second verified payment accumulates in the same real entry');
 
   const catMem = updated.find((m) => m.kind === 'category' && m.refId === opp.category);
-  assert(!!catMem, 'category-level memory entry created if missing');
+  assert(!!catMem && catMem.provenance === 'REAL_VERIFIED', 'category-level real memory entry created');
   assert(catMem!.notes[0].startsWith('[REAL]'), 'category memory also gets the real-world note');
 }
 

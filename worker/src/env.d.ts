@@ -29,14 +29,26 @@ export interface Env {
   /** Optional price overrides (USD per million tokens) for the treasury's cost meter. */
   LLM_INPUT_USD_PER_MTOK?: string;
   LLM_OUTPUT_USD_PER_MTOK?: string;
-  /** Optional per-query search price; defaults to 0 (Tavily/Brave free tiers). */
+  /** Per-query search price for every provider (USD). When unset, each
+   *  provider's list price applies (lib/costMeter.ts DEFAULT_SEARCH_PRICE_USD). */
   SEARCH_COST_PER_QUERY_USD?: string;
+  TAVILY_COST_PER_QUERY_USD?: string;
+  BRAVE_COST_PER_QUERY_USD?: string;
   /** Optional override of the $0.40/day automatic AI + search spending cap. */
   DAILY_SPEND_CAP_USD?: string;
+  /** Operator-triggered paid research: daily cap (default $1.00), per-request
+   *  cap (default $0.25) and requests per hour (default 30). */
+  MANUAL_DAILY_CAP_USD?: string;
+  MANUAL_PER_REQUEST_CAP_USD?: string;
+  MANUAL_PAID_REQUESTS_PER_HOUR?: string;
   TAVILY_API_KEY?: string;
   BRAVE_API_KEY?: string;
 
+  /** Operator password (POST /auth/login) and legacy admin credential. */
   TRIGGER_SECRET?: string;
+  /** Separate admin credential (x-admin-secret) for run lifecycle, kill-switch
+   *  release and maintenance. Falls back to TRIGGER_SECRET when unset. */
+  ADMIN_SECRET?: string;
 
   // Finivex merchant credentials are Worker-only. Never expose the API secret to the browser.
   FINIVEX_BASE_URL?: string;

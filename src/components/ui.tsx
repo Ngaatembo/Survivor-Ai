@@ -182,9 +182,8 @@ export function StatusDot({ status, pulse }: { status: AgentStatus; pulse?: bool
 }
 
 export function statusLabel(status: AgentStatus): string {
-  // 'DEAD' is the stored name for DORMANT since the real treasury (27 Sep 2026):
-  // the agent stops spending but keeps working and wakes on revenue/top-up.
-  if (status === 'DEAD') return 'DORMANT';
+  // Since the truthful ledger (Oct 2026) DEAD is final: the run reached its
+  // death threshold and cannot be revived.
   return status.replace('_', ' ');
 }
 

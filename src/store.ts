@@ -277,6 +277,11 @@ export const useStore = create<SurviveState>()(
           // (appendEvent writes to store.events), so onLog is intentionally a
           // no-op here — it is only needed by hosts whose repo does not
           // stream back into the UI.
+          // Local in-browser demo only (no backend configured): it keeps its
+          // own practice ledger and may run the Math.random() simulator. The
+          // deployed dashboard never runs the engine — it mirrors the Worker.
+          allowLegacyLedger: true,
+          simulateForecasts: true,
           onStatus: (status) => {
             set((s: any) => ({ agent: { ...s.agent, status } }));
           },

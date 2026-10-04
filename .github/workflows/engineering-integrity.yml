@@ -18,8 +18,10 @@ jobs:
       - run: npm ci
       - name: Production boundary guard
         run: npm run production:guard
-      - name: Typecheck
+      - name: Typecheck (dashboard + worker)
         run: npm run typecheck
+      - name: Smoke tests (ledger, security, pipeline)
+        run: npm test
       - name: Production build
         run: npm run build
       - name: Worker dry run

@@ -17,8 +17,9 @@ export interface LLMProvider {
   complete(system: string, prompt: string): Promise<string | null>;
 
   /** Attach (or detach with null) the treasury's cost meter for this cycle or
-   *  manual action. While attached, every call is checked against the daily
-   *  cap / dormant floor first and its real token cost is recorded after. */
+   *  manual action. While attached, every call is checked first (kill switch,
+   *  run status, funds above the death threshold, caps) and its real token
+   *  cost is recorded after as a ledger line item. */
   attachMeter?(meter: import('../../lib/costMeter').CostMeter | null): void;
 
   /**

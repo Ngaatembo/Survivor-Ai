@@ -4,8 +4,11 @@
  * soft (returns null) so the engine falls back to the rule engine.
  *
  * Every call goes through complete(), which asks the attached CostMeter first
- * (daily cap, dormant floor) and records the real token cost afterwards, so
- * the AI is paid for out of the real treasury (see lib/costMeter.ts).
+ * (kill switch, run status, funds above the death threshold, daily/session
+ * caps) and records the real token cost afterwards as its own line item, so
+ * the AI is paid for out of the run's ledger (see lib/costMeter.ts).
+ * With requireMeter (the Worker sets it) a call with no meter attached is
+ * refused instead of running unaccounted.
  * ========================================================================== */
 
 import type { LLMOpportunityAnalysis, LLMProvider, MarketPriceAnalysis, ProspectIntelligenceAnalysis } from './types';
@@ -58,7 +61,12 @@ abstract class MeteredProvider implements LLMProvider {
   abstract readonly label: string;
   private meter: CostMeter | null = null;
 
-  constructor(protected apiKey: string, protected model: string, protected pricing: LlmPricing) {}
+  constructor(
+    protected apiKey: string,
+    protected model: string,
+    protected pricing: LlmPricing,
+    private requireMeter = false,
+  ) {}
 
   get connected() {
     return Boolean(this.apiKey);
@@ -72,15 +80,24 @@ abstract class MeteredProvider implements LLMProvider {
   protected abstract callApi(system: string, prompt: string): Promise<RawCompletion | null>;
 
   async complete(system: string, prompt: string): Promise<string | null> {
-    if (this.meter) {
-      const estimate = estimateLlmCostUsd(this.pricing, system.length + prompt.length, MAX_OUTPUT_TOKENS);
-      const check = this.meter.check(estimate);
-      if (!check.ok) return null; // dormant or over today's cap → rule-engine fallback
+    const meter = this.meter;
+    if (!meter && this.requireMeter) {
+      console.warn(`[llm:${this.id}] refused: no cost meter attached (unaccounted AI calls are not allowed here)`);
+      return null;
+    }
+    const estimate = estimateLlmCostUsd(this.pricing, system.length + prompt.length, MAX_OUTPUT_TOKENS);
+    if (meter) {
+      const check = await meter.authorize(estimate);
+      if (!check.ok) return null; // kill switch, dead run, no funds or cap → rule-engine fallback
     }
     try {
       const raw = await this.callApi(system, prompt);
       if (!raw) return null;
-      this.meter?.recordLlm(llmCostUsd(this.pricing, raw.inputTokens, raw.outputTokens), raw.inputTokens, raw.outputTokens);
+      meter?.recordLlm(llmCostUsd(this.pricing, raw.inputTokens, raw.outputTokens), raw.inputTokens, raw.outputTokens, {
+        provider: `${this.id}:${this.model}`,
+        operation: 'completion',
+        estimatedUsd: estimate,
+      });
       return raw.text?.trim() || null;
     } catch (e) {
       console.warn(`[llm:${this.id}] failed, falling back to rule engine`, e);
@@ -250,13 +267,16 @@ export function createLLMProvider(keys: {
   model?: string;
   inputUsdPerMTok?: number;
   outputUsdPerMTok?: number;
+  /** Refuse any call made without an attached CostMeter. */
+  requireMeter?: boolean;
 }): LLMProvider | null {
+  const strict = Boolean(keys.requireMeter);
   const price = (base: LlmPricing): LlmPricing => ({
     inputUsdPerMTok: Number.isFinite(keys.inputUsdPerMTok) ? keys.inputUsdPerMTok! : base.inputUsdPerMTok,
     outputUsdPerMTok: Number.isFinite(keys.outputUsdPerMTok) ? keys.outputUsdPerMTok! : base.outputUsdPerMTok,
   });
-  if (keys.anthropic) return new AnthropicProvider(keys.anthropic, keys.model || 'claude-haiku-4-5-20251001', price(DEFAULT_LLM_PRICING.claude));
-  if (keys.openai) return new OpenAIProvider(keys.openai, keys.model || 'gpt-4o-mini', price(DEFAULT_LLM_PRICING.openai));
-  if (keys.gemini) return new GeminiProvider(keys.gemini, keys.model || 'gemini-2.5-flash', price(DEFAULT_LLM_PRICING.gemini));
+  if (keys.anthropic) return new AnthropicProvider(keys.anthropic, keys.model || 'claude-haiku-4-5-20251001', price(DEFAULT_LLM_PRICING.claude), strict);
+  if (keys.openai) return new OpenAIProvider(keys.openai, keys.model || 'gpt-4o-mini', price(DEFAULT_LLM_PRICING.openai), strict);
+  if (keys.gemini) return new GeminiProvider(keys.gemini, keys.model || 'gemini-2.5-flash', price(DEFAULT_LLM_PRICING.gemini), strict);
   return null;
 }

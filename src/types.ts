@@ -238,7 +238,10 @@ export interface Experiment {
 
   lessonsLearned: string[];
   evidenceNote: string;
-  simulated: true;
+  /** SIMULATION/LEGACY: every experiment so far was produced by the
+   *  Math.random() simulator (lib/simulation.ts). Only `false` (a real,
+   *  verified experiment — none exist yet) may count as evidence. */
+  simulated: boolean;
 
   createdAt: number;
 }
@@ -258,7 +261,14 @@ export interface MemoryEntry {
   conclusion: 'PROMISING' | 'VIABLE' | 'MIXED' | 'AVOID' | 'UNTESTED' | 'WATCH';
   notes: string[];
   updatedAt: number;
+  /** Where this belief came from. Only REAL_VERIFIED memory may influence
+   *  production decisions; SIMULATED (Math.random experiments) and
+   *  SIMULATED_LEGACY (everything stored before migration 0022) are kept for
+   *  history only. A missing value is treated as not real. */
+  provenance?: MemoryProvenance;
 }
+
+export type MemoryProvenance = 'REAL_VERIFIED' | 'SIMULATED' | 'SIMULATED_LEGACY';
 
 /* ------------------------------- transactions ----------------------------- */
 
@@ -274,6 +284,14 @@ export interface Transaction {
    *  costs, verified revenue). SIMULATED = the pre-27-Sep-2026 practice
    *  ledger, kept for history but never counted in the balance. */
   ledger?: 'REAL' | 'SIMULATED';
+  /** Truthful-ledger fields (migration 0022). Every REAL entry written since
+   *  then belongs to exactly one Survivor run and carries an explicit kind
+   *  and a unique idempotency key — see src/economy/ledger.ts. */
+  runId?: string;
+  kind?: import('./economy/ledger').LedgerKind;
+  idempotencyKey?: string;
+  environment?: import('./economy/ledger').RunEnvironment | 'SIMULATED';
+  metadata?: Record<string, unknown>;
 }
 
 /* ------------------------------- agent_events ----------------------------- */

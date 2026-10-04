@@ -383,7 +383,7 @@ export class D1Repository implements EngineRepository {
       operatingCostsNote: r.operating_costs_note ?? '',
       examples: this.a<string>(r.examples),
       sources: sourceRows.map((s: any) => ({
-        id: s.id,
+        id: D1Repository.sourceIdFromRow(String(s.id), String(r.id)),
         title: s.title,
         url: s.url ?? undefined,
         kind: s.kind,
@@ -445,43 +445,54 @@ export class D1Repository implements EngineRepository {
 
   /* ----------------------------- transactions --------------------------- */
 
+  /**
+   * The current Survivor run's ledger (the open run, or the most recent run
+   * if it has died/ended so its final ledger stays visible). Legacy rows
+   * outside any run — the pre-0019 SIMULATED ledger — are never returned.
+   */
   async listTransactions(): Promise<Transaction[]> {
-    const { results } = await this.db
-      // Only the REAL treasury counts. The pre-27-Sep-2026 simulated ledger
-      // stays in the table for history (ledger = 'SIMULATED', migration 0019).
-      .prepare("SELECT * FROM transactions WHERE agent_id = ? AND ledger = 'REAL' ORDER BY created_at ASC")
+    const run: any = await this.db
+      .prepare(
+        `SELECT id FROM survivor_runs WHERE agent_id = ?
+         ORDER BY CASE WHEN status IN ('CREATED','ALIVE','DEPLETED') THEN 0 ELSE 1 END, created_at DESC LIMIT 1`,
+      )
       .bind(this.agentId)
+      .first();
+    if (!run) return [];
+    const { results } = await this.db
+      .prepare('SELECT * FROM transactions WHERE agent_id = ? AND run_id = ? ORDER BY created_at ASC, id ASC')
+      .bind(this.agentId, run.id)
       .all();
-    return results.map((r: any) => ({
-      id: r.id,
-      type: r.type,
-      amount: this.n(r.amount),
-      description: r.description,
-      relatedExperimentId: r.related_experiment_id ?? undefined,
-      balanceAfter: this.n(r.balance_after),
-      createdAt: this.ms(r.created_at),
-      ledger: 'REAL' as const,
-    }));
+    return results.map((r: any) => {
+      let metadata: Record<string, unknown> = {};
+      try { metadata = r.metadata ? JSON.parse(r.metadata) : {}; } catch { metadata = {}; }
+      return {
+        id: r.id,
+        type: r.type,
+        amount: this.n(r.amount),
+        description: r.description,
+        relatedExperimentId: r.related_experiment_id ?? undefined,
+        balanceAfter: this.n(r.balance_after),
+        createdAt: this.ms(r.created_at),
+        ledger: 'REAL' as const,
+        runId: r.run_id,
+        kind: r.kind,
+        idempotencyKey: r.idempotency_key ?? undefined,
+        environment: r.environment ?? undefined,
+        metadata,
+      };
+    });
   }
 
-  async appendTransaction(tx: Transaction): Promise<void> {
-    await this.db
-      .prepare(
-        `INSERT INTO transactions (id, agent_id, type, amount, description, related_experiment_id, balance_after, created_at, ledger)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      )
-      .bind(
-        tx.id,
-        this.agentId,
-        tx.type,
-        tx.amount,
-        tx.description,
-        tx.relatedExperimentId ?? null,
-        tx.balanceAfter,
-        this.iso(tx.createdAt),
-        tx.ledger ?? 'REAL',
-      )
-      .run();
+  /**
+   * Direct ledger writes are disabled on D1. Every balance change must go
+   * through src/economy/treasury.ts (Treasury.post), which validates the
+   * entry against its run, enforces idempotency and settles death. The
+   * database triggers from migration 0022 would reject an unscoped REAL row
+   * anyway; this makes the mistake loud at the call site.
+   */
+  async appendTransaction(_tx: Transaction): Promise<void> {
+    throw new Error('D1Repository.appendTransaction is disabled: post ledger entries through Treasury (src/economy/treasury.ts)');
   }
 
   /* ------------------------------ experiments --------------------------- */
@@ -599,19 +610,20 @@ export class D1Repository implements EngineRepository {
       conclusion: r.conclusion,
       notes: this.a<string>(r.notes),
       updatedAt: this.ms(r.updated_at ?? r.created_at),
+      provenance: r.provenance ?? 'SIMULATED_LEGACY',
     }));
   }
 
   async upsertMemory(mem: MemoryEntry): Promise<void> {
     await this.db
       .prepare(
-        `INSERT INTO agent_memory (id, agent_id, kind, ref_type, ref_id, title, tests, spent, revenue, conclusion, notes, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `INSERT INTO agent_memory (id, agent_id, kind, ref_type, ref_id, title, tests, spent, revenue, conclusion, notes, updated_at, provenance)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
          ON CONFLICT(id) DO UPDATE SET
            kind = excluded.kind, ref_type = excluded.ref_type, ref_id = excluded.ref_id,
            title = excluded.title, tests = excluded.tests, spent = excluded.spent,
            revenue = excluded.revenue, conclusion = excluded.conclusion,
-           notes = excluded.notes, updated_at = excluded.updated_at`,
+           notes = excluded.notes, updated_at = excluded.updated_at, provenance = excluded.provenance`,
       )
       .bind(
         mem.id,
@@ -626,6 +638,8 @@ export class D1Repository implements EngineRepository {
         mem.conclusion,
         this.j(mem.notes),
         this.iso(mem.updatedAt),
+        // Unlabelled memory is never treated as real experience.
+        mem.provenance ?? 'SIMULATED',
       )
       .run();
   }
@@ -1179,6 +1193,10 @@ export class D1Repository implements EngineRepository {
         .prepare(`DELETE FROM prospect_sources WHERE prospect_id IN (${placeholders})`)
         .bind(...idChunk);
     });
+    // The stored row key is namespaced by prospect. Source ids are only
+    // unique within one prospect; keyed globally, saving prospect B with a
+    // source id that prospect A also uses re-parented A's row to B and
+    // silently stripped A's evidence (found by salesJourney.smoke.ts).
     const sourceStmts = prospects.flatMap((p) =>
       p.sources.map((s) =>
         this.db
@@ -1186,10 +1204,9 @@ export class D1Repository implements EngineRepository {
             `INSERT INTO prospect_sources (id, prospect_id, title, url, kind, note)
              VALUES (?, ?, ?, ?, ?, ?)
              ON CONFLICT(id) DO UPDATE SET
-               prospect_id = excluded.prospect_id, title = excluded.title,
-               url = excluded.url, kind = excluded.kind, note = excluded.note`,
+               title = excluded.title, url = excluded.url, kind = excluded.kind, note = excluded.note`,
           )
-          .bind(s.id, p.id, s.title, s.url ?? null, s.kind, s.note ?? null),
+          .bind(D1Repository.sourceRowId(p.id, s.id), p.id, s.title, s.url ?? null, s.kind, s.note ?? null),
       ),
     );
     await this.db.batch([...deleteStmts, ...sourceStmts]);
@@ -1226,6 +1243,16 @@ export class D1Repository implements EngineRepository {
       created_at: this.iso(p.createdAt),
       updated_at: this.iso(p.updatedAt),
     };
+  }
+
+  private static sourceRowId(prospectId: string, sourceId: string): string {
+    return `${prospectId}::${sourceId}`;
+  }
+
+  /** Rows written before namespacing keep their bare id. */
+  private static sourceIdFromRow(rowId: string, prospectId: string): string {
+    const prefix = `${prospectId}::`;
+    return rowId.startsWith(prefix) ? rowId.slice(prefix.length) : rowId;
   }
 
   private mapProspect(r: any, sourceRows: any[]): Prospect {
@@ -1800,6 +1827,8 @@ export class D1Repository implements EngineRepository {
       competitive_note: intel.competitiveNote,
       specific_problem_evidence: intel.specificProblemEvidence,
       recommended_angle: intel.recommendedAngle,
+      primary_problem: intel.primaryProblem ? JSON.stringify(intel.primaryProblem) : null,
+      problem_selection: intel.problemSelection ? JSON.stringify(intel.problemSelection) : null,
       confidence: intel.confidence,
       generator: intel.generator,
       sources: this.j(intel.sources),
@@ -1820,6 +1849,11 @@ export class D1Repository implements EngineRepository {
       .run();
   }
 
+  private optionalJson<T>(value: unknown): T | undefined {
+    if (typeof value !== 'string' || !value) return undefined;
+    try { return JSON.parse(value) as T; } catch { return undefined; }
+  }
+
   private mapProspectIntelligence(r: any): ProspectIntelligence {
     return {
       id: r.id,
@@ -1830,6 +1864,8 @@ export class D1Repository implements EngineRepository {
       competitiveNote: r.competitive_note,
       specificProblemEvidence: r.specific_problem_evidence,
       recommendedAngle: r.recommended_angle,
+      primaryProblem: this.optionalJson(r.primary_problem),
+      problemSelection: this.optionalJson(r.problem_selection),
       confidence: r.confidence as IntelligenceConfidence,
       generator: r.generator,
       sources: this.a(r.sources),
@@ -2063,7 +2099,8 @@ export async function seedD1(db: D1DatabaseLike, agentId: string = AGENT_ID): Pr
     .run();
 
   await repo.upsertOpportunities(snap.opportunities);
-  for (const tx of snap.transactions) await repo.appendTransaction(tx);
+  // No capital is minted by seeding: money enters only as a run's starting
+  // capital, created explicitly through Treasury.createRun.
   for (const evt of snap.events) await repo.appendEvent(evt);
   for (const strat of snap.strategies) await repo.appendStrategy(strat);
 }

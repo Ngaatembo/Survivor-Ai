@@ -66,12 +66,25 @@ export interface SearchEconomyContext {
   /** Mutated in place across a cycle's worth of runSearch() calls; the
    *  caller (agentEngine) persists it once at the end via saveEconomyState. */
   onLog?: (message: string) => void;
-  /** Real-treasury cost meter (daily cap + dormant floor). Cache hits are free
-   *  and never checked; a real provider call is checked first and charged
-   *  `searchCostUsd` after. */
+  /** Run cost meter. Cache hits are free and never checked; a real provider
+   *  call is authorized first (kill switch, run status, funds, caps) and
+   *  charged its price after, as its own ledger line item. */
   meter?: CostMeter | null;
-  /** Price of one real search call in USD (0 on Tavily/Brave free tiers). */
+  /** Price of one real search call in USD, applied to every provider.
+   *  Superseded per provider by `searchPrices`. */
   searchCostUsd?: number;
+  /** Price of one real search call per provider, USD. */
+  searchPrices?: Partial<Record<'tavily' | 'brave', number>>;
+  /** Refuse real provider calls when no meter is attached (the Worker sets
+   *  this, so no route can search without the cost being accounted). */
+  requireMeter?: boolean;
+}
+
+function searchPrice(ctx: SearchEconomyContext, provider: 'tavily' | 'brave' | 'none'): number {
+  if (provider === 'none') return 0;
+  const specific = ctx.searchPrices?.[provider];
+  const value = specific ?? ctx.searchCostUsd ?? 0;
+  return Number.isFinite(value) && value > 0 ? value : 0;
 }
 
 export interface RunSearchOptions {
@@ -139,24 +152,33 @@ export async function runSearch(ctx: SearchEconomyContext, opts: RunSearchOption
     return { results: [], cacheHit: false, budgetExceeded: false, skippedReason: 'NO_PROVIDER_CONFIGURED', providerUsed: 'none' };
   }
 
-  const searchCost = Math.max(0, ctx.searchCostUsd ?? 0);
+  if (!ctx.meter && ctx.requireMeter) {
+    return { results: [], cacheHit: false, budgetExceeded: false, skippedReason: 'UNMETERED_SEARCH_REFUSED', providerUsed: 'none' };
+  }
+  const otherId = providerId === 'tavily' ? 'brave' : 'tavily';
+  // Authorize the worst case: a quota failover can end up calling the other
+  // provider, so the pre-check covers the dearer of the two.
+  const estimate = Math.max(searchPrice(ctx, providerId), ctx.providers[otherId]?.connected ? searchPrice(ctx, otherId) : 0);
   if (ctx.meter) {
-    const spend = ctx.meter.check(searchCost);
+    const spend = await ctx.meter.authorize(estimate);
     if (!spend.ok) {
-      return {
-        results: [],
-        cacheHit: false,
-        budgetExceeded: spend.reason === 'DAILY_CAP',
-        skippedReason: spend.reason === 'DORMANT' ? 'TREASURY_DORMANT' : 'DAILY_SPEND_CAP',
-        providerUsed: 'none',
-      };
+      const skippedReason =
+        spend.reason === 'KILL_SWITCH' ? 'KILL_SWITCH_ENGAGED'
+        : spend.reason === 'RUN_CLOSED' ? 'RUN_NOT_ALIVE'
+        : spend.reason === 'INSUFFICIENT_FUNDS' ? 'INSUFFICIENT_FUNDS'
+        : spend.reason === 'SESSION_CAP' ? 'REQUEST_SPEND_CAP'
+        : 'DAILY_SPEND_CAP';
+      return { results: [], cacheHit: false, budgetExceeded: spend.reason === 'DAILY_CAP', skippedReason, providerUsed: 'none' };
     }
   }
 
   let results: SearchResult[] = [];
   let usedProvider: SearchProviderId = providerId;
+  // The provider that actually answered (and so bills us), if any.
+  let servedBy: 'tavily' | 'brave' | null = null;
   try {
     results = await provider.search(opts.query, opts.max ?? 5);
+    servedBy = providerId === 'tavily' || providerId === 'brave' ? providerId : null;
   } catch (error) {
     // A hard provider quota/rate/credential failure is different from a
     // legitimate empty search result. Fail over immediately to the other
@@ -169,6 +191,7 @@ export async function runSearch(ctx: SearchEconomyContext, opts: RunSearchOption
         try {
           results = await fallback.search(opts.query, opts.max ?? 5);
           usedProvider = fallbackId;
+          servedBy = fallbackId === 'tavily' || fallbackId === 'brave' ? fallbackId : null;
         } catch {
           results = [];
           usedProvider = fallbackId;
@@ -182,7 +205,11 @@ export async function runSearch(ctx: SearchEconomyContext, opts: RunSearchOption
     { ts: ctx.now, purpose: opts.purpose, provider: usedProvider, query: opts.query, entityId: opts.entityId, cacheHit: false },
     results,
   );
-  ctx.meter?.recordSearch(searchCost);
+  // Charge the provider that served the request. A call that failed (quota,
+  // plan, network) returned nothing billable, so it is not booked.
+  if (servedBy) {
+    ctx.meter?.recordSearch(searchPrice(ctx, servedBy), { provider: servedBy, operation: `${opts.purpose.toLowerCase()} search` });
+  }
 
   return { results, cacheHit: false, budgetExceeded: false, providerUsed: usedProvider };
 }

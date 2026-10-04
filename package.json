@@ -6,14 +6,15 @@
   "description": "SURVIVE AI — autonomous economic research and revenue-operations engine with production D1, treasury controls, verification, and human approval boundaries",
   "scripts": {
     "dev": "vite",
-    "build": "tsc --noEmit && vite build",
+    "build": "npm run typecheck && vite build",
     "preview": "vite preview",
-    "typecheck": "tsc --noEmit",
+    "typecheck": "tsc --noEmit && tsc -p worker/tsconfig.json --noEmit",
     "seed:supabase": "esbuild scripts/seedSupabase.ts --bundle --platform=node --format=esm --outfile=dist/seed.mjs --log-level=error --external:@supabase/supabase-js && node --env-file=.env dist/seed.mjs",
     "worker:dev": "npm run typecheck && wrangler dev worker/src/index.ts --config worker/wrangler.toml",
     "worker:dry-run": "npm run typecheck && wrangler deploy worker/src/index.ts --config worker/wrangler.toml --dry-run",
     "worker:deploy": "npm run typecheck && wrangler deploy worker/src/index.ts --config worker/wrangler.toml",
-    "production:guard": "node scripts/productionGuard.mjs"
+    "production:guard": "node scripts/productionGuard.mjs",
+    "test": "node scripts/runSmoke.mjs"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.109.0",
@@ -27,6 +28,7 @@
     "@types/react-dom": "^18.3.0",
     "@vitejs/plugin-react": "^4.3.2",
     "esbuild": "^0.24.2",
+    "miniflare": "^3.20250718.3",
     "typescript": "^5.6.2",
     "vite": "^5.4.8",
     "wrangler": "^3.114.17"
