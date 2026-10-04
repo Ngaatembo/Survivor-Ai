@@ -24,7 +24,7 @@ const prospect: Prospect = {
   websitePresence: 'SOCIAL_ONLY', socialLinks: ['https://facebook.com/maronderaautobody'],
   contactChannel: 'WHATSAPP', contactValue: '0772 123 456',
   verification: { status: 'VERIFIED', confidence: 82, businessNameMatchScore: 0.95, contactMatchScore: 0.9, independentSources: 2, contactSources: 2 } as any,
-  sources: [{ id: 's1', title: 'Facebook page', url: 'https://facebook.com/maronderaautobody', kind: 'web' }],
+  sources: [{ id: 's1', title: 'Facebook page', url: 'https://facebook.com/maronderaautobody', kind: 'web' }, { id: 's2', title: 'Business directory', url: 'https://example.com/maronderaautobody', kind: 'web' }],
   evidenceNotes: 'Active Facebook page with photos of repairs.', priority: 'HIGH',
   score: { total: 74, factors: ['Active social presence', 'No website found'], expectedDealValue: 250, expectedAcquisitionCost: 5, expectedProfit: 200, expectedTimeToRevenueDays: 10, probabilityOfClose: 0.2, expectedValue: 40, scoredAt: now },
   status: 'QUALIFIED', dataSource: 'LIVE', dateDiscovered: now, messagesSentCount: 0, responsesReceivedCount: 0,
