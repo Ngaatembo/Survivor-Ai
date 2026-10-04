@@ -54,6 +54,24 @@ pl = await call('GET', '/sales/pipeline');
 ok(pl.leads.length === 1, 'second load does not duplicate');
 ok((await repo.listProspects()).length === before, 'discovery prospects untouched');
 
+console.log('safety gates');
+const unsafe: Prospect = {
+  ...prospect,
+  id: 'p-unsafe-1',
+  businessName: 'Unverified Auto Body',
+  verification: { status: 'PROVISIONAL', confidence: 78, businessNameMatchScore: 0.94, contactMatchScore: 0.9, independentSources: 2, contactSources: 2 } as any,
+  contactValue: '0772 999 888',
+  sources: [{ id: 's-unsafe', title: 'Search result', url: 'https://example.com/unsafe', kind: 'web' }],
+  status: 'DISCOVERED',
+};
+await repo.upsertProspects([unsafe]);
+const unsafePipeline = await call('GET', '/sales/pipeline');
+ok(unsafePipeline.leads.some((l: any) => l.prospectId === unsafe.id), 'unsafe test lead imported');
+const unsafeReady = await call('POST', '/sales/stage', { prospectId: unsafe.id, stage: 'READY_TO_CONTACT' });
+ok(!unsafeReady.ok, 'provisional identity cannot reach READY_TO_CONTACT');
+const unsafeForced = await call('POST', '/sales/stage', { prospectId: unsafe.id, stage: 'READY_TO_CONTACT', force: true });
+ok(!unsafeForced.ok, 'force cannot bypass evidence gate');
+
 console.log('research + brief');
 const rs = await call('POST', '/sales/research', P);
 ok(rs.ok && rs.brief.channel.status === 'RECOMMENDED', 'channel recommended: ' + rs.brief?.channel?.channel);
