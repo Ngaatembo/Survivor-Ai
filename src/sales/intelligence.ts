@@ -72,6 +72,9 @@ function sourceDomain(url?: string): string | null {
 export function problemEvidenceAllowed(p: Prospect, intelligence?: ProspectIntelligence): boolean {
   const pp = intelligence?.primaryProblem;
   if (!pp || pp.confidence === 'LOW' || !pp.evidence?.trim() || !pp.outreachClaim?.trim()) return false;
+  // Research is time-sensitive. Do not let an old diagnosis become a fresh sales claim.
+  const ageMs = Date.now() - (intelligence.updatedAt || intelligence.generatedAt || 0);
+  if (!Number.isFinite(ageMs) || ageMs < 0 || ageMs > 7 * 86_400_000) return false;
   const stored = new Map((intelligence?.sources ?? []).map((s) => [s.id, s]));
   const cited = pp.sourceIds.map((id) => stored.get(id)).filter(Boolean) as NonNullable<ProspectIntelligence['sources'][number]>[];
   const domains = new Set(cited.map((s) => sourceDomain(s.url)).filter(Boolean));
