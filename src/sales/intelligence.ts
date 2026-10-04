@@ -59,6 +59,23 @@ export function classifyBusiness(p: Pick<Prospect, 'category' | 'businessName'>)
 
 const audit = (p: Prospect) => (p.verification?.websiteAudit?.status === 'AUDITED' ? p.verification.websiteAudit : undefined);
 const isVerified = (p: Prospect) => p.verification?.status === 'VERIFIED';
+
+// Verification is evidence with a shelf life. Public phone, website and identity
+// signals can change, so a previously VERIFIED lead must be rechecked before it
+// can produce customer-facing material.
+export const VERIFICATION_TTL_MS = 30 * 86_400_000;
+export function verificationFresh(p: Prospect, now = Date.now()): boolean {
+  if (!isVerified(p)) return false;
+  const verifiedAt = p.verification?.verifiedAt ?? 0;
+  const ageMs = now - verifiedAt;
+  if (!Number.isFinite(ageMs) || ageMs < 0 || ageMs > VERIFICATION_TTL_MS) return false;
+  const auditRecord = audit(p);
+  if (auditRecord) {
+    const auditAgeMs = now - auditRecord.auditedAt;
+    if (!Number.isFinite(auditAgeMs) || auditAgeMs < 0 || auditAgeMs > VERIFICATION_TTL_MS) return false;
+  }
+  return true;
+}
 const facebookLink = (p: Prospect) => p.socialLinks.find((u) => /facebook\.com/i.test(u));
 const instagramLink = (p: Prospect) => p.socialLinks.find((u) => /instagram\.com/i.test(u));
 
