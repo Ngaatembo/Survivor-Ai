@@ -315,12 +315,31 @@ export async function verifyProspect(
   // A contact is VERIFIED only when the exact same value is corroborated by
   // at least two independent source domains. A high match score on one
   // directory/search result is not enough to prove ownership of a phone/email.
+  // A website is not "official" merely because it is a custom domain. Search
+  // engines can return unrelated sites, parked domains, agencies, directories,
+  // or businesses with similar names. Require a strong business match on the
+  // result, a business-name signal in the domain, and a successful live audit.
+  // This is still evidence-based attribution, not a claim of legal domain
+  // ownership.
+  const websiteDomain = bestWebsite ? domainOf(bestWebsite.url) : '';
+  const websiteResult = bestWebsite
+    ? identityResults.find(({ r }) => cleanUrl(r.url) === bestWebsite.url)
+    : undefined;
+  const websiteNameSignal = websiteDomain
+    ? normalizeName(prospect.businessName).some((token) => token.length >= 4 && websiteDomain.includes(token))
+    : false;
+  const websiteAuditResult = bestWebsite ? await auditWebsite(bestWebsite.url) : undefined;
   const verifiedWebsiteCandidate = Boolean(
     bestWebsite &&
-    bestWebsite.bestScore >= 0.72 &&
-    !NON_FIRST_PARTY_DOMAINS.some((d) => domainOf(bestWebsite.url) === d || domainOf(bestWebsite.url).endsWith('.' + d)),
+    websiteResult &&
+    bestWebsite.bestScore >= 0.82 &&
+    websiteResult.score >= 0.82 &&
+    websiteNameSignal &&
+    !NON_FIRST_PARTY_DOMAINS.some((d) => websiteDomain === d || websiteDomain.endsWith('.' + d)) &&
+    websiteAuditResult?.status === 'AUDITED' &&
+    websiteAuditResult.checks.reachable,
   );
-  const officialDomain = verifiedWebsiteCandidate ? domainOf(bestWebsite!.url) : undefined;
+  const officialDomain = verifiedWebsiteCandidate ? websiteDomain : undefined;
   const contactHasFirstPartyEvidence = Boolean(
     bestContact &&
     identityResults.some(({ r, score }) =>
@@ -348,7 +367,7 @@ export async function verifyProspect(
     emailHasFirstPartyEvidence,
   );
   const verifiedWebsite = verifiedWebsiteCandidate;
-  const websiteAudit = verifiedWebsite ? await auditWebsite(bestWebsite.url) : undefined;
+  const websiteAudit = verifiedWebsite ? websiteAuditResult : undefined;
   const auditedPresence = websiteAudit?.status === 'AUDITED' && websiteAudit.verdict === 'NEEDS_WORK'
     ? 'WEAK_OR_OUTDATED'
     : websiteAudit?.status === 'AUDITED' && websiteAudit.verdict === 'HEALTHY'
@@ -417,7 +436,8 @@ export async function verifyProspect(
   if (bestEmail?.sources >= 2 && emailHasFirstPartyEvidence) notes.push('The same email appears on multiple independent sources, including a likely first-party source.');
   else if (bestEmail?.sources >= 2) notes.push('The same email appears on multiple public sources, but none is strong enough to establish first-party ownership; it cannot be VERIFIED.');
   else if (bestEmail) notes.push('An email was found on a matching source, but it is not corroborated across multiple domains; it cannot be VERIFIED.');
-  if (verifiedWebsite) notes.push('A matching business website was found: ' + bestWebsite.url);
+  if (verifiedWebsite) notes.push('A matching business website was found and live-audited with strong business-name/domain evidence: ' + bestWebsite.url);
+  else if (bestWebsite) notes.push('A website-like result was found, but it did not meet the first-party ownership evidence threshold; it is not treated as the official website.');
   if (websiteAudit?.status === 'AUDITED') notes.push(...websiteAudit.criticalIssues, ...websiteAudit.opportunities.slice(0, 6));
   if (websiteAssessment.note) notes.push(websiteAssessment.note);
   if (verifiedLocation) notes.push('A matching location signal was found: ' + bestLocation.value);
