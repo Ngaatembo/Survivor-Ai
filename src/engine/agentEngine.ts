@@ -52,7 +52,7 @@ import { verifyProspect } from '../services/prospectVerification';
 import { resolveProspectEntities } from '../services/prospectEntityResolution';
 import { CostMeter, type CostPolicy } from '../lib/costMeter';
 import { APPROVALS_KV_KEY, queueApprovals, type QueuedApproval } from '../lib/approvalQueue';
-import { commercialActionAllowed } from '../sales/intelligence';
+import { commercialActionAllowed, verificationFresh, VERIFICATION_TTL_MS } from '../sales/intelligence';
 
 export const STEP_ORDER: CycleStepKey[] = [
   'RESEARCH',
@@ -721,11 +721,25 @@ export class AgentEngine {
         if (hasLiveSearch) {
           const verificationTargets = allProspects
             // A never-verified prospect is stored with an empty {} verification, so
-            // test the status, not the object (SupaFix sat unverified for 6 days).
-            .filter((p) => !p.verification?.status || p.verification.status === 'UNVERIFIED' || p.verification.status === 'CONFLICT')
+            // test the status, not the object. Verified evidence is also time-bound:
+            // once it exceeds the same 30-day TTL enforced by commercial gates,
+            // re-run verification before the prospect can be used again.
+            .filter((p) => {
+              const status = p.verification?.status;
+              const needsInitialVerification =
+                !status || status === 'UNVERIFIED' || status === 'CONFLICT';
+              const needsRefresh =
+                status === 'VERIFIED' && !verificationFresh(p, now);
+              return needsInitialVerification || needsRefresh;
+            })
             .filter((p) => p.priority !== 'DO_NOT_CONTACT')
-            .filter((p) => p.status === 'DISCOVERED' || p.status === 'QUALIFIED' || p.status === 'REPLIED' || p.status === 'INTERESTED' || p.status === 'PROPOSAL_SENT' || p.status === 'NEGOTIATING')
-            .sort((a, b) => b.score.expectedValue - a.score.expectedValue || b.score.total - a.score.total)
+            .filter((p) => p.status === 'DISCOVERED' || p.status === 'QUALIFIED' || p.status === 'CONTACTED' || p.status === 'REPLIED' || p.status === 'INTERESTED' || p.status === 'PROPOSAL_SENT' || p.status === 'NEGOTIATING' || p.status === 'FOLLOW_UP')
+            .sort((a, b) => {
+              const aStale = a.verification?.status === 'VERIFIED' && !verificationFresh(a, now);
+              const bStale = b.verification?.status === 'VERIFIED' && !verificationFresh(b, now);
+              if (aStale !== bStale) return aStale ? -1 : 1;
+              return b.score.expectedValue - a.score.expectedValue || b.score.total - a.score.total;
+            })
             .slice(0, 2);
 
           for (const target of verificationTargets) {
@@ -750,7 +764,7 @@ export class AgentEngine {
           if (verificationTargets.length > 0) {
             await hooks.log(
               'VERIFY',
-              `Verified ${verificationTargets.length} prospect(s) against independent public sources before revenue actions.`,
+              `Re-verified ${verificationTargets.length} prospect(s) against independent public sources before revenue actions; stale evidence is refreshed after ${Math.round(VERIFICATION_TTL_MS / 86_400_000)} days.`,
             );
           }
         }
