@@ -1770,7 +1770,7 @@ export default {
         ]);
         const prospect = prospects.find((p) => p.id === prospectId);
         if (!prospect) return json({ ok: false, error: `no prospect found with id ${prospectId}` }, { status: 404 });
-        if (!['VERIFIED', 'PROVISIONAL'].includes(prospect.verification?.status ?? '')) {
+        if (prospect.verification?.status !== 'VERIFIED') {
           return json({ ok: false, error: 'offer generation requires VERIFIED or PROVISIONAL prospect verification' }, { status: 409 });
         }
         if (offers.some((o) => o.prospectId === prospectId)) {
@@ -1804,7 +1804,7 @@ export default {
         ]);
         const prospect = prospects.find((p) => p.id === prospectId);
         if (!prospect) return json({ ok: false, error: `no prospect found with id ${prospectId}` }, { status: 404 });
-        if (!['VERIFIED', 'PROVISIONAL'].includes(prospect.verification?.status ?? '')) {
+        if (prospect.verification?.status !== 'VERIFIED') {
           return json({ ok: false, error: 'outreach generation requires VERIFIED or PROVISIONAL prospect verification' }, { status: 409 });
         }
         if (outreach.some((o) => o.prospectId === prospectId)) {
@@ -1867,8 +1867,7 @@ export default {
 
         const current = prospect.status;
         const verificationReady =
-          prospect.verification?.status === 'VERIFIED' ||
-          prospect.verification?.status === 'PROVISIONAL';
+          prospect.verification?.status === 'VERIFIED';
         const hasVerifiedContact = Boolean(
           prospect.verification?.verifiedContactValue || prospect.verification?.verifiedEmail,
         );
