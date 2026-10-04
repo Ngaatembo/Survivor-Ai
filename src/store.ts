@@ -405,6 +405,8 @@ export const useStore = create<SurviveState>()(
           const { generateOffer } = await import('./lib/offerGenerator');
           const { generateDesignBrief } = await import('./lib/designBriefGenerator');
           const offer = generateOffer(prospect, model, intel, market);
+          const offerText = [model?.offer ?? '', offer.deliverables.join(' '), offer.gapAnalysis ?? ''].join(' ');
+          if (!commercialActionAllowed(prospect, intel, offerText)) throw new Error('Offer generation blocked: proposed service does not fit the evidence-backed problem.');
           await repo.upsertOffer(offer);
           await repo.upsertDesignBrief(generateDesignBrief(offer, prospect));
           set({ offers: await repo.listOffers(), designBriefs: await repo.listDesignBriefs() } as any);
@@ -428,7 +430,9 @@ export const useStore = create<SurviveState>()(
           if (!prospect || !commercialActionAllowed(prospect, intel)) throw new Error('Outreach generation requires VERIFIED identity and current evidence-backed problem research.');
           if ((await repo.listOutreachMessages()).some((o) => o.prospectId === prospectId)) throw new Error('Outreach already exists for this prospect.');
           const { generateOutreachMessages } = await import('./lib/outreachGenerator');
-          await repo.upsertOutreachMessages(generateOutreachMessages(prospect, models.find((m) => m.opportunityId === prospect.opportunityId), intel));
+          const model = models.find((m) => m.opportunityId === prospect.opportunityId);
+          if (!commercialActionAllowed(prospect, intel, model?.offer ?? '')) throw new Error('Outreach generation blocked: proposed service does not fit the evidence-backed problem.');
+          await repo.upsertOutreachMessages(generateOutreachMessages(prospect, model, intel));
           set({ outreachMessages: await repo.listOutreachMessages() } as any);
         },
 
