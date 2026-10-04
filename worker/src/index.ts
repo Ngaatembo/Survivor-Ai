@@ -1779,7 +1779,6 @@ export default {
           return json({ ok: false, error: 'an offer already exists for this prospect' }, { status: 409 });
         }
         const model = models.find((m) => m.opportunityId === prospect.opportunityId);
-        const intel = intelligence.find((i) => i.prospectId === prospectId);
         const marketPrice = pricing.find((p) => p.opportunityId === prospect.opportunityId);
         const offer = generateOffer(prospect, model, intel, marketPrice);
         await repo.upsertOffer(offer);
@@ -1814,7 +1813,6 @@ export default {
           return json({ ok: false, error: 'outreach already exists for this prospect' }, { status: 409 });
         }
         const model = models.find((m) => m.opportunityId === prospect.opportunityId);
-        const intel = intelligence.find((i) => i.prospectId === prospectId);
         const messages = generateOutreachMessages(prospect, model, intel);
         await repo.upsertOutreachMessages(messages);
         await repo.appendProspectInteraction({
