@@ -98,8 +98,34 @@ export function websiteClaimAllowed(p: Prospect): boolean {
 export function commercialActionAllowed(p: Prospect, intelligence?: ProspectIntelligence): boolean {
   if (!isVerified(p)) return false;
   if (!problemEvidenceAllowed(p, intelligence)) return false;
+  if (!offerFitsProblem(p, intelligence)) return false;
   if ((p.websitePresence === 'NONE_FOUND' || p.websitePresence === 'SOCIAL_ONLY') && !websiteClaimAllowed(p)) return false;
   return true;
+}
+
+const PROBLEM_OFFER_FIT: Record<ProspectProblem['type'], RegExp> = {
+  DISCOVERABILITY: /website|seo|online presence|google|listing|visibility|landing/i,
+  TRUST: /website|brand|testimonial|review|trust|portfolio|online presence/i,
+  CONVERSION: /website|landing|conversion|cta|sales page|funnel/i,
+  BOOKING: /booking|reservation|website|calendar|appointment/i,
+  ORDERING: /ordering|order|e-?commerce|online store|menu|website/i,
+  LEAD_CAPTURE: /lead|form|website|landing|crm|whatsapp/i,
+  FOLLOW_UP: /follow.?up|crm|automation|whatsapp|email/i,
+  CUSTOMER_EXPERIENCE: /website|booking|ordering|portal|automation|customer/i,
+  COMPETITIVE_POSITION: /website|seo|branding|online presence|digital/i,
+  WEBSITE_QUALITY: /website|web|site|landing/i,
+  OTHER: /website|web|digital|automation|software/i,
+};
+
+function offerFitsProblem(p: Prospect, intelligence?: ProspectIntelligence): boolean {
+  const pp = intelligence?.primaryProblem;
+  if (!pp || pp.confidence === 'LOW' || !pp.solvableOpportunity?.trim()) return false;
+  const text = [
+    pp.solvableOpportunity,
+    pp.outreachClaim,
+    p.opportunityId ?? '',
+  ].join(' ');
+  return PROBLEM_OFFER_FIT[pp.type].test(text);
 }
 
 /* ------------------------------- qualification ------------------------------ */
