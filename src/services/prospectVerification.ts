@@ -77,10 +77,11 @@ const NON_FIRST_PARTY_DOMAINS = [
   'hararelife.com','zimbabwedirectory.co.zw','zimbabweyp.com',
 ];
 
-function isLikelyFirstPartySource(url: string, prospect: Prospect, score: number): boolean {
+function isLikelyFirstPartySource(url: string, prospect: Prospect, score: number, officialDomain?: string): boolean {
   if (score < 0.82) return false;
   const domain = domainOf(url);
   if (!domain || NON_FIRST_PARTY_DOMAINS.some((d) => domain === d || domain.endsWith('.' + d))) return false;
+  if (officialDomain && domain === officialDomain) return true;
   if (/facebook\.com|instagram\.com|linkedin\.com/i.test(domain)) return true;
   const businessTokens = normalizeName(prospect.businessName);
   return businessTokens.some((token) => token.length >= 4 && domain.includes(token));
@@ -314,17 +315,23 @@ export async function verifyProspect(
   // A contact is VERIFIED only when the exact same value is corroborated by
   // at least two independent source domains. A high match score on one
   // directory/search result is not enough to prove ownership of a phone/email.
+  const verifiedWebsiteCandidate = Boolean(
+    bestWebsite &&
+    bestWebsite.bestScore >= 0.72 &&
+    !NON_FIRST_PARTY_DOMAINS.some((d) => domainOf(bestWebsite.url) === d || domainOf(bestWebsite.url).endsWith('.' + d)),
+  );
+  const officialDomain = verifiedWebsiteCandidate ? domainOf(bestWebsite!.url) : undefined;
   const contactHasFirstPartyEvidence = Boolean(
     bestContact &&
     identityResults.some(({ r, score }) =>
-      isLikelyFirstPartySource(r.url, prospect, score) &&
+      isLikelyFirstPartySource(r.url, prospect, score, officialDomain) &&
       extractPhones(r.title + ' ' + r.snippet).some((raw) => normalizePhone(raw) === bestContact.normalized),
     ),
   );
   const emailHasFirstPartyEvidence = Boolean(
     bestEmail &&
     identityResults.some(({ r, score }) =>
-      isLikelyFirstPartySource(r.url, prospect, score) &&
+      isLikelyFirstPartySource(r.url, prospect, score, officialDomain) &&
       extractEmails(r.title + ' ' + r.snippet).includes(bestEmail.value),
     ),
   );
@@ -340,7 +347,7 @@ export async function verifyProspect(
     bestEmail.bestScore >= 0.72 &&
     emailHasFirstPartyEvidence,
   );
-  const verifiedWebsite = bestWebsite && bestWebsite.bestScore >= 0.72;
+  const verifiedWebsite = verifiedWebsiteCandidate;
   const websiteAudit = verifiedWebsite ? await auditWebsite(bestWebsite.url) : undefined;
   const auditedPresence = websiteAudit?.status === 'AUDITED' && websiteAudit.verdict === 'NEEDS_WORK'
     ? 'WEAK_OR_OUTDATED'
