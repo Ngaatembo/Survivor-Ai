@@ -881,3 +881,51 @@ export function fetchWindsorIncomeSummary(): Promise<{ ok: true } & WindsorIncom
   return getJson('/integrations/windsor/summary');
 }
 export const salesPost = <T>(path: string, body: unknown, timeoutMs?: number): Promise<T> => postJson<T>(path, body, timeoutMs);
+
+/* --------------------------- revenue-first loop --------------------------- */
+// Survivor selects opportunities and queues HUMAN actions; the operator
+// approves, performs and reports them. A PAID result is verified with the
+// payment provider by the Worker — the browser never records revenue.
+
+export type RevenueActionResult = 'NO_RESPONSE' | 'INTERESTED' | 'PRICE_REJECTED' | 'NEGOTIATING' | 'TRIAL' | 'PAID' | 'LOST';
+
+export interface RevenueOpportunity {
+  id: string; strategyId: string; title: string; targetCustomer: string; problem: string; offer: string;
+  hypothesis: string; estimatedValue: number; estimatedCost: number; probability: number; score: number;
+  scoreExplanation: string; status: string; statusReason: string | null;
+}
+
+export interface RevenueAction {
+  id: string; opportunityId: string; kind: 'CONTACT_PROSPECT' | 'FOLLOW_UP' | 'REQUEST_PAYMENT'; title: string; why: string;
+  instructions: string; payload: Record<string, any>; expectedValue: number; predictedProbability: number;
+  predictedOutcome: string; cost: number; status: 'WAITING_FOR_OPERATOR' | 'APPROVED' | 'REJECTED' | 'COMPLETED' | 'RESOLVED';
+  result: RevenueActionResult | null;
+}
+
+export interface RevenueSummary {
+  ok: true; status: string; killSwitchEngaged: boolean; balance: number; startingCapital: number; revenue: number;
+  expenses: number; profit: number; riskCapital: number; mission: string; counts: Record<string, number>;
+  calibration: { resolvedActions: number; meanPredictedPositive: number | null; actualPositiveRate: number | null };
+  opportunities: RevenueOpportunity[]; actions: RevenueAction[];
+}
+
+export function fetchRevenueSummary(): Promise<RevenueSummary> {
+  return getJson<RevenueSummary>('/revenue/summary');
+}
+
+export function runRevenueLoop(): Promise<{ ok: true; queued: RevenueAction[] }> {
+  return postJson('/revenue/loop/run', {});
+}
+
+export function revenueActionDecision(verb: 'approve' | 'reject' | 'complete', actionId: string, note?: string): Promise<{ ok: true }> {
+  return postJson(`/revenue/actions/${verb}`, { actionId, note });
+}
+
+export function reportRevenueActionResult(
+  actionId: string,
+  result: RevenueActionResult,
+  note?: string,
+  payment?: { transactionId: string; amount: number; currency: string },
+): Promise<{ ok: true; next: RevenueAction | null; revenue?: { amount: number; balance: number } }> {
+  return postJson('/revenue/actions/result', { actionId, result, note, payment });
+}

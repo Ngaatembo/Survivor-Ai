@@ -16,6 +16,7 @@ import { Experiments } from './components/Experiments';
 import { MemoryView } from './components/MemoryView';
 import { Wallet } from './components/Wallet';
 import { Treasury } from './components/Treasury';
+import { RevenueLoop } from './components/RevenueLoop';
 import { ActivityLog } from './components/ActivityLog';
 import { Reports } from './components/Reports';
 import { Architecture } from './components/Architecture';
@@ -42,6 +43,7 @@ export type View =
   | 'memory'
   | 'wallet'
   | 'treasury'
+  | 'revenue'
   | 'activity'
   | 'reports'
   | 'architecture';
@@ -52,6 +54,7 @@ const NAV: { id: View; label: string; icon: string; section: string }[] = [
   { id: 'prospects', label: 'All leads (CRM)', icon: '▤', section: 'CLIENTS' },
   { id: 'projects', label: 'Delivery', icon: '🛠', section: 'CLIENTS' },
   { id: 'income', label: 'Income Hub', icon: '💰', section: 'CLIENTS' },
+  { id: 'revenue', label: 'First Dollar', icon: '$', section: 'SURVIVOR' },
   { id: 'command', label: 'Command Center', icon: '▣', section: 'SURVIVOR' },
   { id: 'treasury', label: 'Treasury ($50)', icon: '₿', section: 'SURVIVOR' },
   { id: 'decision', label: 'Decisions', icon: '➤', section: 'SURVIVOR' },
@@ -127,6 +130,7 @@ const TITLES: Record<View, string> = {
   memory: 'Agent Memory',
   wallet: 'Simulated Wallet',
   treasury: 'Survivor Treasury',
+  revenue: 'Revenue loop — first verified dollar',
   activity: 'Activity Log',
   reports: 'Research Reports',
   architecture: 'Architecture & Safety',
@@ -317,6 +321,7 @@ export function App() {
           {view === 'memory' && <MemoryView />}
           {view === 'wallet' && <Wallet />}
           {view === 'treasury' && <Treasury />}
+          {view === 'revenue' && <RevenueLoop />}
           {view === 'activity' && <ActivityLog />}
           {view === 'reports' && <Reports />}
           {view === 'architecture' && <Architecture />}
