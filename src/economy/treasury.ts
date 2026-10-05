@@ -58,6 +58,8 @@ export interface CostItem {
   at: number;
   inputTokens?: number;
   outputTokens?: number;
+  /** Already written to the ledger by the spend gate at settle time. */
+  posted?: boolean;
 }
 
 export interface CostContext {
@@ -254,6 +256,7 @@ export class Treasury {
   async recordCosts(items: CostItem[], ctx: CostContext): Promise<PostResult[]> {
     const results: PostResult[] = [];
     for (const item of items) {
+      if (item.posted) continue; // the spend gate already booked this call
       const amount = roundMoney(item.actualUsd);
       if (amount <= 0) continue; // a free call is not an expense
       const kind: LedgerKind = item.kind === 'AI' ? 'AI_EXPENSE' : 'SEARCH_EXPENSE';

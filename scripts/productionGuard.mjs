@@ -27,6 +27,10 @@ const challengePanel = read('src/components/SurvivalChallengePanel.tsx');
 const security = read('worker/src/security.ts');
 const d1Repo = read('src/engine/d1Repository.ts');
 const ledgerMigration = read('migrations/0022_truthful_ledger.sql');
+const store = read('src/store.ts');
+const costMeter = read('src/lib/costMeter.ts');
+const spendLimits = read('src/economy/spendLimits.ts');
+const searchEconomy = read('src/services/searchEconomy.ts');
 
 const checks = [
   {
@@ -135,6 +139,24 @@ const checks = [
       has(worker, "code: 'CAPITAL_ONLY_VIA_NEW_RUN'") &&
       has(ledgerMigration, 'trg_tx_run_must_be_open') &&
       has(ledgerMigration, 'trg_run_terminal_is_final'),
+  },
+  {
+    name: 'incident 5 Oct 2026: autonomous paid calls default OFF; every paid call is atomically reserved first',
+    ok:
+      has(spendLimits, 'autonomousPaidCalls: false') &&
+      has(spendLimits, "=== 'enabled'") &&
+      has(worker, 'spendGate: spendGate ?? undefined') &&
+      has(worker, "initiatedBy: 'OPERATOR'") &&
+      has(searchEconomy, 'ctx.meter.authorizeCall(') &&
+      lacks(searchEconomy, 'ctx.meter?.recordSearch('),
+  },
+  {
+    name: 'incident 5 Oct 2026: no invented provider prices; the browser never calls paid providers',
+    ok:
+      lacks(costMeter, 'DEFAULT_SEARCH_PRICE_USD =') &&
+      lacks(worker, 'DEFAULT_SEARCH_PRICE_USD') &&
+      has(store, 'createSearchProviders({})') &&
+      has(store, 'createLLMProvider({})'),
   },
   {
     name: 'Math.random() experiments never run in the production Worker',

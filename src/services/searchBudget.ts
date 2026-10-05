@@ -216,6 +216,28 @@ const MAX_LOG_ENTRIES = 4000;
 /** Bound the cache similarly — oldest entries evicted first. */
 const MAX_CACHE_ENTRIES = 1500;
 
+/**
+ * Keep the log bounded WITHOUT losing the fresh (billable) calls the
+ * day/month budgets are counted from. Before 5 Oct 2026 the log was a plain
+ * 4,000-entry ring buffer that also held cache hits (~15 per cycle, 48
+ * cycles/day), so it covered only ~5–6 days and the "monthly" limits were
+ * silently counting a few days. Now cache hits are dropped first (oldest
+ * first) and fresh calls are kept for 31 days.
+ */
+function trimLog(log: SearchLogEntry[], now: number): SearchLogEntry[] {
+  const keepFreshSince = now - 31 * 86_400_000;
+  const kept = log.filter((e) => e.cacheHit || e.ts >= keepFreshSince);
+  if (kept.length <= MAX_LOG_ENTRIES) return kept;
+  let excess = kept.length - MAX_LOG_ENTRIES;
+  const out: SearchLogEntry[] = [];
+  for (const e of kept) {
+    if (excess > 0 && e.cacheHit) { excess -= 1; continue; }
+    out.push(e);
+  }
+  // Only fresh calls left and still over: drop the oldest fresh entries.
+  return out.length > MAX_LOG_ENTRIES ? out.slice(-MAX_LOG_ENTRIES) : out;
+}
+
 export function emptyState(): SearchEconomyState {
   return { log: [], cache: {} };
 }
@@ -415,7 +437,7 @@ export function recordSearch(
   results?: unknown[],
 ): SearchEconomyState {
   const cacheHit = entry.cacheHit ?? false;
-  const log = [...state.log, { ...entry, cacheHit }].slice(-MAX_LOG_ENTRIES);
+  const log = trimLog([...state.log, { ...entry, cacheHit }], entry.ts);
   let cache = state.cache;
   if (!cacheHit && results) {
     const normalizedQuery = normalizeQuery(entry.query);

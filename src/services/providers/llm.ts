@@ -86,20 +86,26 @@ abstract class MeteredProvider implements LLMProvider {
       return null;
     }
     const estimate = estimateLlmCostUsd(this.pricing, system.length + prompt.length, MAX_OUTPUT_TOKENS);
+    let ticket: import('../../lib/costMeter').SpendTicket | undefined;
     if (meter) {
-      const check = await meter.authorize(estimate);
-      if (!check.ok) return null; // kill switch, dead run, no funds or cap → rule-engine fallback
+      // Authorized (and, in the Worker, atomically reserved) before the call.
+      const auth = await meter.authorizeCall({ kind: 'AI', provider: `${this.id}:${this.model}`, operation: 'completion', units: 1, unit: 'llm_call', estimatedUsd: estimate });
+      if (!auth.ok) return null; // kill switch, dead run, autonomy off, no funds or cap → rule-engine fallback
+      ticket = auth.ticket;
     }
     try {
       const raw = await this.callApi(system, prompt);
-      if (!raw) return null;
-      meter?.recordLlm(llmCostUsd(this.pricing, raw.inputTokens, raw.outputTokens), raw.inputTokens, raw.outputTokens, {
-        provider: `${this.id}:${this.model}`,
-        operation: 'completion',
-        estimatedUsd: estimate,
-      });
+      if (!raw) {
+        if (ticket) await meter!.settleCall(ticket, 'UNCERTAIN');
+        return null;
+      }
+      if (ticket) {
+        await meter!.settleCall(ticket, 'OK', llmCostUsd(this.pricing, raw.inputTokens, raw.outputTokens), { inputTokens: raw.inputTokens, outputTokens: raw.outputTokens });
+      }
       return raw.text?.trim() || null;
     } catch (e) {
+      // The provider may or may not have billed a failed call: keep it reserved.
+      if (ticket) await meter!.settleCall(ticket, 'UNCERTAIN');
       console.warn(`[llm:${this.id}] failed, falling back to rule engine`, e);
       return null;
     }

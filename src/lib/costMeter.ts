@@ -16,6 +16,7 @@
 
 import type { Transaction } from '../types';
 import type { CostItem } from '../economy/treasury';
+import type { Initiator, SpendGate, SpendRequestLimits } from '../economy/spendGate';
 
 export interface CostPolicy {
   /** Max spend per UTC day for this channel, USD. */
@@ -47,12 +48,9 @@ export const DEFAULT_LLM_PRICING: Record<'claude' | 'openai' | 'gemini', LlmPric
   gemini: { inputUsdPerMTok: 0, outputUsdPerMTok: 0 }, // free tier
 };
 
-/** Default per-query search prices (USD) when no price is configured.
- *  Tavily pay-as-you-go: 1 credit (basic search) ≈ $0.008. Brave Search API
- *  paid tiers: ≈ $5 per 1,000 queries. Override per deployment with
- *  SEARCH_COST_PER_QUERY_USD or TAVILY_/BRAVE_COST_PER_QUERY_USD, so a free
- *  tier is never silently booked as $0 unless an operator says it is. */
-export const DEFAULT_SEARCH_PRICE_USD: Record<'tavily' | 'brave', number> = { tavily: 0.008, brave: 0.005 };
+/* Search prices are deliberately NOT defaulted here: see
+ * src/economy/spendLimits.ts (TAVILY_USD_PER_CREDIT, BRAVE_USD_PER_QUERY).
+ * An unpriced provider cannot be called. */
 
 export function llmCostUsd(pricing: LlmPricing, inputTokens: number, outputTokens: number): number {
   return (inputTokens * pricing.inputUsdPerMTok + outputTokens * pricing.outputUsdPerMTok) / 1_000_000;
@@ -86,12 +84,37 @@ export function autoSpentToday(transactions: Transaction[], now = Date.now()): n
   return spentToday(transactions, 'AUTO', now);
 }
 
-export type SpendBlock = 'KILL_SWITCH' | 'RUN_CLOSED' | 'INSUFFICIENT_FUNDS' | 'DAILY_CAP' | 'SESSION_CAP';
+export type SpendBlock =
+  | 'KILL_SWITCH' | 'RUN_CLOSED' | 'AUTONOMY_DISABLED' | 'PRICING_UNKNOWN'
+  | 'INSUFFICIENT_FUNDS' | 'DAILY_CAP' | 'SESSION_CAP' | 'GATE_REFUSED';
 export type SpendCheck = { ok: true } | { ok: false; reason: SpendBlock; detail?: string };
 
 /** Fresh server-side check run before every paid call: returns a reason to
  *  refuse (kill switch engaged, run dead/ended) or null to proceed. */
-export type SpendGuard = () => Promise<{ reason: 'KILL_SWITCH' | 'RUN_CLOSED'; detail: string } | null>;
+export type SpendGuard = () => Promise<{ reason: 'KILL_SWITCH' | 'RUN_CLOSED' | 'AUTONOMY_DISABLED'; detail: string } | null>;
+
+/** Atomic server-side authorization (src/economy/spendGate.ts). When a
+ *  meter has a gate, every paid call must obtain a reservation first. */
+export interface MeterGate {
+  gate: SpendGate;
+  runId: string;
+  initiatedBy: Initiator;
+  sessionId: string;
+  reason: string;
+  limits: SpendRequestLimits;
+}
+
+/** Proof that a specific paid call was authorized. */
+export interface SpendTicket {
+  seq: number;
+  kind: 'AI' | 'SEARCH';
+  provider: string;
+  operation: string;
+  units: number;
+  unit: string;
+  estimatedUsd: number;
+  authorizationId?: string;
+}
 
 export class CostMeter {
   readonly policy: CostPolicy;
@@ -99,6 +122,7 @@ export class CostMeter {
   private readonly spentBeforeUsd: number;
   private readonly balanceUsd: number;
   private readonly guard?: SpendGuard;
+  private readonly meterGate?: MeterGate;
   private seq = 0;
   items: CostItem[] = [];
   spentUsd = 0;
@@ -106,26 +130,35 @@ export class CostMeter {
   searchCalls = 0;
   inputTokens = 0;
   outputTokens = 0;
-  blocked: Record<SpendBlock, number> = { KILL_SWITCH: 0, RUN_CLOSED: 0, INSUFFICIENT_FUNDS: 0, DAILY_CAP: 0, SESSION_CAP: 0 };
+  blocked: Record<SpendBlock, number> = {
+    KILL_SWITCH: 0, RUN_CLOSED: 0, AUTONOMY_DISABLED: 0, PRICING_UNKNOWN: 0,
+    INSUFFICIENT_FUNDS: 0, DAILY_CAP: 0, SESSION_CAP: 0, GATE_REFUSED: 0,
+  };
   lastBlock: string | null = null;
 
-  constructor(opts: { balanceUsd: number; spentTodayUsd: number; policy?: Partial<CostPolicy>; guard?: SpendGuard; channel?: CostChannel }) {
+  constructor(opts: { balanceUsd: number; spentTodayUsd: number; policy?: Partial<CostPolicy>; guard?: SpendGuard; channel?: CostChannel; gate?: MeterGate }) {
     this.policy = { ...DEFAULT_COST_POLICY, ...(opts.policy ?? {}) };
     this.balanceUsd = opts.balanceUsd;
     this.spentBeforeUsd = opts.spentTodayUsd;
     this.guard = opts.guard;
     this.channel = opts.channel ?? 'AUTO';
+    this.meterGate = opts.gate;
+  }
+
+  /** True when every paid call must be authorized by the atomic gate. */
+  get gated(): boolean {
+    return Boolean(this.meterGate);
   }
 
   static fromLedger(
     transactions: Transaction[],
     policy?: Partial<CostPolicy>,
     now = Date.now(),
-    opts: { guard?: SpendGuard; channel?: CostChannel } = {},
+    opts: { guard?: SpendGuard; channel?: CostChannel; gate?: MeterGate } = {},
   ): CostMeter {
     const balance = transactions.reduce((sum, t) => sum + t.amount, 0);
     const channel = opts.channel ?? 'AUTO';
-    return new CostMeter({ balanceUsd: balance, spentTodayUsd: spentToday(transactions, channel, now), policy, guard: opts.guard, channel });
+    return new CostMeter({ balanceUsd: balance, spentTodayUsd: spentToday(transactions, channel, now), policy, guard: opts.guard, channel, gate: opts.gate });
   }
 
   /** Money left above the death threshold after this session's spend. */
@@ -175,6 +208,89 @@ export class CostMeter {
       if (block) return this.refuse(block.reason, block.detail);
     }
     return this.check(estimateUsd);
+  }
+
+  /**
+   * Authorize ONE paid call before it is made. Order: guard (kill switch,
+   * run, autonomy) → price known → local caps → atomic gate reservation.
+   * Only a returned ticket permits the request.
+   */
+  async authorizeCall(call: { kind: 'AI' | 'SEARCH'; provider: string; operation: string; units: number; unit: string; estimatedUsd: number | undefined }): Promise<{ ok: true; ticket: SpendTicket } | { ok: false; reason: SpendBlock; detail?: string }> {
+    if (call.estimatedUsd === undefined || !Number.isFinite(call.estimatedUsd) || (this.gated && call.estimatedUsd <= 0)) {
+      const r = this.refuse('PRICING_UNKNOWN', `${call.provider}: no configured price — the call cannot be costed, so it is not made`);
+      return r as { ok: false; reason: SpendBlock; detail?: string };
+    }
+    const local = await this.authorize(call.estimatedUsd);
+    if (!local.ok) return local;
+    const seq = ++this.seq;
+    const ticket: SpendTicket = { seq, kind: call.kind, provider: call.provider, operation: call.operation, units: call.units, unit: call.unit, estimatedUsd: call.estimatedUsd };
+    if (this.meterGate) {
+      const g = this.meterGate;
+      const reserved = await g.gate.reserve({
+        idempotencyKey: `${g.sessionId}:${seq}`,
+        runId: g.runId,
+        initiatedBy: g.initiatedBy,
+        channel: this.channel,
+        provider: call.provider,
+        operation: call.operation,
+        units: call.units,
+        unit: call.unit,
+        amountUsd: call.estimatedUsd,
+        sessionId: g.sessionId,
+        reason: g.reason,
+        limits: g.limits,
+      });
+      if (!reserved.ok) {
+        const r = this.refuse(reserved.code === 'KILL_SWITCH' ? 'KILL_SWITCH' : reserved.code === 'RUN_CLOSED' ? 'RUN_CLOSED' : 'GATE_REFUSED', `${reserved.code}: ${reserved.detail}`);
+        return r as { ok: false; reason: SpendBlock; detail?: string };
+      }
+      ticket.authorizationId = reserved.id;
+    }
+    // Count the reservation now so later checks in this session see it.
+    this.spentUsd += call.estimatedUsd;
+    return { ok: true, ticket };
+  }
+
+  /**
+   * Close a ticket after the provider answered.
+   *   OK          provider served the call: actual cost recorded (ledger now)
+   *   NOT_BILLED  provider definitely refused it (HTTP 4xx): reservation released
+   *   UNCERTAIN   timeout / network / 5xx: reservation kept, still counted
+   */
+  async settleCall(ticket: SpendTicket, outcome: 'OK' | 'NOT_BILLED' | 'UNCERTAIN', actualUsd = ticket.estimatedUsd, detail: { inputTokens?: number; outputTokens?: number } = {}): Promise<void> {
+    this.spentUsd -= ticket.estimatedUsd; // replace the reservation with the outcome
+    if (outcome === 'NOT_BILLED') {
+      if (this.meterGate && ticket.authorizationId) await this.meterGate.gate.release(ticket.authorizationId, 'provider refused the request (not billed)');
+      return;
+    }
+    if (outcome === 'UNCERTAIN') {
+      this.spentUsd += ticket.estimatedUsd; // keep counting the worst case
+      return;
+    }
+    const cost = Math.max(0, actualUsd);
+    if (ticket.kind === 'AI') {
+      this.llmCalls += 1;
+      this.inputTokens += detail.inputTokens ?? 0;
+      this.outputTokens += detail.outputTokens ?? 0;
+    } else {
+      this.searchCalls += 1;
+    }
+    this.spentUsd += cost;
+    const item: CostItem = {
+      seq: ticket.seq, kind: ticket.kind, provider: ticket.provider, operation: ticket.operation,
+      estimatedUsd: ticket.estimatedUsd, actualUsd: cost,
+      costBasis: ticket.kind === 'AI' ? 'TOKEN_USAGE_X_PRICE' : 'CONFIGURED_PRICE', at: Date.now(),
+      inputTokens: detail.inputTokens, outputTokens: detail.outputTokens,
+    };
+    if (this.meterGate && ticket.authorizationId) {
+      const settled = await this.meterGate.gate.settle(ticket.authorizationId, cost, {
+        kind: ticket.kind === 'AI' ? 'AI_EXPENSE' : 'SEARCH_EXPENSE',
+        description: `${ticket.kind === 'AI' ? 'AI call' : 'Search'} — ${ticket.provider} ${ticket.operation} (${this.meterGate.reason})`,
+        metadata: { units: ticket.units, unit: ticket.unit, sessionId: this.meterGate.sessionId, costBasis: item.costBasis, inputTokens: detail.inputTokens, outputTokens: detail.outputTokens },
+      });
+      item.posted = settled.ok;
+    }
+    this.items.push(item);
   }
 
   recordLlm(costUsd: number, inputTokens: number, outputTokens: number, detail: { provider?: string; operation?: string; estimatedUsd?: number } = {}): void {

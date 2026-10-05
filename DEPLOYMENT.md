@@ -29,6 +29,20 @@ The Worker auto-initializes the production agent row on first cycle when the req
 
 Supabase support is retained only as a legacy repository implementation; it is not the production default. It has no truthful ledger, so a Worker on the Supabase backend refuses to run cycles.
 
+### Paid-call containment (migration 0023, incident 5 Oct 2026)
+
+Every paid AI/search call now needs an authorization row in `spend_authorizations`, created by one atomic statement that checks the kill switch, the run, per-call / per-cycle / per-request / daily caps and the runway reserve **before** the request is sent. Defaults and meaning: `src/economy/spendLimits.ts`.
+
+- `AUTONOMOUS_PAID_CALLS` — unset by default: Survivor's own cycles make **no** paid calls. Set to `enabled` only deliberately.
+- `TAVILY_USD_PER_CREDIT` / `BRAVE_USD_PER_QUERY` — your plan's real price. **No default**: an unpriced provider is never called. Tavily bills basic search as 1 credit and advanced as 2.
+- The dashboard never calls paid providers; `VITE_*` provider keys are ignored.
+
+```bash
+npx wrangler d1 execute survivor-ai --remote --file=./migrations/0023_spend_authorizations.sql
+```
+
+Apply 0021, 0022 and 0023 (in that order) before deploying this code.
+
 ### Truthful ledger rollout (migrations 0021 + 0022, Oct 2026)
 
 Apply **before** deploying the code that reads them (the new code queries `survivor_runs` and the new `transactions` columns; `/health` reports `ready: false` until they exist). Each must run exactly once:
@@ -49,7 +63,7 @@ Money rules after 0022:
 
 - Capital enters **only** as a new run's starting capital: `POST /runs` (admin). `POST /treasury/record-capital` returns 410.
 - Revenue is credited only from a provider-verified payment (`POST /real-revenue/verify-finivex`), once per provider transaction id.
-- Every paid AI call and search is its own ledger entry. Search prices default to list prices (Tavily $0.008, Brave $0.005 per query); set `SEARCH_COST_PER_QUERY_USD` / `TAVILY_COST_PER_QUERY_USD` / `BRAVE_COST_PER_QUERY_USD` (as `[vars]`) only if your plan genuinely costs something else.
+- Every paid AI call and search is its own ledger entry, posted when the provider answers, linked to its authorization. There are no default search prices (see containment above).
 - When the run's balance reaches its death threshold the run is DEAD: no cycles, no spending, no revival.
 
 Start a new experiment (admin):

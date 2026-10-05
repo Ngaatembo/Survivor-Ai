@@ -260,8 +260,12 @@ export const useStore = create<SurviveState>()(
   persist(
     (set, get) => {
       /* -------- engine wiring: providers from env (absent → rule engine) ------ */
-      const llm = createLLMProvider({ anthropic: env.anthropicKey, openai: env.openaiKey });
-      const { tavily, brave } = createSearchProviders({ tavily: env.tavilyKey, brave: env.braveKey });
+      // Incident 5 Oct 2026: the browser never makes paid AI/search calls.
+      // Paid providers live only in the Worker, behind the atomic spend gate;
+      // VITE_* provider keys are ignored here (a browser call would bypass
+      // every limit and never reach the ledger).
+      const llm = createLLMProvider({});
+      const { tavily, brave } = createSearchProviders({});
 
       const repo = createStoreRepository(
         () => get() as any,

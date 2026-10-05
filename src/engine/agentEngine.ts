@@ -54,6 +54,8 @@ import { CostMeter, type CostPolicy, type SpendGuard } from '../lib/costMeter';
 import type { Treasury } from '../economy/treasury';
 import { agentStatusForRun, runAcceptsWork, type SurvivorRun } from '../economy/ledger';
 import { readKillSwitch } from '../economy/killSwitch';
+import type { SpendGate } from '../economy/spendGate';
+import type { ProviderPrices, SpendLimits } from '../economy/spendLimits';
 import { openingLedger } from '../services/wallet';
 import { APPROVALS_KV_KEY, queueApprovals, type QueuedApproval } from '../lib/approvalQueue';
 import { commercialActionAllowed, verificationFresh, VERIFICATION_TTL_MS } from '../sales/intelligence';
@@ -114,6 +116,14 @@ export interface EngineOptions {
   simulateForecasts?: boolean;
   /** Refuse paid search calls without a meter (the Worker sets this). */
   requireMeter?: boolean;
+  /** Atomic server-side authorization for every paid call (the Worker). */
+  spendGate?: SpendGate;
+  /** Spending limits and the autonomy switch (src/economy/spendLimits.ts).
+   *  When set, Survivor's own cycles make paid calls only if
+   *  autonomousPaidCalls is true. */
+  spendLimits?: SpendLimits;
+  /** Provider prices in billing units; unpriced providers are not called. */
+  providerPrices?: ProviderPrices;
 }
 
 export interface RunOptions {
@@ -170,6 +180,13 @@ export class AgentEngine {
   /** Re-read immediately before every paid call (kill switch, run status). */
   private spendGuard(): SpendGuard {
     return async () => {
+      // A gate without limits cannot be armed: fail closed.
+      if (this.options.spendGate && !this.options.spendLimits) {
+        return { reason: 'AUTONOMY_DISABLED', detail: 'spend gate configured without limits — paid calls refused' };
+      }
+      if (this.options.spendLimits && !this.options.spendLimits.autonomousPaidCalls) {
+        return { reason: 'AUTONOMY_DISABLED', detail: 'autonomous paid calls are disabled (AUTONOMOUS_PAID_CALLS is not "enabled")' };
+      }
       const kill = await readKillSwitch(this.repo);
       if (kill.engaged) return { reason: 'KILL_SWITCH', detail: kill.reason || 'emergency stop' };
       if (this.options.treasury) {
@@ -270,12 +287,37 @@ export class AgentEngine {
     // death threshold, daily cap) and posted to the run's ledger afterwards,
     // one entry per call.
     const sessionId = uid('cycle-cost');
+    const limits = this.options.spendLimits;
     const meter = CostMeter.fromLedger(
       await this.ledger(),
-      { ...this.options.costPolicy, floorUsd: runAtStart?.deathThreshold ?? 0 },
+      {
+        ...this.options.costPolicy,
+        ...(limits ? { dailyCapUsd: limits.autoDailyUsd, sessionCapUsd: limits.autoPerCycleUsd } : {}),
+        floorUsd: runAtStart?.deathThreshold ?? 0,
+      },
       Date.now(),
-      { guard: this.spendGuard(), channel: 'AUTO' },
+      {
+        guard: this.spendGuard(),
+        channel: 'AUTO',
+        gate: this.options.spendGate && runAtStart && limits
+          ? {
+              gate: this.options.spendGate,
+              runId: runAtStart.id,
+              initiatedBy: 'SURVIVOR',
+              sessionId,
+              reason: `cycle #${agent.totalCyclesRun + 1}`,
+              limits: {
+                perCallUsd: limits.perCallUsd,
+                perSessionUsd: limits.autoPerCycleUsd,
+                channelDailyUsd: limits.autoDailyUsd,
+                totalDailyUsd: limits.totalDailyUsd,
+                runwayReserveUsd: limits.runwayReserveUsd,
+              },
+            }
+          : undefined,
+      },
     );
+
     this.providers.llm?.attachMeter?.(meter);
     if (meter.exhausted) {
       await hooks.log('WARNING', 'No funds above the death threshold — no paid AI or search this cycle.');
@@ -415,6 +457,7 @@ export class AgentEngine {
       meter,
       searchCostUsd: this.options.searchCostUsd ?? 0,
       searchPrices: this.options.searchPrices,
+      providerPrices: this.options.providerPrices,
       requireMeter: this.options.requireMeter,
     };
 

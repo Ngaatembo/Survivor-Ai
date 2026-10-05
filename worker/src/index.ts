@@ -63,7 +63,9 @@ import { D1LedgerStore } from '../../src/economy/d1LedgerStore';
 import { readKillSwitch, setKillSwitch, killSwitchBlock } from '../../src/economy/killSwitch';
 import { runAcceptsWork, type RunEnvironment } from '../../src/economy/ledger';
 import { realExperience } from '../../src/services/memory';
-import { DEFAULT_SEARCH_PRICE_USD, spentToday, type SpendGuard } from '../../src/lib/costMeter';
+import { spentToday, type SpendGuard } from '../../src/lib/costMeter';
+import { D1SpendGate } from '../../src/economy/spendGate';
+import { spendLimitsFromEnv, providerPricesFromEnv } from '../../src/economy/spendLimits';
 import { routePolicy, isAdminRequest, takeRateLimit, safeEqual } from './security';
 import {
   ecoCashStatus,
@@ -204,23 +206,12 @@ async function hasHumanApproval(
 /* ------------------------- metered paid operations ------------------------- */
 
 function costPolicyFromEnv(env: Env): Partial<CostPolicy> {
-  const cap = Number(env.DAILY_SPEND_CAP_USD);
-  return env.DAILY_SPEND_CAP_USD && Number.isFinite(cap) && cap >= 0 ? { dailyCapUsd: cap } : {};
+  return { dailyCapUsd: spendLimitsFromEnv(env as any).autoDailyUsd };
 }
 
 function envNumber(value: string | undefined, fallback: number): number {
   const n = Number(value);
   return value !== undefined && value !== '' && Number.isFinite(n) && n >= 0 ? n : fallback;
-}
-
-/** Per-provider search price. An explicit 0 is honoured (a free tier the
- *  operator vouches for); unset means the provider's list price. */
-function searchPricesFromEnv(env: Env): { tavily: number; brave: number } {
-  const shared = env.SEARCH_COST_PER_QUERY_USD;
-  return {
-    tavily: envNumber(env.TAVILY_COST_PER_QUERY_USD ?? shared, DEFAULT_SEARCH_PRICE_USD.tavily),
-    brave: envNumber(env.BRAVE_COST_PER_QUERY_USD ?? shared, DEFAULT_SEARCH_PRICE_USD.brave),
-  };
 }
 
 /** Checked immediately before every paid call: kill switch, then the run. */
@@ -254,7 +245,8 @@ async function openPaidSession(
   built: ReturnType<typeof buildEngine>,
   label: string,
 ): Promise<PaidSession | Response> {
-  const { repo, treasury, llm, tavily, brave } = built;
+  const { repo, treasury, llm, tavily, brave, spendGate } = built;
+  const limits = spendLimitsFromEnv(env as any);
   const blocked = await killSwitchBlock(repo);
   if (blocked) return json({ ok: false, error: blocked, code: 'KILL_SWITCH_ENGAGED' }, { status: 503 });
   const run = treasury ? await treasury.getOpenRun() : null;
@@ -267,16 +259,36 @@ async function openPaidSession(
     return json({ ok: false, error: `paid research rate limit reached (${perHour}/hour)`, code: 'RATE_LIMITED' }, { status: 429, headers: { 'retry-after': String(limit.retryAfterSeconds) } });
   }
 
+  if (!spendGate) return json({ ok: false, error: 'spend gate unavailable on this backend — paid calls refused', code: 'SPEND_GATE_UNAVAILABLE' }, { status: 503 });
   const transactions = await repo.listTransactions();
-  const dailyCapUsd = envNumber(env.MANUAL_DAILY_CAP_USD, 1);
+  const dailyCapUsd = limits.manualDailyUsd;
   if (spentToday(transactions, 'MANUAL') >= dailyCapUsd) {
     return json({ ok: false, error: `today's manual research spend cap ($${dailyCapUsd.toFixed(2)}) is used up`, code: 'MANUAL_DAILY_SPEND_CAP' }, { status: 429 });
   }
+  const sessionId = `manual_${crypto.randomUUID()}`;
   const meter = CostMeter.fromLedger(
     transactions,
-    { dailyCapUsd, sessionCapUsd: envNumber(env.MANUAL_PER_REQUEST_CAP_USD, 0.25), floorUsd: run!.deathThreshold },
+    { dailyCapUsd, sessionCapUsd: limits.manualPerRequestUsd, floorUsd: run!.deathThreshold },
     Date.now(),
-    { guard: spendGuardFor(repo, treasury), channel: 'MANUAL' },
+    {
+      guard: spendGuardFor(repo, treasury),
+      channel: 'MANUAL',
+      // Every paid call in this request is reserved atomically first.
+      gate: {
+        gate: spendGate,
+        runId: run!.id,
+        initiatedBy: 'OPERATOR',
+        sessionId,
+        reason: label,
+        limits: {
+          perCallUsd: limits.perCallUsd,
+          perSessionUsd: limits.manualPerRequestUsd,
+          channelDailyUsd: limits.manualDailyUsd,
+          totalDailyUsd: limits.totalDailyUsd,
+          runwayReserveUsd: limits.runwayReserveUsd,
+        },
+      },
+    },
   );
   llm?.attachMeter?.(meter);
   const now = Date.now();
@@ -287,10 +299,9 @@ async function openPaidSession(
     now,
     cycleStartedAt: now,
     meter,
-    searchPrices: searchPricesFromEnv(env),
+    providerPrices: providerPricesFromEnv(env as any),
     requireMeter: true,
   };
-  const sessionId = `manual_${crypto.randomUUID()}`;
   return {
     ctx,
     meter,
@@ -309,6 +320,8 @@ function buildEngine(env: Env): {
   repo: EngineRepository;
   /** null only on the legacy Supabase backend, which cannot run cycles. */
   treasury: Treasury | null;
+  /** Atomic authorization for every paid call; null = no paid calls. */
+  spendGate: D1SpendGate | null;
   tavily: import('../../src/services/providers/types').SearchProvider | null;
   brave: import('../../src/services/providers/types').SearchProvider | null;
   llm: import('../../src/services/providers/types').LLMProvider | null;
@@ -320,6 +333,7 @@ function buildEngine(env: Env): {
   let repo: EngineRepository;
   let dbConnected: boolean;
   let treasury: Treasury | null = null;
+  let spendGate: D1SpendGate | null = null;
   if (backend === 'supabase') {
     if (!env.SUPABASE_URL || !env.SUPABASE_SERVICE_ROLE_KEY) {
       throw new Error('DB_BACKEND=supabase but SUPABASE_URL/SUPABASE_SERVICE_ROLE_KEY are not set');
@@ -333,6 +347,7 @@ function buildEngine(env: Env): {
     if (!env.DB) throw new Error('DB_BACKEND=d1 but the DB (D1) binding is missing from wrangler.toml');
     repo = new D1Repository(env.DB, agentId);
     treasury = new Treasury(new D1LedgerStore(env.DB, agentId), agentId);
+    spendGate = new D1SpendGate(env.DB, agentId, treasury);
     dbConnected = true;
   }
 
@@ -353,8 +368,13 @@ function buildEngine(env: Env): {
 
   const engine = new AgentEngine(repo, { llm, tavily, brave }, {
     costPolicy: costPolicyFromEnv(env),
-    searchPrices: searchPricesFromEnv(env),
     treasury: treasury ?? undefined,
+    // Incident 5 Oct 2026: every paid call is reserved atomically first, and
+    // Survivor's own cycles make NO paid calls unless AUTONOMOUS_PAID_CALLS
+    // is "enabled". Unpriced providers are never called.
+    spendGate: spendGate ?? undefined,
+    spendLimits: spendLimitsFromEnv(env as any),
+    providerPrices: providerPricesFromEnv(env as any),
     requireMeter: true,
     // Math.random() experiments never run in production.
     simulateForecasts: false,
@@ -364,6 +384,7 @@ function buildEngine(env: Env): {
     engine,
     repo,
     treasury,
+    spendGate,
     tavily,
     brave,
     llm,
@@ -1232,6 +1253,7 @@ export default {
             'payment_provider_events',
             'revenue_verifications',
             'survivor_runs',
+            'spend_authorizations',
           ];
           const placeholders = requiredTables.map(() => '?').join(',');
           const rows = await env.DB
@@ -1286,6 +1308,12 @@ export default {
           db: { backend, connected: backend === 'supabase' ? Boolean(env.SUPABASE_URL && env.SUPABASE_SERVICE_ROLE_KEY) : Boolean(env.DB) },
           llm: Boolean(env.ANTHROPIC_API_KEY || env.OPENAI_API_KEY || env.GEMINI_API_KEY),
           search: Boolean(env.TAVILY_API_KEY || env.BRAVE_API_KEY),
+          spending: {
+            // Containment status (incident 5 Oct 2026). No secrets.
+            autonomousPaidCalls: spendLimitsFromEnv(env as any).autonomousPaidCalls,
+            tavilyPriced: providerPricesFromEnv(env as any).tavilyUsdPerCredit !== undefined,
+            bravePriced: providerPricesFromEnv(env as any).braveUsdPerQuery !== undefined,
+          },
           payments: {
             sandboxConfigured: ecoCashStatus(ecoCashConfig(env)).configured,
             finivexConfigured: finivexStatus(finivexConfig(env)).configured,

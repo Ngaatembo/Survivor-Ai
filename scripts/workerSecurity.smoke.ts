@@ -47,6 +47,7 @@ const env: any = {
   TRIGGER_SECRET: 'operator-secret-for-tests',
   ADMIN_SECRET: 'admin-secret-for-tests',
   TAVILY_API_KEY: 'tvly-test',
+  TAVILY_USD_PER_CREDIT: '0.008', // test fixture, not a real plan price
   ANTHROPIC_API_KEY: 'sk-ant-test',
   MANUAL_PAID_REQUESTS_PER_HOUR: '3',
 };
@@ -121,9 +122,10 @@ outbound = [];
 const research = await call('POST', '/prospects/verify', { token, body: { prospectId: 'p-pii' } });
 const searchEntries = (await treasury.entries()).filter((e) => e.kind === 'SEARCH_EXPENSE');
 assert(research.status === 200 && outbound.some((u) => u.includes('tavily')), 'authorized verification runs real (stubbed) searches');
-assert(searchEntries.length > 0 && searchEntries.every((e) => e.metadata.channel === 'MANUAL' && e.metadata.provider === 'tavily' && e.amount === -0.008), `each search is booked as its own -$0.008 SEARCH_EXPENSE (${searchEntries.length} entries)`);
+assert(searchEntries.length > 0 && searchEntries.every((e) => e.metadata.channel === 'MANUAL' && e.metadata.provider === 'tavily' && e.metadata.initiatedBy === 'OPERATOR' && Math.abs(e.amount + 0.008 * Number(e.metadata.units)) < 1e-9), `each search is booked as its own SEARCH_EXPENSE at credits × price, initiated_by OPERATOR (${searchEntries.length} entries)`);
+const booked = searchEntries.reduce((x, e) => x + e.amount, 0);
 const balanceAfter = (await treasury.balance());
-assert(Math.abs(balanceAfter - (50 - 0.008 * searchEntries.length)) < 1e-9, `balance moved from $50 to $${balanceAfter.toFixed(3)} through recorded transactions only`);
+assert(Math.abs(balanceAfter - (50 + booked)) < 1e-9, `balance moved from $50 to $${balanceAfter.toFixed(3)} through recorded transactions only`);
 await call('POST', '/prospects/verify', { token, body: { prospectId: 'p-pii' } });
 await call('POST', '/prospects/verify', { token, body: { prospectId: 'p-pii' } });
 outbound = [];
