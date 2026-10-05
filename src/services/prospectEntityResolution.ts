@@ -12,6 +12,9 @@ import type { Prospect } from '../types';
 const GENERIC = new Set([
   'the','and','of','in','for','to','a','an','on','at','by','with',
   'business','services','service','company','co','ltd','limited',
+  // Legal-entity suffixes carry no identity ("ABC Construction" and
+  // "ABC Construction (Pvt) Ltd" are the same business).
+  'pvt','private','pty','plc','inc','llc','corp','incorporated',
   'zimbabwe','harare','bulawayo','masvingo','mutare','gweru',
   'shop','store','restaurant','cafe','official','home','page','contact',
 ]);

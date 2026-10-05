@@ -44,38 +44,14 @@ const health = await check('/health', (body) => {
   if (body.connectors?.payments?.productionExecutionEnabled !== false) throw new Error('production payment execution is not hard-disabled');
 });
 
-await check('/status', (body) => {
-  if (body.ok !== true) throw new Error('/status ok=false');
-  if (!body.agent || typeof body.agent.id !== 'string') throw new Error('/status missing agent');
-});
+if (JSON.stringify(health).match(/"balance"/)) throw new Error('/health must not expose balances');
 
-await check('/state', (body) => {
-  if (body.ok !== true) throw new Error('/state ok=false');
-  if (!body.agent || typeof body.agent.id !== 'string') throw new Error('/state missing agent');
-});
-
-await check('/payments/requests', (body) => {
-  if (body.ok !== true) throw new Error('/payments/requests ok=false');
-  if (!Array.isArray(body.requests)) throw new Error('/payments/requests requests is not an array');
-});
-
-await check('/payments/finivex/status', (body) => {
-  if (body.ok !== true) throw new Error('/payments/finivex/status ok=false');
-  if (!body.payment || typeof body.payment.configured !== 'boolean') throw new Error('/payments/finivex/status invalid payload');
-});
-
-await check('/treasury', (body) => {
-  if (body.ok !== true) throw new Error('/treasury ok=false');
-  if (!body.treasury || typeof body.treasury.balance !== 'number') throw new Error('/treasury missing balance');
-  if (!Array.isArray(body.spendRequests)) throw new Error('/treasury spendRequests is not an array');
-});
-
-await check('/content/state', (body) => {
-  if (body.ok !== true) throw new Error('/content/state ok=false');
-  if (!body.state || body.state.version !== 1) throw new Error('/content/state invalid version');
-  if (!Array.isArray(body.state.research)) throw new Error('/content/state research is not an array');
-  if (!Array.isArray(body.state.drafts)) throw new Error('/content/state drafts is not an array');
-});
+// Since Phase 0 (Oct 2026) everything except /health, /auth/login and the
+// prospect-facing /demo pages requires an operator session or the admin
+// secret. Unauthenticated reads must be refused and must carry no data.
+for (const path of ['/status', '/state', '/payments/requests', '/payments/finivex/status', '/treasury', '/content/state', '/runs', '/ledger', '/control/kill-switch']) {
+  await checkUnauthenticatedGet(path);
+}
 
 async function checkPost(path, body, expectedStatus, validate) {
   const response = await fetch(base + path, {
@@ -106,9 +82,10 @@ async function checkUnauthenticatedGet(path) {
   const text = await response.text();
   let payload;
   try { payload = JSON.parse(text); } catch { payload = null; }
-  if (response.status !== 401 || payload?.ok !== false || payload?.error !== 'operator authentication required') {
-    throw new Error(`${path} should reject unauthenticated operators: HTTP ${response.status}: ${text.slice(0, 500)}`);
+  if (response.status !== 401 || payload?.ok !== false || !/authentication required|credential required/.test(payload?.error ?? '')) {
+    throw new Error(`${path} should reject unauthenticated callers: HTTP ${response.status}: ${text.slice(0, 500)}`);
   }
+  if (/"balance"|"prospects"|"transactions"|"entries"/.test(text)) throw new Error(`${path} leaked data in its rejection`);
   console.log(`SMOKE PASS ${path} unauthenticated rejection`);
 }
 
@@ -117,8 +94,17 @@ await checkUnauthenticatedGet('/real-revenue/first-dollar');
 await checkUnauthenticatedGet('/survival-challenge');
 
 
-// Payment-management mutations are operator-only; keep the read endpoint above public.
+// Payment-management mutations are operator-only.
 await checkUnauthenticatedPost('/payments/requests', {});
+
+// Paid AI/search routes: never callable without credentials.
+for (const path of ['/prospects/research', '/prospects/research/full', '/prospects/verify', '/income/research', '/income/strategy', '/content/state']) {
+  await checkUnauthenticatedPost(path, { prospectId: 'smoke_fake_prospect' });
+}
+// Admin-only: cycles, run lifecycle, kill-switch release.
+for (const path of ['/cycles/run', '/runs', '/runs/end', '/control/kill-switch/release', '/admin/search/reset']) {
+  await checkUnauthenticatedPost(path, {});
+}
 
 await checkUnauthenticatedPost('/treasury/spend-request', {});
 await checkUnauthenticatedPost('/treasury/record-capital', {});
@@ -146,8 +132,8 @@ async function checkUnauthenticatedPost(path, body) {
   const text = await response.text();
   let payload;
   try { payload = JSON.parse(text); } catch { payload = null; }
-  if (response.status !== 401 || payload?.ok !== false || payload?.error !== 'operator authentication required') {
-    throw new Error(`${path} should reject unauthenticated operators: HTTP ${response.status}: ${text.slice(0, 500)}`);
+  if (response.status !== 401 || payload?.ok !== false || !/authentication required|credential required/.test(payload?.error ?? '')) {
+    throw new Error(`${path} should reject unauthenticated callers: HTTP ${response.status}: ${text.slice(0, 500)}`);
   }
   console.log(`SMOKE PASS ${path} unauthenticated rejection`);
 }

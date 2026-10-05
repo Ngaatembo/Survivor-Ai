@@ -3,10 +3,13 @@
  *
  * Runs the AgentEngine headlessly against Cloudflare D1 on a cron.
  *
- *   POST /cycles/run        run one research cycle now  (header: x-trigger-secret)
- *   GET  /health            liveness + connector status
- *   GET  /status            agent snapshot (balance, status, counts)
+ *   POST /cycles/run        run one research cycle now  (admin)
+ *   GET  /health            liveness + connector status (public, no PII)
+ *   GET  /status            agent snapshot (operator)
  *   scheduled (cron)        runs one cycle every 30 minutes
+ *
+ * Access to every route is decided by worker/src/security.ts before any
+ * handler runs. Money moves only through src/economy/treasury.ts.
  *
  * The worker holds all secrets (API keys and payment credentials) — they never
  * touch the browser. EcoCash is currently sandbox-only; real-money execution
@@ -33,7 +36,7 @@ import { createLLMProvider } from '../../src/services/providers/llm';
 import { CostMeter, type CostPolicy } from '../../src/lib/costMeter';
 import { createSearchProviders } from '../../src/services/providers/search';
 import { balanceFrom } from '../../src/services/wallet';
-import { loadEconomyState, saveEconomyState, getEconomySummary, computeSearchROI } from '../../src/services/searchEconomy';
+import { loadEconomyState, saveEconomyState, getEconomySummary, computeSearchROI, type SearchEconomyContext } from '../../src/services/searchEconomy';
 import {
   computeRevenueFunnel,
   conversionByCategory,
@@ -49,13 +52,21 @@ import { computeMoneyMetrics } from '../../src/lib/moneyMetrics';
 import {
   calculateTreasurySnapshot,
   authorizeSpend,
-  createConfirmedExpense,
   DEFAULT_TREASURY_POLICY,
   type TreasuryPolicy,
   type SpendRequest,
 } from '../../src/lib/treasury';
 import type { Env } from './env';
 import { handleSalesRoute } from './sales';
+import { Treasury } from '../../src/economy/treasury';
+import { D1LedgerStore } from '../../src/economy/d1LedgerStore';
+import { readKillSwitch, setKillSwitch, killSwitchBlock } from '../../src/economy/killSwitch';
+import { runAcceptsWork, type RunEnvironment } from '../../src/economy/ledger';
+import { realExperience } from '../../src/services/memory';
+import { spentToday, type SpendGuard } from '../../src/lib/costMeter';
+import { D1SpendGate } from '../../src/economy/spendGate';
+import { spendLimitsFromEnv, providerPricesFromEnv } from '../../src/economy/spendLimits';
+import { routePolicy, isAdminRequest, takeRateLimit, safeEqual } from './security';
 import {
   ecoCashStatus,
   createEcoCashSandboxCharge,
@@ -148,6 +159,8 @@ async function createOperatorSession(repo: EngineRepository): Promise<{ token: s
 }
 
 async function requireOperator(req: Request, env: Env): Promise<boolean> {
+  // The admin credential is a superset of an operator session.
+  if (isAdminRequest(req, env)) return true;
   if (!env.TRIGGER_SECRET) return false;
   const match = (req.headers.get('authorization') ?? '').match(/^Bearer\s+(.+)$/i);
   if (!match?.[1]) return false;
@@ -168,7 +181,7 @@ const json = (data: unknown, init?: ResponseInit) =>
       'content-type': 'application/json',
       'access-control-allow-origin': '*',
       'access-control-allow-methods': 'GET, POST, OPTIONS',
-      'access-control-allow-headers': 'content-type, x-trigger-secret, authorization',
+      'access-control-allow-headers': 'content-type, x-trigger-secret, x-admin-secret, authorization',
       'access-control-max-age': '600',
       ...(init?.headers ?? {}),
     },
@@ -190,47 +203,125 @@ async function hasHumanApproval(
   );
 }
 
-/* ---------------------- real treasury: running costs ---------------------- */
+/* ------------------------- metered paid operations ------------------------- */
 
 function costPolicyFromEnv(env: Env): Partial<CostPolicy> {
-  const cap = Number(env.DAILY_SPEND_CAP_USD);
-  return env.DAILY_SPEND_CAP_USD && Number.isFinite(cap) && cap >= 0 ? { dailyCapUsd: cap } : {};
+  return { dailyCapUsd: spendLimitsFromEnv(env as any).autoDailyUsd };
 }
 
-function searchCostFromEnv(env: Env): number {
-  const v = Number(env.SEARCH_COST_PER_QUERY_USD);
-  return env.SEARCH_COST_PER_QUERY_USD && Number.isFinite(v) && v > 0 ? v : 0;
+function envNumber(value: string | undefined, fallback: number): number {
+  const n = Number(value);
+  return value !== undefined && value !== '' && Number.isFinite(n) && n >= 0 ? n : fallback;
 }
 
-/** A human pressed the button, so the call is approved: it is charged to the
- *  real treasury like any other AI/search cost, but the automatic daily cap
- *  and dormant floor don't block it. */
-async function openManualCostSession(
-  repo: EngineRepository,
-  llm: import('../../src/services/providers/types').LLMProvider | null,
-): Promise<CostMeter> {
-  const meter = CostMeter.fromLedger(await repo.listTransactions(), {
-    dailyCapUsd: Number.POSITIVE_INFINITY,
-    floorUsd: Number.NEGATIVE_INFINITY,
-  });
-  llm?.attachMeter?.(meter);
-  return meter;
+/** Checked immediately before every paid call: kill switch, then the run. */
+function spendGuardFor(repo: EngineRepository, treasury: Treasury | null): SpendGuard {
+  return async () => {
+    const kill = await readKillSwitch(repo);
+    if (kill.engaged) return { reason: 'KILL_SWITCH', detail: kill.reason || 'emergency stop' };
+    const open = runAcceptsWork(treasury ? await treasury.getOpenRun() : null);
+    if (!open.ok) return { reason: 'RUN_CLOSED', detail: open.reason };
+    return null;
+  };
 }
 
-async function closeManualCostSession(
-  repo: EngineRepository,
-  llm: import('../../src/services/providers/types').LLMProvider | null,
-  meter: CostMeter,
+type PaidSession = {
+  ctx: SearchEconomyContext;
+  meter: CostMeter;
+  /** Detach the meter, persist search state and post every priced call to
+   *  the ledger. Always call it (try/finally). */
+  close: () => Promise<void>;
+};
+
+/**
+ * The only way an operator-triggered route may spend AI/search credits.
+ * Refuses (returns a Response) when the kill switch is engaged, the run is
+ * not alive, the hourly request limit or today's manual spend cap is used
+ * up. Otherwise every call is authorized against a per-request cap, the
+ * manual daily cap and the run's death threshold, and posted to the ledger.
+ */
+async function openPaidSession(
+  env: Env,
+  built: ReturnType<typeof buildEngine>,
   label: string,
-): Promise<void> {
-  llm?.attachMeter?.(null);
-  const tx = meter.toExpense(await repo.listTransactions(), `manual: ${label}`);
-  if (tx) await repo.appendTransaction(tx);
+): Promise<PaidSession | Response> {
+  const { repo, treasury, llm, tavily, brave, spendGate } = built;
+  const limits = spendLimitsFromEnv(env as any);
+  const blocked = await killSwitchBlock(repo);
+  if (blocked) return json({ ok: false, error: blocked, code: 'KILL_SWITCH_ENGAGED' }, { status: 503 });
+  const run = treasury ? await treasury.getOpenRun() : null;
+  const open = runAcceptsWork(run);
+  if (!open.ok) return json({ ok: false, error: open.reason, code: 'RUN_NOT_ALIVE' }, { status: 409 });
+
+  const perHour = Math.max(1, Math.floor(envNumber(env.MANUAL_PAID_REQUESTS_PER_HOUR, 30)));
+  const limit = await takeRateLimit(repo, 'manual-paid', perHour, 60 * 60 * 1000);
+  if (!limit.allowed) {
+    return json({ ok: false, error: `paid research rate limit reached (${perHour}/hour)`, code: 'RATE_LIMITED' }, { status: 429, headers: { 'retry-after': String(limit.retryAfterSeconds) } });
+  }
+
+  if (!spendGate) return json({ ok: false, error: 'spend gate unavailable on this backend — paid calls refused', code: 'SPEND_GATE_UNAVAILABLE' }, { status: 503 });
+  const transactions = await repo.listTransactions();
+  const dailyCapUsd = limits.manualDailyUsd;
+  if (spentToday(transactions, 'MANUAL') >= dailyCapUsd) {
+    return json({ ok: false, error: `today's manual research spend cap ($${dailyCapUsd.toFixed(2)}) is used up`, code: 'MANUAL_DAILY_SPEND_CAP' }, { status: 429 });
+  }
+  const sessionId = `manual_${crypto.randomUUID()}`;
+  const meter = CostMeter.fromLedger(
+    transactions,
+    { dailyCapUsd, sessionCapUsd: limits.manualPerRequestUsd, floorUsd: run!.deathThreshold },
+    Date.now(),
+    {
+      guard: spendGuardFor(repo, treasury),
+      channel: 'MANUAL',
+      // Every paid call in this request is reserved atomically first.
+      gate: {
+        gate: spendGate,
+        runId: run!.id,
+        initiatedBy: 'OPERATOR',
+        sessionId,
+        reason: label,
+        limits: {
+          perCallUsd: limits.perCallUsd,
+          perSessionUsd: limits.manualPerRequestUsd,
+          channelDailyUsd: limits.manualDailyUsd,
+          totalDailyUsd: limits.totalDailyUsd,
+          runwayReserveUsd: limits.runwayReserveUsd,
+        },
+      },
+    },
+  );
+  llm?.attachMeter?.(meter);
+  const now = Date.now();
+  const ctx: SearchEconomyContext = {
+    state: await loadEconomyState(repo),
+    providers: { tavily, brave },
+    survivalStatus: computeSurvivalStatus(balanceFrom(transactions), run),
+    now,
+    cycleStartedAt: now,
+    meter,
+    providerPrices: providerPricesFromEnv(env as any),
+    requireMeter: true,
+  };
+  return {
+    ctx,
+    meter,
+    close: async () => {
+      llm?.attachMeter?.(null);
+      await saveEconomyState(repo, ctx.state);
+      if (treasury && meter.items.length) {
+        await treasury.recordCosts(meter.items, { sessionId, channel: 'MANUAL', reason: label });
+      }
+    },
+  };
 }
 
 function buildEngine(env: Env): {
   engine: AgentEngine;
   repo: EngineRepository;
+  /** null only on the legacy Supabase backend, which cannot run cycles. */
+  treasury: Treasury | null;
+  /** Atomic authorization for every paid call; null = no paid calls. */
+  spendGate: D1SpendGate | null;
   tavily: import('../../src/services/providers/types').SearchProvider | null;
   brave: import('../../src/services/providers/types').SearchProvider | null;
   llm: import('../../src/services/providers/types').LLMProvider | null;
@@ -241,6 +332,8 @@ function buildEngine(env: Env): {
 
   let repo: EngineRepository;
   let dbConnected: boolean;
+  let treasury: Treasury | null = null;
+  let spendGate: D1SpendGate | null = null;
   if (backend === 'supabase') {
     if (!env.SUPABASE_URL || !env.SUPABASE_SERVICE_ROLE_KEY) {
       throw new Error('DB_BACKEND=supabase but SUPABASE_URL/SUPABASE_SERVICE_ROLE_KEY are not set');
@@ -253,6 +346,8 @@ function buildEngine(env: Env): {
   } else {
     if (!env.DB) throw new Error('DB_BACKEND=d1 but the DB (D1) binding is missing from wrangler.toml');
     repo = new D1Repository(env.DB, agentId);
+    treasury = new Treasury(new D1LedgerStore(env.DB, agentId), agentId);
+    spendGate = new D1SpendGate(env.DB, agentId, treasury);
     dbConnected = true;
   }
 
@@ -263,6 +358,8 @@ function buildEngine(env: Env): {
     model: env.LLM_MODEL,
     inputUsdPerMTok: env.LLM_INPUT_USD_PER_MTOK ? Number(env.LLM_INPUT_USD_PER_MTOK) : undefined,
     outputUsdPerMTok: env.LLM_OUTPUT_USD_PER_MTOK ? Number(env.LLM_OUTPUT_USD_PER_MTOK) : undefined,
+    // No AI call may run in the Worker without a cost meter attached.
+    requireMeter: true,
   });
   const { tavily, brave } = createSearchProviders({
     tavily: env.TAVILY_API_KEY,
@@ -271,12 +368,23 @@ function buildEngine(env: Env): {
 
   const engine = new AgentEngine(repo, { llm, tavily, brave }, {
     costPolicy: costPolicyFromEnv(env),
-    searchCostUsd: searchCostFromEnv(env),
+    treasury: treasury ?? undefined,
+    // Incident 5 Oct 2026: every paid call is reserved atomically first, and
+    // Survivor's own cycles make NO paid calls unless AUTONOMOUS_PAID_CALLS
+    // is "enabled". Unpriced providers are never called.
+    spendGate: spendGate ?? undefined,
+    spendLimits: spendLimitsFromEnv(env as any),
+    providerPrices: providerPricesFromEnv(env as any),
+    requireMeter: true,
+    // Math.random() experiments never run in production.
+    simulateForecasts: false,
   });
 
   return {
     engine,
     repo,
+    treasury,
+    spendGate,
     tavily,
     brave,
     llm,
@@ -306,18 +414,8 @@ const INCOME_CHANNEL_QUERIES: Record<string, string[]> = {
   'other': ['Zimbabwe small business technology opportunities 2026', 'Zimbabwe online business opportunities services demand 2026'],
 };
 
-async function researchIncomeChannels(env: Env, requestedChannel?: string): Promise<IncomeChannelOpportunity[]> {
-  const { repo, tavily, brave } = buildEngine(env);
-  const balance = balanceFrom(await repo.listTransactions());
-  const survivalStatus = computeSurvivalStatus(balance);
-  const state = await loadEconomyState(repo);
-  const ctx = {
-    state,
-    providers: { tavily, brave },
-    survivalStatus,
-    now: Date.now(),
-    cycleStartedAt: Date.now(),
-  };
+async function researchIncomeChannels(env: Env, ctx: SearchEconomyContext, requestedChannel?: string): Promise<IncomeChannelOpportunity[]> {
+  const { repo } = buildEngine(env);
   const existingRaw = await repo.getKV('income_intelligence');
   const existing: IncomeChannelOpportunity[] = existingRaw ? JSON.parse(existingRaw) : [];
   const found: IncomeChannelOpportunity[] = [...existing];
@@ -350,7 +448,6 @@ async function researchIncomeChannels(env: Env, requestedChannel?: string): Prom
       }
     }
   }
-  ctx.state && await saveEconomyState(repo, ctx.state);
   const bounded = found.sort((a,b) => b.discoveredAt - a.discoveredAt).slice(0, 100);
   await repo.setKV('income_intelligence', JSON.stringify(bounded));
   return bounded;
@@ -366,7 +463,7 @@ async function runCycle(env: Env): Promise<Response> {
     });
     if (!outcome) {
       return json(
-        { ok: false, reason: 'agent is DEAD or cycle aborted', connections },
+        { ok: false, rejected: true, reason: engine.lastRejection ?? 'cycle did not run', connections },
         { status: 409 },
       );
     }
@@ -398,10 +495,8 @@ async function runCycle(env: Env): Promise<Response> {
       connections,
     });
   } catch (e) {
-    return json(
-      { ok: false, error: (e as Error).message, stack: (e as Error).stack?.split('\n').slice(0, 3) },
-      { status: 500 },
-    );
+    console.error('[cycles/run] failed:', (e as Error).stack ?? (e as Error).message);
+    return json({ ok: false, error: (e as Error).message }, { status: 500 });
   }
 }
 
@@ -564,17 +659,45 @@ export default {
     if (req.method === 'OPTIONS') return new Response(null, { status: 204, headers: {
       'access-control-allow-origin': '*',
       'access-control-allow-methods': 'GET, POST, OPTIONS',
-      'access-control-allow-headers': 'content-type, x-trigger-secret, authorization',
+      'access-control-allow-headers': 'content-type, x-trigger-secret, x-admin-secret, authorization',
       'access-control-max-age': '600',
     } });
 
+    /* ---- route policy gate (worker/src/security.ts) -------------------- */
+    // Decided here for every request, before any handler runs.
+    const policy = routePolicy(req.method, url.pathname);
+    if (policy) {
+      if (policy.access === 'ADMIN' && !isAdminRequest(req, env)) {
+        // A signed-in operator is authenticated but not allowed (403), so the
+        // dashboard does not treat it as an expired session and re-prompt.
+        const hasCredentials = Boolean(req.headers.get('authorization') || req.headers.get('x-admin-secret') || req.headers.get('x-trigger-secret'));
+        return json({ ok: false, error: 'admin credential required' }, { status: hasCredentials ? 403 : 401 });
+      }
+      if (policy.access === 'OPERATOR' && !(await requireOperator(req, env))) {
+        return json({ ok: false, error: 'operator authentication required' }, { status: 401 });
+      }
+      if ((policy.paid || policy.financial || policy.external) && req.method !== 'GET') {
+        const { repo: gateRepo } = buildEngine(env);
+        const blocked = await killSwitchBlock(gateRepo);
+        if (blocked) return json({ ok: false, error: blocked, code: 'KILL_SWITCH_ENGAGED' }, { status: 503 });
+      }
+    } else if (req.method !== 'GET') {
+      // Outside the API only static dashboard GETs exist.
+      return json({ ok: false, error: 'not found' }, { status: 404 });
+    }
+
     if (url.pathname === '/auth/login' && req.method === 'POST') {
       try {
+        const { repo } = buildEngine(env);
+        const client = req.headers.get('cf-connecting-ip') ?? 'unknown';
+        const attempts = await takeRateLimit(repo, `login:${client}`, 10, 15 * 60 * 1000);
+        if (!attempts.allowed) {
+          return json({ ok: false, error: 'too many login attempts — try again later' }, { status: 429, headers: { 'retry-after': String(attempts.retryAfterSeconds) } });
+        }
         const body: any = await req.json();
-        if (typeof body?.secret !== 'string' || !env.TRIGGER_SECRET || body.secret !== env.TRIGGER_SECRET) {
+        if (typeof body?.secret !== 'string' || !env.TRIGGER_SECRET || !safeEqual(body.secret, env.TRIGGER_SECRET)) {
           return json({ ok: false, error: 'unauthorized' }, { status: 401 });
         }
-        const { repo } = buildEngine(env);
         const session = await createOperatorSession(repo);
         return json({ ok: true, token: session.token, expiresAt: session.expiresAt });
       } catch (e) {
@@ -597,8 +720,7 @@ export default {
     if (url.pathname === '/admin/discovery/reset' && req.method === 'POST') {
       // Administrative maintenance uses the existing deployment trigger
       // secret rather than exposing a new credential surface.
-      const secret = req.headers.get('x-trigger-secret');
-      if (!env.TRIGGER_SECRET || secret !== env.TRIGGER_SECRET) {
+      if (!isAdminRequest(req, env)) {
         return json({ ok: false, error: 'unauthorized' }, { status: 401 });
       }
       try {
@@ -629,8 +751,7 @@ export default {
     }
 
     if (url.pathname === '/admin/search/reset' && req.method === 'POST') {
-      const secret = req.headers.get('x-trigger-secret');
-      if (!env.TRIGGER_SECRET || secret !== env.TRIGGER_SECRET) {
+      if (!isAdminRequest(req, env)) {
         return json({ ok: false, error: 'unauthorized' }, { status: 401 });
       }
       try {
@@ -849,8 +970,7 @@ export default {
     }
 
     if (url.pathname === '/payments/finivex/payment-link' && req.method === 'POST') {
-      const secret = req.headers.get('x-trigger-secret');
-      if (!env.TRIGGER_SECRET || secret !== env.TRIGGER_SECRET) return json({ ok: false, error: 'unauthorized' }, { status: 401 });
+      if (!isAdminRequest(req, env)) return json({ ok: false, error: 'unauthorized' }, { status: 401 });
       let body: any;
       try { body = await req.json(); } catch { return json({ ok: false, error: 'invalid JSON body' }, { status: 400 }); }
       const amount = body?.amount;
@@ -878,8 +998,7 @@ export default {
     }
 
     if (url.pathname === '/payments/finivex/payment-status' && req.method === 'GET') {
-      const secret = req.headers.get('x-trigger-secret');
-      if (!env.TRIGGER_SECRET || secret !== env.TRIGGER_SECRET) return json({ ok: false, error: 'unauthorized' }, { status: 401 });
+      if (!isAdminRequest(req, env)) return json({ ok: false, error: 'unauthorized' }, { status: 401 });
       const transactionId = url.searchParams.get('transactionId')?.trim() ?? '';
       if (!transactionId) return json({ ok: false, error: 'transactionId is required' }, { status: 400 });
       try {
@@ -904,8 +1023,7 @@ export default {
     }
 
     if (url.pathname === '/payments/ecocash/sandbox-charge' && req.method === 'POST') {
-      const secret = req.headers.get('x-trigger-secret');
-      if (!env.TRIGGER_SECRET || secret !== env.TRIGGER_SECRET) {
+      if (!isAdminRequest(req, env)) {
         return json({ ok: false, error: 'unauthorized' }, { status: 401 });
       }
       let body: any;
@@ -983,8 +1101,7 @@ export default {
 
 
     if (url.pathname === '/payments/ecocash/sandbox-lookup' && req.method === 'GET') {
-      const secret = req.headers.get('x-trigger-secret');
-      if (!env.TRIGGER_SECRET || secret !== env.TRIGGER_SECRET) {
+      if (!isAdminRequest(req, env)) {
         return json({ ok: false, error: 'unauthorized' }, { status: 401 });
       }
 
@@ -1109,7 +1226,11 @@ export default {
       try {
         const { repo } = buildEngine(env);
         const raw = await repo.getKV('runtime:last_cycle');
-        if (raw) lastCycle = JSON.parse(raw) as Record<string, unknown>;
+        if (raw) {
+          // Public endpoint: timing and status only, never money.
+          const parsed = JSON.parse(raw) as Record<string, unknown>;
+          lastCycle = { at: parsed.at, cycleIndex: parsed.cycleIndex, status: parsed.status, trigger: parsed.trigger, rejected: parsed.rejected };
+        }
       } catch {
         // Health remains liveness-first: an unavailable heartbeat should not
         // turn the Worker into a 500 response.
@@ -1131,6 +1252,8 @@ export default {
             'payment_intents',
             'payment_provider_events',
             'revenue_verifications',
+            'survivor_runs',
+            'spend_authorizations',
           ];
           const placeholders = requiredTables.map(() => '?').join(',');
           const rows = await env.DB
@@ -1144,6 +1267,17 @@ export default {
             await env.DB.prepare('SELECT ledger FROM transactions LIMIT 0').all();
           } catch {
             missingTables.push('transactions.ledger (run migrations/0019_real_treasury.sql)');
+          }
+          try {
+            await env.DB.prepare('SELECT run_id, kind, idempotency_key FROM transactions LIMIT 0').all();
+            await env.DB.prepare('SELECT provenance FROM agent_memory LIMIT 0').all();
+          } catch {
+            missingTables.push('truthful ledger columns (run migrations/0022_truthful_ledger.sql)');
+          }
+          try {
+            await env.DB.prepare('SELECT primary_problem FROM prospect_intelligence LIMIT 0').all();
+          } catch {
+            missingTables.push('prospect_intelligence.primary_problem (run migrations/0021_prospect_problem_persistence.sql)');
           }
           schemaReady = missingTables.length === 0;
         } catch {
@@ -1174,6 +1308,12 @@ export default {
           db: { backend, connected: backend === 'supabase' ? Boolean(env.SUPABASE_URL && env.SUPABASE_SERVICE_ROLE_KEY) : Boolean(env.DB) },
           llm: Boolean(env.ANTHROPIC_API_KEY || env.OPENAI_API_KEY || env.GEMINI_API_KEY),
           search: Boolean(env.TAVILY_API_KEY || env.BRAVE_API_KEY),
+          spending: {
+            // Containment status (incident 5 Oct 2026). No secrets.
+            autonomousPaidCalls: spendLimitsFromEnv(env as any).autonomousPaidCalls,
+            tavilyPriced: providerPricesFromEnv(env as any).tavilyUsdPerCredit !== undefined,
+            bravePriced: providerPricesFromEnv(env as any).braveUsdPerQuery !== undefined,
+          },
           payments: {
             sandboxConfigured: ecoCashStatus(ecoCashConfig(env)).configured,
             finivexConfigured: finivexStatus(finivexConfig(env)).configured,
@@ -1194,8 +1334,11 @@ export default {
           repo.listEvents(),
         ]);
         const balance = balanceFrom(txs);
+        const { treasury } = buildEngine(env);
         return json({
           ok: true,
+          run: treasury ? await treasury.snapshot() : null,
+          killSwitch: await readKillSwitch(repo),
           agent: {
             id: agent.id,
             status: agent.status,
@@ -1319,10 +1462,13 @@ export default {
 
         const moneyMetrics = computeMoneyMetrics(prospects, offers, realRevenue);
 
+        const { treasury: stateTreasury } = buildEngine(env);
         return json({
           ok: true,
           fetchedAt: new Date().toISOString(),
           agent,
+          run: stateTreasury ? await stateTreasury.snapshot() : null,
+          killSwitch: await readKillSwitch(repo),
           survivalScore,
           actionApprovals,
           economicEfficiency: {
@@ -1391,17 +1537,14 @@ export default {
           return json({ ok: false, error: 'unknown income channel' }, { status: 400 });
         }
 
-        const { repo, tavily, brave } = buildEngine(env);
+        const built = buildEngine(env);
+        const { repo } = built;
         const entries = await repo.listRealRevenue();
         const memory = buildEconomicMemory(entries);
-        const state = await loadEconomyState(repo);
-        const ctx = {
-          state,
-          providers: { tavily, brave },
-          survivalStatus: computeSurvivalStatus(balanceFrom(await repo.listTransactions())),
-          now: Date.now(),
-          cycleStartedAt: Date.now(),
-        };
+        const session = await openPaidSession(env, built, `income strategy research${requested ? ` (${requested})` : ''}`);
+        if (session instanceof Response) return session;
+        const { ctx } = session;
+        try {
 
         const evidence: Array<{ channel: string; title: string; description: string; sourceUrls: string[] }> = [];
         const strategiesOut: Array<any> = [];
@@ -1477,7 +1620,6 @@ export default {
           }
         }
 
-        await saveEconomyState(repo, ctx.state);
         const forex = buildForexResearchPackage(forexFindings);
 
         return json({
@@ -1494,7 +1636,11 @@ export default {
             autonomousPayments: false,
             academicDishonesty: false,
           },
+          cost: session.meter.summary(),
         });
+        } finally {
+          await session.close();
+        }
       } catch (e) {
         return json({ ok: false, error: (e as Error).message }, { status: 500 });
       }
@@ -1625,8 +1771,16 @@ export default {
         if (requestedChannel && !INCOME_CHANNEL_QUERIES[requestedChannel]) {
           return json({ ok: false, error: `unsupported income channel: ${requestedChannel}` }, { status: 400 });
         }
-        const opportunities = await researchIncomeChannels(env, requestedChannel);
-        return json({ ok: true, opportunities, researchedAt: new Date().toISOString() });
+        const built = buildEngine(env);
+        const session = await openPaidSession(env, built, `income channel research${requestedChannel ? ` (${requestedChannel})` : ''}`);
+        if (session instanceof Response) return session;
+        let opportunities: IncomeChannelOpportunity[];
+        try {
+          opportunities = await researchIncomeChannels(env, session.ctx, requestedChannel);
+        } finally {
+          await session.close();
+        }
+        return json({ ok: true, opportunities, researchedAt: new Date().toISOString(), cost: session.meter.summary() });
       } catch (e) {
         return json({ ok: false, error: (e as Error).message }, { status: 500 });
       }
@@ -1643,7 +1797,8 @@ export default {
       const region = typeof body?.region === 'string' && body.region.trim() ? body.region.trim() : undefined;
       const searchQuery = typeof body?.searchQuery === 'string' && body.searchQuery.trim() ? body.searchQuery.trim() : undefined;
       try {
-        const { repo, tavily, brave } = buildEngine(env);
+        const built = buildEngine(env);
+        const { repo, tavily, brave } = built;
         if (!tavily?.connected && !brave?.connected) return json({ ok: false, error: 'no live search provider connected — connect Tavily or Brave before discovering real businesses' }, { status: 503 });
         const opportunities = (await repo.listOpportunities()).filter((o) => o.researchStage !== 'UNDISCOVERED');
         const directAcquisitionOpportunity: Opportunity = {
@@ -1723,11 +1878,15 @@ export default {
         // Dedupe against EVERY saved business, not just this opportunity's —
         // the cron and this button file leads under different opportunities.
         const existingNames = existing.map((p) => p.businessName);
-        const balance = balanceFrom(await repo.listTransactions());
-        const state = await loadEconomyState(repo);
         const now = Date.now();
-        const ctx = { state, providers: { tavily, brave }, survivalStatus: computeSurvivalStatus(balance), now, cycleStartedAt: now };
-        const discovered = await discoverProspects(ctx, opportunity, model, existingNames, undefined, now, { region, searchQuery });
+        const session = await openPaidSession(env, built, `prospect discovery (${searchQuery ?? 'auto'})`);
+        if (session instanceof Response) return session;
+        let discovered: Awaited<ReturnType<typeof discoverProspects>>;
+        try {
+          discovered = await discoverProspects(session.ctx, opportunity, model, existingNames, undefined, now, { region, searchQuery });
+        } finally {
+          await session.close();
+        }
         // Save straight away. Identity/contact verification used to run here,
         // inline — 2 more searches per business, one after another — which
         // pushed the request past the dashboard's timeout, so the button
@@ -1754,8 +1913,7 @@ export default {
             });
           }
         }
-        await saveEconomyState(repo, ctx.state);
-        return json({ ok: true, opportunityId: opportunity.id, opportunityName: opportunity.name, directAcquisitionMode: opportunity.id === 'nwt-dev-local-business-acquisition', region: region || opportunity.geographicRelevance[0] || 'Zimbabwe', searchQuery: searchQuery || null, discovered: discovered.prospects.length, saved: accepted.length, verified: 0, verificationQueued: accepted.length, rejectedUnverifiedOrConflicting: 0, rejectedNotABusiness: discovered.rejected, queriesRun: discovered.queriesRun, sourcesCount: discovered.sourcesCount, cacheHits: discovered.cacheHits, budgetExceeded: discovered.budgetExceeded, prospects: accepted });
+        return json({ ok: true, cost: session.meter.summary(), opportunityId: opportunity.id, opportunityName: opportunity.name, directAcquisitionMode: opportunity.id === 'nwt-dev-local-business-acquisition', region: region || opportunity.geographicRelevance[0] || 'Zimbabwe', searchQuery: searchQuery || null, discovered: discovered.prospects.length, saved: accepted.length, verified: 0, verificationQueued: accepted.length, rejectedUnverifiedOrConflicting: 0, rejectedNotABusiness: discovered.rejected, queriesRun: discovered.queriesRun, sourcesCount: discovered.sourcesCount, cacheHits: discovered.cacheHits, budgetExceeded: discovered.budgetExceeded, prospects: accepted });
       } catch (e) { return json({ ok: false, error: (e as Error).message }, { status: 500 }); }
     }
     if (url.pathname === '/offers/generate' && req.method === 'POST') {
@@ -1972,7 +2130,8 @@ export default {
         return json({ ok: false, error: 'prospectId is required' }, { status: 400 });
       }
       try {
-        const { repo, tavily, brave } = buildEngine(env);
+        const built = buildEngine(env);
+        const { repo, tavily, brave } = built;
         if (!tavily?.connected && !brave?.connected) {
           return json({ ok: false, error: 'no live search provider connected — nothing real to verify' }, { status: 503 });
         }
@@ -1981,17 +2140,14 @@ export default {
         if (!prospect) return json({ ok: false, error: `no prospect found with id ${prospectId}` }, { status: 404 });
 
         const now = Date.now();
-        const balance = balanceFrom(await repo.listTransactions());
-        const state = await loadEconomyState(repo);
-        const ctx = {
-          state,
-          providers: { tavily, brave },
-          survivalStatus: computeSurvivalStatus(balance),
-          now,
-          cycleStartedAt: now,
-        };
-        const verified = await verifyProspect(ctx, prospect, now);
-        await saveEconomyState(repo, ctx.state);
+        const session = await openPaidSession(env, built, `verification of ${prospect.businessName}`);
+        if (session instanceof Response) return session;
+        let verified: Awaited<ReturnType<typeof verifyProspect>>;
+        try {
+          verified = await verifyProspect(session.ctx, prospect, now);
+        } finally {
+          await session.close();
+        }
         await repo.upsertProspects([verified]);
         await repo.appendProspectInteraction({
           id: `pint_${crypto.randomUUID()}`,
@@ -2017,7 +2173,8 @@ export default {
         return json({ ok: false, error: 'prospectId is required' }, { status: 400 });
       }
       try {
-        const { repo, tavily, brave, llm } = buildEngine(env);
+        const built = buildEngine(env);
+        const { repo, tavily, brave, llm } = built;
         if (!tavily?.connected && !brave?.connected) {
           return json({ ok: false, error: 'no live search provider connected — nothing real to research' }, { status: 503 });
         }
@@ -2029,30 +2186,19 @@ export default {
         if (!opportunity) return json({ ok: false, error: 'linked opportunity not found' }, { status: 404 });
 
         const now = Date.now();
-        const balance = balanceFrom(await repo.listTransactions());
-        const state = await loadEconomyState(repo);
-        const meter = await openManualCostSession(repo, llm);
-        const ctx = {
-          state,
-          providers: { tavily, brave },
-          survivalStatus: computeSurvivalStatus(balance),
-          now,
-          cycleStartedAt: now,
-          meter,
-          searchCostUsd: searchCostFromEnv(env),
-        };
+        const session = await openPaidSession(env, built, `full research of ${prospect.businessName}`);
+        if (session instanceof Response) return session;
 
         let packageResult: Awaited<ReturnType<typeof runUnifiedProspectResearch>>;
         try {
           const outcomeStats = computeProblemOutcomeStats(prospects, await repo.listProspectIntelligence());
-          packageResult = await runUnifiedProspectResearch(ctx, llm, prospect, opportunity, now, outcomeStats);
+          packageResult = await runUnifiedProspectResearch(session.ctx, llm, prospect, opportunity, now, outcomeStats);
         } finally {
-          await closeManualCostSession(repo, llm, meter, `full research of ${prospect.businessName}`);
+          await session.close();
         }
         await repo.upsertProspects([packageResult.prospect]);
         await repo.upsertProspectIntelligence(packageResult.intelligence);
         await repo.upsertMarketPriceResearch(packageResult.marketPrice);
-        await saveEconomyState(repo, ctx.state);
         await repo.appendProspectInteraction({
           id: `pint_${crypto.randomUUID()}`,
           prospectId,
@@ -2083,7 +2229,8 @@ export default {
         return json({ ok: false, error: 'prospectId is required' }, { status: 400 });
       }
       try {
-        const { repo, tavily, brave, llm } = buildEngine(env);
+        const built = buildEngine(env);
+        const { repo, tavily, brave, llm } = built;
         if (!tavily?.connected && !brave?.connected) {
           return json({ ok: false, error: 'no live search provider connected — nothing real to research' }, { status: 503 });
         }
@@ -2095,31 +2242,22 @@ export default {
         // (justified refresh) so it isn't silently deferred by the
         // LOW_VALUE_DEFERRED gate that protects the automatic cycle.
         const now = Date.now();
-        const balance = balanceFrom(await repo.listTransactions());
-        const state = await loadEconomyState(repo);
-        const meter = await openManualCostSession(repo, llm);
-        const ctx = {
-          state,
-          providers: { tavily, brave },
-          survivalStatus: computeSurvivalStatus(balance),
-          now,
-          cycleStartedAt: now,
-          meter,
-          searchCostUsd: searchCostFromEnv(env),
-        };
+        // (Was an undefined identifier here: every call threw a ReferenceError.)
+        const problemOutcomeStats = computeProblemOutcomeStats(prospects, await repo.listProspectIntelligence());
+        const session = await openPaidSession(env, built, `deep research of ${prospect.businessName}`);
+        if (session instanceof Response) return session;
         // Manual deep research starts with identity/contact consolidation so
         // the research is performed against the best-supported business name,
         // location and public contact rather than an unverified discovery label.
         let verified: Awaited<ReturnType<typeof verifyProspect>>;
         let intel: Awaited<ReturnType<typeof researchProspect>>;
         try {
-          verified = await verifyProspect(ctx, prospect, now);
+          verified = await verifyProspect(session.ctx, prospect, now);
           await repo.upsertProspects([verified]);
-          intel = await researchProspect(ctx, llm, verified, now, { statusChanged: true, outcomeStats: problemOutcomeStats });
+          intel = await researchProspect(session.ctx, llm, verified, now, { statusChanged: true, outcomeStats: problemOutcomeStats });
         } finally {
-          await closeManualCostSession(repo, llm, meter, `deep research of ${prospect.businessName}`);
+          await session.close();
         }
-        await saveEconomyState(repo, ctx.state);
         await repo.upsertProspectIntelligence(intel);
         await repo.appendProspectInteraction({
           id: `pint_${crypto.randomUUID()}`,
@@ -2355,6 +2493,32 @@ export default {
           verification.reason, verification.evidence, verification.checked_at, verification.created_at,
         ).run();
 
+        // REVENUE_PENDING (the operator's claim) → verification → ledger
+        // credit. The credit uses the amount the PROVIDER confirmed, and the
+        // provider's transaction id is the idempotency key, so the same
+        // payment can never be credited twice. A dead/ended run refuses it.
+        let ledger: unknown = null;
+        if (decision.status === 'VERIFIED' && decision.verifiedAmount !== undefined) {
+          const { treasury } = buildEngine(env);
+          if (!treasury) {
+            ledger = { status: 'REJECTED', reason: 'ledger unavailable on this backend' };
+          } else {
+            const credited = await treasury.confirmRevenue({
+              verifier: 'FINIVEX_PROVIDER',
+              verificationId: verification.id,
+              externalReference: transactionId,
+              amount: decision.verifiedAmount,
+              currency: decision.verifiedCurrency ?? entry.currency,
+              paidAt: entry.date,
+              claimId: entry.id,
+              description: `Customer payment: ${entry.productService} (${entry.prospectName || entry.prospectId}) — Finivex ${transactionId}`,
+            });
+            ledger = credited.payment.status === 'REJECTED'
+              ? { status: 'REJECTED', code: credited.payment.code, reason: credited.payment.reason }
+              : { status: credited.payment.status, entryId: credited.payment.entry.id, balance: credited.payment.status === 'POSTED' ? credited.payment.balance : undefined };
+          }
+        }
+
         // IMPORTANT: a real-revenue entry is not autonomous evidence merely
         // because an operator recorded it. Only an independently VERIFIED
         // payment may create the learning event / memory that the autonomous
@@ -2385,7 +2549,7 @@ export default {
                 ),
                 opp.category,
               );
-              const updatedMemory = foldRealRevenueIntoMemory(memory, entry, opp, categoryStats, Date.now());
+              const updatedMemory = foldRealRevenueIntoMemory(realExperience(memory), entry, opp, categoryStats, Date.now());
               for (const kind of ['opportunity', 'category'] as const) {
                 const updated = updatedMemory.find((m) => m.kind === kind && m.refId === (kind === 'opportunity' ? opp.id : opp.category));
                 if (updated) await repo.upsertMemory(updated);
@@ -2398,6 +2562,7 @@ export default {
           ok: true,
           verification,
           countsAsVerifiedRevenue: decision.status === 'VERIFIED',
+          ledger,
         }, { status: decision.status === 'VERIFIED' ? 200 : decision.status === 'PENDING' ? 202 : 409 });
       } catch (e) {
         return json({ ok: false, error: (e as Error).message }, { status: 502 });
@@ -2526,46 +2691,28 @@ export default {
         const policy: TreasuryPolicy = rawPolicy ? { ...DEFAULT_TREASURY_POLICY, ...JSON.parse(rawPolicy) } : DEFAULT_TREASURY_POLICY;
         const rawRequests = await repo.getKV('treasury:spend-requests');
         const requests: SpendRequest[] = rawRequests ? JSON.parse(rawRequests) : [];
-        return json({ ok: true, treasury: calculateTreasurySnapshot(transactions, policy), spendRequests: requests.slice(-100) });
+        const { treasury } = buildEngine(env);
+        return json({
+          ok: true,
+          treasury: calculateTreasurySnapshot(transactions, policy),
+          run: treasury ? await treasury.snapshot() : null,
+          killSwitch: await readKillSwitch(repo),
+          spendRequests: requests.slice(-100),
+        });
       } catch (e) {
         return json({ ok: false, error: (e as Error).message }, { status: 500 });
       }
     }
 
     if (url.pathname === '/treasury/record-capital' && req.method === 'POST') {
-      if (!(await requireOperator(req, env))) return json({ ok: false, error: 'operator authentication required' }, { status: 401 });
-      // Human records money already allocated to Survivor's operating budget.
-      // This is accounting only: no bank/EcoCash/Finivex transfer is initiated.
-      let body: any;
-      try { body = await req.json(); } catch { return json({ ok: false, error: 'invalid JSON body' }, { status: 400 }); }
-      if (typeof body?.amount !== 'number' || !Number.isFinite(body.amount) || body.amount <= 0) {
-        return json({ ok: false, error: 'amount must be a positive number' }, { status: 400 });
-      }
-      try {
-        const { repo } = buildEngine(env);
-        const transactions = await repo.listTransactions();
-        const balanceBefore = transactions.reduce((sum, tx) => sum + tx.amount, 0);
-        const tx = {
-          id: `tx_${crypto.randomUUID()}`,
-          type: 'DEPOSIT' as const,
-          amount: body.amount,
-          description: `[TREASURY CAPITAL] ${typeof body.description === 'string' && body.description.trim() ? body.description.trim() : 'Operating budget allocated to Survivor'}`,
-          balanceAfter: balanceBefore + body.amount,
-          createdAt: Date.now(),
-        };
-        await repo.appendTransaction(tx);
-        await repo.appendEvent({
-          id: `evt_${crypto.randomUUID()}`,
-          type: 'WALLET',
-          message: `Treasury capital recorded: ${body.amount.toFixed(2)}. No transfer was initiated by Survivor.`,
-          createdAt: Date.now(),
-        });
-        const rawPolicy = await repo.getKV('treasury:policy');
-        const policy: TreasuryPolicy = rawPolicy ? { ...DEFAULT_TREASURY_POLICY, ...JSON.parse(rawPolicy) } : DEFAULT_TREASURY_POLICY;
-        return json({ ok: true, transaction: tx, treasury: calculateTreasurySnapshot(await repo.listTransactions(), policy) });
-      } catch (e) {
-        return json({ ok: false, error: (e as Error).message }, { status: 500 });
-      }
+      // Retired: depositing into an existing run would let money "revive" or
+      // top up an experiment. Capital now enters only as a new run's starting
+      // capital (POST /runs, admin).
+      return json({
+        ok: false,
+        code: 'CAPITAL_ONLY_VIA_NEW_RUN',
+        error: 'Capital cannot be added to an existing Survivor run. Create a new run with its own starting capital (POST /runs, admin).',
+      }, { status: 410 });
     }
 
     if (url.pathname === '/treasury/policy' && req.method === 'POST') {
@@ -2710,8 +2857,18 @@ export default {
         if (request.decision === 'BLOCKED' || request.status === 'REJECTED') return json({ ok: false, error: 'blocked/rejected spend cannot be recorded' }, { status: 403 });
         if (request.status === 'RECORDED') return json({ ok: false, error: 'spend request is already recorded' }, { status: 409 });
         if (request.status !== 'APPROVED') return json({ ok: false, error: 'spend request must be approved before recording payment' }, { status: 403 });
-        const tx = createConfirmedExpense(request, await repo.listTransactions());
-        await repo.appendTransaction(tx);
+        const { treasury } = buildEngine(env);
+        if (!treasury) return json({ ok: false, error: 'ledger unavailable on this backend' }, { status: 503 });
+        const posted = await treasury.recordOperatorExpense({
+          requestId: request.id,
+          amount: request.amount,
+          vendor: request.vendor,
+          purpose: request.purpose,
+          receiptReference: typeof body.receiptReference === 'string' ? body.receiptReference : undefined,
+          recordedBy: 'operator',
+        });
+        if (posted.status === 'REJECTED') return json({ ok: false, error: posted.reason, code: posted.code }, { status: 409 });
+        const tx = posted.entry;
         request.status = 'RECORDED';
         await repo.setKV('treasury:spend-requests', JSON.stringify(requests));
         await repo.appendEvent({
@@ -2720,7 +2877,7 @@ export default {
           message: `Confirmed expense recorded for ${request.vendor}: ${request.amount.toFixed(2)}. No payment was initiated by Survivor.`,
           createdAt: Date.now(),
         });
-        return json({ ok: true, transaction: tx, treasury: calculateTreasurySnapshot(await repo.listTransactions()) });
+        return json({ ok: true, transaction: tx, duplicate: posted.status === 'DUPLICATE', run: await treasury.snapshot(), treasury: calculateTreasurySnapshot(await repo.listTransactions()) });
       } catch (e) {
         return json({ ok: false, error: (e as Error).message }, { status: 500 });
       }
@@ -2862,9 +3019,93 @@ export default {
       }
     }
 
+    /* ---------------------- runs, ledger, kill switch ---------------------- */
+
+    if (url.pathname === '/runs' && req.method === 'GET') {
+      const { treasury } = buildEngine(env);
+      if (!treasury) return json({ ok: false, error: 'ledger unavailable on this backend' }, { status: 503 });
+      return json({ ok: true, current: await treasury.snapshot(), runs: await treasury.listRuns() });
+    }
+
+    if (url.pathname === '/runs' && req.method === 'POST') {
+      // The only way capital enters Survivor: an explicit new experiment.
+      let body: any;
+      try { body = await req.json(); } catch { return json({ ok: false, error: 'invalid JSON body' }, { status: 400 }); }
+      const environment: RunEnvironment | null = ['PRODUCTION', 'SANDBOX', 'TEST'].includes(body?.environment) ? body.environment : null;
+      if (!environment) return json({ ok: false, error: 'environment must be PRODUCTION, SANDBOX or TEST' }, { status: 400 });
+      if (typeof body?.startingCapital !== 'number') return json({ ok: false, error: 'startingCapital (number) is required' }, { status: 400 });
+      try {
+        const { treasury, repo } = buildEngine(env);
+        if (!treasury) return json({ ok: false, error: 'ledger unavailable on this backend' }, { status: 503 });
+        const created = await treasury.createRun({
+          environment,
+          startingCapital: body.startingCapital,
+          deathThreshold: typeof body.deathThreshold === 'number' ? body.deathThreshold : 0,
+          depletedThreshold: typeof body.depletedThreshold === 'number' ? body.depletedThreshold : undefined,
+          currency: typeof body.currency === 'string' ? body.currency : 'USD',
+          label: typeof body.label === 'string' ? body.label : undefined,
+          endOpenRunReason: typeof body.endOpenRunReason === 'string' ? body.endOpenRunReason : undefined,
+          createdBy: 'admin',
+        });
+        await repo.updateAgent({ startingCapital: created.run.startingCapital, survivalThreshold: created.run.deathThreshold });
+        await repo.appendEvent({
+          id: `evt_${crypto.randomUUID()}`,
+          type: 'WALLET',
+          message: `New ${created.run.environment} run ${created.run.id} started with ${created.run.startingCapital.toFixed(2)} ${created.run.currency}; it dies at ${created.run.deathThreshold.toFixed(2)}.`,
+          createdAt: Date.now(),
+        });
+        return json({ ok: true, run: created.run, capital: created.capital, snapshot: await treasury.snapshot(created.run.id) });
+      } catch (e) {
+        return json({ ok: false, error: (e as Error).message }, { status: 409 });
+      }
+    }
+
+    if (url.pathname === '/runs/end' && req.method === 'POST') {
+      let body: any;
+      try { body = await req.json(); } catch { return json({ ok: false, error: 'invalid JSON body' }, { status: 400 }); }
+      if (typeof body?.runId !== 'string' || typeof body?.reason !== 'string' || !body.reason.trim()) {
+        return json({ ok: false, error: 'runId and reason are required' }, { status: 400 });
+      }
+      const { treasury, repo } = buildEngine(env);
+      if (!treasury) return json({ ok: false, error: 'ledger unavailable on this backend' }, { status: 503 });
+      const ended = await treasury.endRun(body.runId, body.reason.trim());
+      if (!ended) return json({ ok: false, error: 'run not found or already closed' }, { status: 409 });
+      await repo.appendEvent({ id: `evt_${crypto.randomUUID()}`, type: 'WARNING', message: `Run ${body.runId} ended by admin: ${body.reason.trim()}`, createdAt: Date.now() });
+      return json({ ok: true, snapshot: await treasury.snapshot(body.runId) });
+    }
+
+    if (url.pathname === '/ledger' && req.method === 'GET') {
+      const { treasury } = buildEngine(env);
+      if (!treasury) return json({ ok: false, error: 'ledger unavailable on this backend' }, { status: 503 });
+      const runId = url.searchParams.get('runId') ?? undefined;
+      return json({ ok: true, snapshot: await treasury.snapshot(runId), entries: await treasury.entries(runId) });
+    }
+
+    if (url.pathname === '/control/kill-switch' && req.method === 'GET') {
+      const { repo } = buildEngine(env);
+      return json({ ok: true, killSwitch: await readKillSwitch(repo) });
+    }
+
+    if ((url.pathname === '/control/kill-switch/engage' || url.pathname === '/control/kill-switch/release') && req.method === 'POST') {
+      let body: any = {};
+      try { body = await req.json(); } catch { body = {}; }
+      const engage = url.pathname.endsWith('/engage');
+      const reason = typeof body?.reason === 'string' && body.reason.trim() ? body.reason.trim() : (engage ? 'emergency stop' : 'released');
+      const { repo } = buildEngine(env);
+      const state = await setKillSwitch(repo, engage, reason, engage ? 'operator' : 'admin');
+      await repo.appendEvent({
+        id: `evt_${crypto.randomUUID()}`,
+        type: 'WARNING',
+        message: engage
+          ? `KILL SWITCH ENGAGED: ${reason}. Cycles, paid AI/search, financial and external actions are stopped.`
+          : `Kill switch released by admin: ${reason}.`,
+        createdAt: Date.now(),
+      });
+      return json({ ok: true, killSwitch: state });
+    }
+
     if (url.pathname === '/cycles/run' && req.method === 'POST') {
-      const secret = req.headers.get('x-trigger-secret');
-      if (!env.TRIGGER_SECRET || secret !== env.TRIGGER_SECRET) {
+      if (!isAdminRequest(req, env)) {
         return json({ ok: false, error: 'unauthorized' }, { status: 401 });
       }
       return runCycle(env);
@@ -2885,13 +3126,22 @@ export default {
   },
 
   async scheduled(_event: ScheduledController, env: Env, ctx: ExecutionContext): Promise<void> {
-    // The cron fires regardless of agent status; runCycle no-ops safely if DEAD.
+    // The cron fires regardless of status; runCycle refuses (and spends
+    // nothing) when the kill switch is engaged or the run is not alive.
     ctx.waitUntil(
       (async () => {
         try {
           const { engine, repo } = buildEngine(env);
           await engine.ensureSeeded();
           const outcome = await engine.runCycle({ useLive: true, stepDelay: 0 });
+          if (!outcome && engine.lastRejection) {
+            await repo.setKV('runtime:last_cycle', JSON.stringify({
+              at: new Date().toISOString(),
+              status: 'REJECTED',
+              rejected: engine.lastRejection.split(':')[0],
+              trigger: 'cron',
+            }));
+          }
           if (outcome) {
             try {
               await repo.setKV('runtime:last_cycle', JSON.stringify({
@@ -2908,7 +3158,7 @@ export default {
           console.log(
             outcome
               ? `[cron] cycle ${outcome.cycle.index} complete — status ${outcome.finalStatus}, balance ${outcome.balance.toFixed(2)}`
-              : '[cron] no cycle executed (agent unavailable/dead or cycle lock not acquired)',
+              : `[cron] no cycle executed: ${engine.lastRejection ?? 'unknown reason'}`,
           );
         } catch (e) {
           console.error('[cron] cycle failed:', (e as Error).message);

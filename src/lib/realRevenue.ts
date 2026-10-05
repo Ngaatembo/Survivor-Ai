@@ -77,12 +77,12 @@ export function generateLearningEvent(
   };
 }
 
-/** Fold a real_revenue entry into the EXISTING per-opportunity and
- *  per-category memory entries as a note — never touching the
- *  tests/spent/revenue/conclusion fields, which are simulated-economics
- *  only (mixing real dollars into those would corrupt wallet/experiment
- *  bookkeeping the rest of the app relies on). Creates the memory entries
- *  if they don't exist yet, same shape as services/memory.ts. */
+/** Fold a VERIFIED real_revenue entry into the REAL_VERIFIED per-opportunity
+ *  and per-category memory entries: a note plus the real money received and
+ *  spent. Simulated memory (provenance SIMULATED / SIMULATED_LEGACY) is never
+ *  read or modified here, so real dollars and Math.random() results cannot
+ *  mix. Creates the real entries if they don't exist yet. Returns only the
+ *  real entries. */
 export function foldRealRevenueIntoMemory(
   memory: MemoryEntry[],
   entry: RealRevenueEntry,
@@ -90,7 +90,7 @@ export function foldRealRevenueIntoMemory(
   categoryStats?: CategoryRealWorldStats,
   now: number = Date.now(),
 ): MemoryEntry[] {
-  const next = [...memory];
+  const next = memory.filter((m) => m.provenance === 'REAL_VERIFIED');
   const note = `[REAL] $${entry.amountReceived.toFixed(2)} received (profit $${entry.profit.toFixed(2)}) from ${entry.prospectName} via ${entry.acquisitionChannel}, ${entry.daysFromDiscoveryToPayment}d discovery-to-payment.${entry.notes ? ` Notes/objections: ${entry.notes}` : ''}`;
   // Phase 5 §19 — once this category has a real conversion-rate track
   // record, note it directly so a future decision/memory read doesn't
@@ -118,12 +118,20 @@ export function foldRealRevenueIntoMemory(
         conclusion: 'UNTESTED',
         notes: [],
         updatedAt: now,
+        provenance: 'REAL_VERIFIED',
       };
       next.push(mem);
     }
     const idx = next.findIndex((m) => m.kind === kind && m.refId === refId);
     const newNotes = conversionNote ? [conversionNote, note, ...mem.notes] : [note, ...mem.notes];
-    next[idx] = { ...mem, notes: newNotes.slice(0, 12), updatedAt: now };
+    next[idx] = {
+      ...mem,
+      revenue: Math.round((mem.revenue + entry.amountReceived) * 100) / 100,
+      spent: Math.round((mem.spent + (entry.costs ?? 0)) * 100) / 100,
+      notes: newNotes.slice(0, 12),
+      updatedAt: now,
+      provenance: 'REAL_VERIFIED',
+    };
   }
   return next;
 }

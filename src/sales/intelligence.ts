@@ -7,7 +7,7 @@
  *   UNKNOWN   — something the salesperson still has to find out
  * ========================================================================== */
 
-import type { Prospect, ProspectIntelligence } from '../types';
+import type { Prospect, ProspectIntelligence, ProspectProblemType } from '../types';
 import { displayName, parseZimPhone, prospectPhone } from '../lib/whatsappOutreach';
 import { quoteOffer } from './pricing';
 import {
@@ -112,15 +112,17 @@ export function websiteClaimAllowed(p: Prospect): boolean {
 /** Final gate before Survivor may generate customer-facing commercial material.
  * Verification alone is not enough: the current business-specific diagnosis and
  * any negative website claim must also be evidence-backed. */
-export function commercialActionAllowed(p: Prospect, intelligence?: ProspectIntelligence): boolean {
+export function commercialActionAllowed(p: Prospect, intelligence?: ProspectIntelligence, offerText?: string): boolean {
   if (!isVerified(p)) return false;
   if (!problemEvidenceAllowed(p, intelligence)) return false;
-  if (!offerFitsProblem(p, intelligence)) return false;
+  // The concrete offer text (when the caller has one) must itself fit the
+  // evidenced problem — previously callers passed it but it was ignored.
+  if (!offerFitsProblem(p, intelligence, offerText)) return false;
   if ((p.websitePresence === 'NONE_FOUND' || p.websitePresence === 'SOCIAL_ONLY') && !websiteClaimAllowed(p)) return false;
   return true;
 }
 
-const PROBLEM_OFFER_FIT: Record<ProspectProblem['type'], RegExp> = {
+const PROBLEM_OFFER_FIT: Record<ProspectProblemType, RegExp> = {
   DISCOVERABILITY: /website|seo|online presence|google|listing|visibility|landing/i,
   TRUST: /website|brand|testimonial|review|trust|portfolio|online presence/i,
   CONVERSION: /website|landing|conversion|cta|sales page|funnel/i,
@@ -159,7 +161,7 @@ export function qualifyLead(ctx: LeadContext): QualificationResult {
   const pp = ctx.intelligence?.primaryProblem;
   if (!ctx.intelligence) {
     blockers.push('Business intelligence has not been completed — do not invent a problem or sales angle.');
-  } else if (!problemEvidenceAllowed(p, ctx.intelligence)) {
+  } else if (!pp || !problemEvidenceAllowed(p, ctx.intelligence)) {
     blockers.push('No sufficiently evidenced business-specific problem exists for a customer-facing claim.');
   } else {
     reasons.push(`Evidence-backed problem: ${pp.type} from ${pp.sourceIds.length} independent source(s), confidence ${pp.confidence}.`);

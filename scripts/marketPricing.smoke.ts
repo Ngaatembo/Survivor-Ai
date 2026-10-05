@@ -131,17 +131,31 @@ console.log('--- researchMarketPrice: no search results -> honest LOW-confidence
     assert(digestResearch.sources.length > 0, 'sources are still captured for manual review');
 
     console.log('--- researchMarketPrice: LLM connected, returns a confident, evidence-backed range ---');
+    // The range must sit inside prices actually observed in the retrieved
+    // sources (the snippet shows $150 and $300) — see the evidence gate in
+    // services/marketPricing.ts.
     const goodLlm = new MockLLMProvider({
-      priceMin: 120,
-      priceMax: 250,
+      priceMin: 150,
+      priceMax: 300,
       currency: 'USD',
-      rationale: 'Multiple freelancers in Harare quote $120-$250 for a basic small business website.',
+      rationale: 'Freelancers in Harare quote $150 for a basic site and $300+ for e-commerce.',
       confidence: 'HIGH',
     });
     const llmResearch = await researchMarketPrice(mkCtx(snippetSearch), goodLlm, opp);
     assert(llmResearch.generator === 'llm', 'LLM connected and returned valid JSON -> generator is llm');
     assert(llmResearch.confidence === 'HIGH', 'confidence passed through from the model');
-    assert(llmResearch.priceMin === 120 && llmResearch.priceMax === 250, 'real researched price range is used exactly');
+    assert(llmResearch.priceMin === 150 && llmResearch.priceMax === 300, 'real researched price range is used exactly');
+
+    console.log('--- researchMarketPrice: LLM range outside the observed evidence is rejected ---');
+    const inventedLlm = new MockLLMProvider({
+      priceMin: 120,
+      priceMax: 250,
+      currency: 'USD',
+      rationale: 'Quotes $120-$250 (the $120 figure appears in no source).',
+      confidence: 'HIGH',
+    });
+    const gated = await researchMarketPrice(mkCtx(snippetSearch), inventedLlm, opp);
+    assert(gated.generator !== 'llm', 'an LLM range not bounded by observed source prices is never stored as synthesis');
 
     console.log('--- researchMarketPrice: LLM fails/returns unusable JSON -> falls back to honest digest ---');
     const failingLlm = new MockLLMProvider(null);
@@ -153,7 +167,7 @@ console.log('--- researchMarketPrice: no search results -> honest LOW-confidence
     const prospect = baseProspect(opp);
     const formulaOffer = generateOffer(prospect, model);
     const researchedOffer = generateOffer(prospect, model, undefined, llmResearch);
-    assert(researchedOffer.price === Math.round((120 + 250) / 2), `researched offer prices at the midpoint of the real range (got ${researchedOffer.price})`);
+    assert(researchedOffer.price === Math.round((150 + 300) / 2), `researched offer prices at the midpoint of the real range (got ${researchedOffer.price})`);
     assert(researchedOffer.price !== formulaOffer.price, `real market research changes the price from the old formula guess ($${formulaOffer.price} -> $${researchedOffer.price})`);
     assert(!!researchedOffer.priceRationale?.includes('real market research'), 'the offer explains that its price is grounded in real research');
 

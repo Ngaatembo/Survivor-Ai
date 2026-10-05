@@ -6,8 +6,23 @@
  * conclusion), per-category rollups, and distilled lessons/assumptions.
  * ========================================================================== */
 
-import type { Experiment, MemoryEntry, Opportunity } from '../types';
+import type { Experiment, MemoryEntry, MemoryProvenance, Opportunity } from '../types';
 import { uid } from '../lib/format';
+
+/**
+ * Only memory backed by verified real-world outcomes may influence
+ * production decisions. Simulated (Math.random) experiments and everything
+ * stored before migration 0022 are history, not experience.
+ */
+export function realExperience(memory: MemoryEntry[]): MemoryEntry[] {
+  return memory.filter((m) => m.provenance === 'REAL_VERIFIED');
+}
+
+function provenanceOf(exp: Experiment): MemoryProvenance {
+  // Experiments are produced only by the simulator today; a future real
+  // experiment must say so explicitly to be treated as experience.
+  return exp.simulated === false ? 'REAL_VERIFIED' : 'SIMULATED';
+}
 
 function conclude(tests: number, spent: number, revenue: number, lastOutcome: string): MemoryEntry['conclusion'] {
   if (revenue > spent * 1.5 && tests >= 1) return 'VIABLE';
@@ -25,7 +40,9 @@ export function recordResult(
   exp: Experiment,
   opp: Opportunity,
 ): MemoryEntry[] {
-  const next = [...memory];
+  const provenance = provenanceOf(exp);
+  // Simulated results never merge into real experience (or vice versa).
+  const next = memory.filter((m) => (m.provenance ?? 'SIMULATED_LEGACY') === provenance);
 
   // --- Per-opportunity memory ---
   let oppMem = next.find((m) => m.kind === 'opportunity' && m.refId === opp.id);
@@ -41,6 +58,7 @@ export function recordResult(
       conclusion: 'UNTESTED',
       notes: [],
       updatedAt: Date.now(),
+      provenance,
     };
     next.push(oppMem);
   }
@@ -73,6 +91,7 @@ export function recordResult(
       conclusion: 'UNTESTED',
       notes: [],
       updatedAt: Date.now(),
+      provenance,
     };
     next.push(catMem);
   }
@@ -114,5 +133,6 @@ export function lessonFromExperiment(exp: Experiment): MemoryEntry {
     conclusion: net > 0 ? 'PROMISING' : net < 0 ? 'WATCH' : 'UNTESTED',
     notes: exp.lessonsLearned,
     updatedAt: Date.now(),
+    provenance: provenanceOf(exp),
   };
 }

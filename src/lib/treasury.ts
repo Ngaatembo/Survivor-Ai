@@ -130,27 +130,6 @@ export function authorizeSpend(
   return 'APPROVAL';
 }
 
-/**
- * During Treasury v1, no code path sends money. This helper only creates an
- * auditable EXPENSE ledger entry after the operator has approved the request
- * and separately completed the real-world payment.
- */
-export function createConfirmedExpense(
-  request: SpendRequest,
-  transactions: Transaction[],
-  now = Date.now(),
-): Transaction {
-  if (request.status !== 'APPROVED') throw new Error('spend request must be approved before recording an expense');
-  if (request.amount <= 0) throw new Error('expense amount must be positive');
-  const balanceBefore = transactions.reduce((sum, tx) => sum + tx.amount, 0);
-  const balanceAfter = balanceBefore - request.amount;
-  return {
-    id: `tx_${crypto.randomUUID()}`,
-    type: 'EXPENSE' as TransactionType,
-    amount: -request.amount,
-    description: `[TREASURY] [${request.decision}] ${request.vendor}: ${request.purpose}`,
-    relatedExperimentId: request.opportunityId,
-    balanceAfter,
-    createdAt: now,
-  };
-}
+// Recording a confirmed expense is done by Treasury.recordOperatorExpense
+// (src/economy/treasury.ts), which validates it against the run and makes
+// it idempotent per spend request.

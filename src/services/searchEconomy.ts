@@ -17,7 +17,8 @@
 import type { AgentStatus } from '../types';
 import type { EngineRepository } from '../engine/repository';
 import type { LLMProvider, SearchProvider, SearchResult } from './providers/types';
-import type { CostMeter } from '../lib/costMeter';
+import type { CostMeter, SpendBlock, SpendTicket } from '../lib/costMeter';
+import { tavilyCreditsForQuery, type ProviderPrices } from '../economy/spendLimits';
 import { SearchProviderError } from './providers/search';
 import {
   emptyState,
@@ -66,12 +67,28 @@ export interface SearchEconomyContext {
   /** Mutated in place across a cycle's worth of runSearch() calls; the
    *  caller (agentEngine) persists it once at the end via saveEconomyState. */
   onLog?: (message: string) => void;
-  /** Real-treasury cost meter (daily cap + dormant floor). Cache hits are free
-   *  and never checked; a real provider call is checked first and charged
-   *  `searchCostUsd` after. */
+  /** Run cost meter. Cache hits are free and never checked; a real provider
+   *  call is authorized first (kill switch, run status, funds, caps) and
+   *  charged its price after, as its own ledger line item. */
   meter?: CostMeter | null;
-  /** Price of one real search call in USD (0 on Tavily/Brave free tiers). */
+  /** Price of one real search call in USD, applied to every provider.
+   *  Superseded per provider by `searchPrices`. */
   searchCostUsd?: number;
+  /** Price of one real search call per provider, USD. */
+  searchPrices?: Partial<Record<'tavily' | 'brave', number>>;
+  /** Refuse real provider calls when no meter is attached (the Worker sets
+   *  this, so no route can search without the cost being accounted). */
+  requireMeter?: boolean;
+  /** Configured provider prices in their billing unit (Tavily credits,
+   *  Brave queries). When set, an unpriced provider is never called. */
+  providerPrices?: ProviderPrices;
+}
+
+function searchPrice(ctx: SearchEconomyContext, provider: 'tavily' | 'brave' | 'none'): number {
+  if (provider === 'none') return 0;
+  const specific = ctx.searchPrices?.[provider];
+  const value = specific ?? ctx.searchCostUsd ?? 0;
+  return Number.isFinite(value) && value > 0 ? value : 0;
 }
 
 export interface RunSearchOptions {
@@ -139,41 +156,72 @@ export async function runSearch(ctx: SearchEconomyContext, opts: RunSearchOption
     return { results: [], cacheHit: false, budgetExceeded: false, skippedReason: 'NO_PROVIDER_CONFIGURED', providerUsed: 'none' };
   }
 
-  const searchCost = Math.max(0, ctx.searchCostUsd ?? 0);
-  if (ctx.meter) {
-    const spend = ctx.meter.check(searchCost);
-    if (!spend.ok) {
-      return {
-        results: [],
-        cacheHit: false,
-        budgetExceeded: spend.reason === 'DAILY_CAP',
-        skippedReason: spend.reason === 'DORMANT' ? 'TREASURY_DORMANT' : 'DAILY_SPEND_CAP',
-        providerUsed: 'none',
-      };
-    }
+  if (!ctx.meter && ctx.requireMeter) {
+    return { results: [], cacheHit: false, budgetExceeded: false, skippedReason: 'UNMETERED_SEARCH_REFUSED', providerUsed: 'none' };
   }
+
+  const purposeOp = `${opts.purpose.toLowerCase()} search`;
+  const skippedFor = (reason: SpendBlock): RunSearchResult => ({
+    results: [],
+    cacheHit: false,
+    budgetExceeded: reason === 'DAILY_CAP',
+    skippedReason:
+      reason === 'KILL_SWITCH' ? 'KILL_SWITCH_ENGAGED'
+      : reason === 'RUN_CLOSED' ? 'RUN_NOT_ALIVE'
+      : reason === 'AUTONOMY_DISABLED' ? 'AUTONOMOUS_SPEND_DISABLED'
+      : reason === 'PRICING_UNKNOWN' ? 'PRICING_UNKNOWN'
+      : reason === 'INSUFFICIENT_FUNDS' ? 'INSUFFICIENT_FUNDS'
+      : reason === 'SESSION_CAP' ? 'REQUEST_SPEND_CAP'
+      : reason === 'GATE_REFUSED' ? 'SPEND_NOT_AUTHORIZED'
+      : 'DAILY_SPEND_CAP',
+    providerUsed: 'none',
+  });
+
+  /** One provider call: authorized first (its own ticket), then settled. */
+  const call = async (
+    id: 'tavily' | 'brave',
+    p: SearchProvider,
+  ): Promise<{ ok: true; results: SearchResult[] } | { ok: false; refused?: SpendBlock; error?: unknown }> => {
+    let ticket: SpendTicket | undefined;
+    if (ctx.meter) {
+      const q = quoteSearch(ctx, id, opts.query);
+      const auth = await ctx.meter.authorizeCall({ kind: 'SEARCH', provider: id, operation: purposeOp, units: q.units, unit: q.unit, estimatedUsd: q.usd });
+      if (!auth.ok) return { ok: false, refused: auth.reason };
+      ticket = auth.ticket;
+    }
+    try {
+      const results = await p.search(opts.query, opts.max ?? 5);
+      if (ticket) await ctx.meter!.settleCall(ticket, 'OK');
+      return { ok: true, results };
+    } catch (error) {
+      // A 4xx refusal (quota, plan, credentials) is not billed; a timeout,
+      // network error or 5xx may have been, so it stays reserved.
+      if (ticket) {
+        const notBilled = error instanceof SearchProviderError && error.status >= 400 && error.status < 500;
+        await ctx.meter!.settleCall(ticket, notBilled ? 'NOT_BILLED' : 'UNCERTAIN');
+      }
+      return { ok: false, error };
+    }
+  };
 
   let results: SearchResult[] = [];
   let usedProvider: SearchProviderId = providerId;
-  try {
-    results = await provider.search(opts.query, opts.max ?? 5);
-  } catch (error) {
-    // A hard provider quota/rate/credential failure is different from a
-    // legitimate empty search result. Fail over immediately to the other
-    // configured provider so exhausting Tavily cannot stall Survivor when
-    // Brave is available (and vice versa).
-    if (error instanceof SearchProviderError) {
-      const fallbackId = providerId === 'tavily' ? 'brave' : providerId === 'brave' ? 'tavily' : 'none';
-      const fallback = fallbackId === 'tavily' ? ctx.providers.tavily : fallbackId === 'brave' ? ctx.providers.brave : null;
-      if (fallback?.connected) {
-        try {
-          results = await fallback.search(opts.query, opts.max ?? 5);
-          usedProvider = fallbackId;
-        } catch {
-          results = [];
-          usedProvider = fallbackId;
-        }
-      }
+  const primaryId = providerId as 'tavily' | 'brave';
+  const first = await call(primaryId, provider);
+  if (first.ok) {
+    results = first.results;
+  } else if (first.refused) {
+    return skippedFor(first.refused);
+  } else if (first.error instanceof SearchProviderError) {
+    // A hard provider quota/rate/credential failure: fail over to the other
+    // configured provider — which needs its own authorization.
+    const fallbackId: 'tavily' | 'brave' = primaryId === 'tavily' ? 'brave' : 'tavily';
+    const fallback = ctx.providers[fallbackId];
+    if (fallback?.connected) {
+      usedProvider = fallbackId;
+      const second = await call(fallbackId, fallback);
+      if (second.ok) results = second.results;
+      else if (second.refused) return skippedFor(second.refused);
     }
   }
 
@@ -182,9 +230,25 @@ export async function runSearch(ctx: SearchEconomyContext, opts: RunSearchOption
     { ts: ctx.now, purpose: opts.purpose, provider: usedProvider, query: opts.query, entityId: opts.entityId, cacheHit: false },
     results,
   );
-  ctx.meter?.recordSearch(searchCost);
 
   return { results, cacheHit: false, budgetExceeded: false, providerUsed: usedProvider };
+}
+
+/**
+ * Price of one call, in the provider's billing unit. With providerPrices
+ * set (the Worker), an unconfigured price is undefined → PRICING_UNKNOWN.
+ * Without it (legacy tests/demo), the flat per-call price is used.
+ */
+function quoteSearch(ctx: SearchEconomyContext, provider: 'tavily' | 'brave', query: string): { units: number; unit: string; usd: number | undefined } {
+  if (ctx.providerPrices) {
+    if (provider === 'tavily') {
+      const credits = tavilyCreditsForQuery(query);
+      const perCredit = ctx.providerPrices.tavilyUsdPerCredit;
+      return { units: credits, unit: 'tavily_credit', usd: perCredit === undefined ? undefined : credits * perCredit };
+    }
+    return { units: 1, unit: 'brave_query', usd: ctx.providerPrices.braveUsdPerQuery };
+  }
+  return { units: 1, unit: 'request', usd: searchPrice(ctx, provider) };
 }
 
 export function getEconomySummary(state: SearchEconomyState, survivalStatus: AgentStatus, now = Date.now()): SearchEconomySummary {

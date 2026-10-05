@@ -437,7 +437,7 @@ async function postJson<T>(path: string, body: unknown, timeoutMs: number = TIME
   if (!env.apiBaseUrl) throw new BackendError('VITE_API_BASE_URL is not configured');
   // Log in BEFORE starting the request timer, so time spent typing the
   // secret never counts against the request.
-  if (path !== '/auth/login' && OPERATOR_POST_PATHS.test(path) && !operatorSessionToken) await loginOperator();
+  if (path !== '/auth/login' && !operatorSessionToken) await loginOperator();
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
@@ -476,9 +476,9 @@ async function postJson<T>(path: string, body: unknown, timeoutMs: number = TIME
   }
 }
 
-/** POST routes that always need the operator session (every write except
- *  webhooks and the public income research). */
-const OPERATOR_POST_PATHS = /^\/(sales|prospects|offers|outreach|projects|real-revenue|treasury|survival-challenge|actions|payments\/requests|payments\/finivex\/create-approved-link|income\/strategy|content\/state)/;
+/* Every POST except /auth/login needs the operator session (enforced
+ * server-side by worker/src/security.ts); webhooks are never called from
+ * the dashboard. */
 
 export interface FirstDollarStatus {
   ok: true;

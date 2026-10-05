@@ -29,14 +29,32 @@ export interface Env {
   /** Optional price overrides (USD per million tokens) for the treasury's cost meter. */
   LLM_INPUT_USD_PER_MTOK?: string;
   LLM_OUTPUT_USD_PER_MTOK?: string;
-  /** Optional per-query search price; defaults to 0 (Tavily/Brave free tiers). */
-  SEARCH_COST_PER_QUERY_USD?: string;
-  /** Optional override of the $0.40/day automatic AI + search spending cap. */
+  /* Spending controls — see src/economy/spendLimits.ts for meaning/defaults. */
+  /** "enabled" lets Survivor's own cycles make paid calls. Default: disabled. */
+  AUTONOMOUS_PAID_CALLS?: string;
+  /** USD per Tavily credit for YOUR plan. Unset = pricing unknown = no Tavily calls. */
+  TAVILY_USD_PER_CREDIT?: string;
+  /** USD per Brave query for YOUR plan. Unset = pricing unknown = no Brave calls. */
+  BRAVE_USD_PER_QUERY?: string;
+  PER_CALL_CAP_USD?: string;
+  AUTO_PER_CYCLE_CAP_USD?: string;
+  AUTO_DAILY_CAP_USD?: string;
+  /** Legacy name for AUTO_DAILY_CAP_USD. */
   DAILY_SPEND_CAP_USD?: string;
+  MANUAL_DAILY_CAP_USD?: string;
+  MANUAL_PER_REQUEST_CAP_USD?: string;
+  TOTAL_DAILY_CAP_USD?: string;
+  MIN_RUNWAY_RESERVE_USD?: string;
+  /** Operator paid-research requests per hour (default 30). */
+  MANUAL_PAID_REQUESTS_PER_HOUR?: string;
   TAVILY_API_KEY?: string;
   BRAVE_API_KEY?: string;
 
+  /** Operator password (POST /auth/login) and legacy admin credential. */
   TRIGGER_SECRET?: string;
+  /** Separate admin credential (x-admin-secret) for run lifecycle, kill-switch
+   *  release and maintenance. Falls back to TRIGGER_SECRET when unset. */
+  ADMIN_SECRET?: string;
 
   // Finivex merchant credentials are Worker-only. Never expose the API secret to the browser.
   FINIVEX_BASE_URL?: string;

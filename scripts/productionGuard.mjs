@@ -24,6 +24,13 @@ const paymentProvider = read('worker/src/paymentProvider.ts');
 const workflow = read('.github/workflows/deploy.yml');
 const backendApi = read('src/services/backendApi.ts');
 const challengePanel = read('src/components/SurvivalChallengePanel.tsx');
+const security = read('worker/src/security.ts');
+const d1Repo = read('src/engine/d1Repository.ts');
+const ledgerMigration = read('migrations/0022_truthful_ledger.sql');
+const store = read('src/store.ts');
+const costMeter = read('src/lib/costMeter.ts');
+const spendLimits = read('src/economy/spendLimits.ts');
+const searchEconomy = read('src/services/searchEconomy.ts');
 
 const checks = [
   {
@@ -105,15 +112,55 @@ const checks = [
       has(paymentProvider, "EcoCash payment execution is restricted to the sandbox endpoint"),
   },
   {
-    name: 'manual cycle execution requires the trigger secret',
+    name: 'every route passes the central route policy gate; cycles are admin-only',
     ok:
-      has(worker, "req.headers.get('x-trigger-secret')") &&
-      has(worker, "if (!env.TRIGGER_SECRET || secret !== env.TRIGGER_SECRET)") &&
-      has(worker, "if (url.pathname === '/cycles/run' && req.method === 'POST')") &&
+      has(security, "{ method: 'POST', path: '/cycles/run', access: 'ADMIN', paid: true }") &&
+      has(security, "{ method: 'GET', path: '/health', access: 'PUBLIC'") &&
+      has(security, "if (isApiPath(path)) return { method, path, access: 'OPERATOR' };") &&
+      has(worker, 'const policy = routePolicy(req.method, url.pathname);') &&
       has(worker, "if (url.pathname === '/auth/login' && req.method === 'POST')") &&
       has(worker, "requireOperator(req, env)") &&
-      has(worker, "url.pathname === '/actions/approvals/review' && req.method === 'POST'") &&
-      has(worker, "operator authentication required"),
+      has(worker, "operator authentication required") &&
+      lacks(worker, "secret !== env.TRIGGER_SECRET"),
+  },
+  {
+    name: 'every Worker search/AI context is metered (openPaidSession or the engine)',
+    ok:
+      (worker.match(/cycleStartedAt:/g) ?? []).length === 1 &&
+      has(worker, 'requireMeter: true') &&
+      lacks(worker, 'openManualCostSession'),
+  },
+  {
+    name: 'money moves only through Treasury; no deposits into a run',
+    ok:
+      lacks(worker, 'appendTransaction(') &&
+      lacks(agentEngine, 'appendTransaction(snap.transactions') &&
+      has(d1Repo, 'D1Repository.appendTransaction is disabled') &&
+      has(worker, "code: 'CAPITAL_ONLY_VIA_NEW_RUN'") &&
+      has(ledgerMigration, 'trg_tx_run_must_be_open') &&
+      has(ledgerMigration, 'trg_run_terminal_is_final'),
+  },
+  {
+    name: 'incident 5 Oct 2026: autonomous paid calls default OFF; every paid call is atomically reserved first',
+    ok:
+      has(spendLimits, 'autonomousPaidCalls: false') &&
+      has(spendLimits, "=== 'enabled'") &&
+      has(worker, 'spendGate: spendGate ?? undefined') &&
+      has(worker, "initiatedBy: 'OPERATOR'") &&
+      has(searchEconomy, 'ctx.meter.authorizeCall(') &&
+      lacks(searchEconomy, 'ctx.meter?.recordSearch('),
+  },
+  {
+    name: 'incident 5 Oct 2026: no invented provider prices; the browser never calls paid providers',
+    ok:
+      lacks(costMeter, 'DEFAULT_SEARCH_PRICE_USD =') &&
+      lacks(worker, 'DEFAULT_SEARCH_PRICE_USD') &&
+      has(store, 'createSearchProviders({})') &&
+      has(store, 'createLLMProvider({})'),
+  },
+  {
+    name: 'Math.random() experiments never run in the production Worker',
+    ok: has(worker, 'simulateForecasts: false') && has(agentEngine, 'realExperience(await this.repo.listMemory())'),
   },
   {
     name: 'deployment does not expose frontend provider secrets',
@@ -143,6 +190,7 @@ const checks = [
       has(worker, "'kv_store'") &&
       has(worker, "'payment_intents'") &&
       has(worker, "'payment_provider_events'") &&
+      has(worker, "'survivor_runs'") &&
       has(worker, 'ready: schemaReady'),
   },
 ];

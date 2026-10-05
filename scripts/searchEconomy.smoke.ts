@@ -207,8 +207,11 @@ async function main() {
     const failoverCtx = mkCtx({
       providers: { tavily: new QuotaFailSearch('tavily'), brave: new MockSearch('brave') },
     });
+    // PROSPECT_INTELLIGENCE is a purpose whose policy primary is Tavily (see
+    // intelBoth above), so the Tavily quota error is actually exercised.
+    // (MARKET_PRICING prefers Brave, so Tavily would never be called.)
     const failover = await runSearch(failoverCtx, {
-      purpose: 'MARKET_PRICING',
+      purpose: 'PROSPECT_INTELLIGENCE',
       query: 'provider failover smoke test',
       entityId: 'failover-1',
     });

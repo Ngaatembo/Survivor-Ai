@@ -27,7 +27,7 @@ import { simulateExperiment, experimentBudget } from '../lib/simulation';
 import { balanceFrom } from '../services/wallet';
 import { advanceStage, scoreAll, rankOpportunities } from '../services/research';
 import { decide, generateReport, strategyFromMemory, type Decision } from '../services/ai';
-import { recordResult, lessonFromExperiment } from '../services/memory';
+import { recordResult, lessonFromExperiment, realExperience } from '../services/memory';
 import { discoverLive } from '../services/liveResearch';
 import { discoverProspects } from '../services/prospectDiscovery';
 import type { EngineHooks, EngineRepository } from './repository';
@@ -50,7 +50,13 @@ import { computeRecommendedActions } from '../lib/recommendedActions';
 import { rankRevenueProspects } from '../lib/revenueConversion';
 import { verifyProspect } from '../services/prospectVerification';
 import { resolveProspectEntities } from '../services/prospectEntityResolution';
-import { CostMeter, type CostPolicy } from '../lib/costMeter';
+import { CostMeter, type CostPolicy, type SpendGuard } from '../lib/costMeter';
+import type { Treasury } from '../economy/treasury';
+import { agentStatusForRun, runAcceptsWork, type SurvivorRun } from '../economy/ledger';
+import { readKillSwitch } from '../economy/killSwitch';
+import type { SpendGate } from '../economy/spendGate';
+import type { ProviderPrices, SpendLimits } from '../economy/spendLimits';
+import { openingLedger } from '../services/wallet';
 import { APPROVALS_KV_KEY, queueApprovals, type QueuedApproval } from '../lib/approvalQueue';
 import { commercialActionAllowed, verificationFresh, VERIFICATION_TTL_MS } from '../sales/intelligence';
 
@@ -93,10 +99,31 @@ export interface EngineOptions {
   onStatus?: (status: AgentStatusLike) => void;
   onActivity?: (activity: string, step: CycleStepKey | null) => void;
   onLog?: (type: EventType, message: string) => void;
-  /** Real-treasury spending rules (daily cap, dormant floor). */
+  /** Spending rules (daily cap). The floor is always the run's death threshold. */
   costPolicy?: Partial<CostPolicy>;
-  /** Price of one real search call, USD (0 on free tiers). */
+  /** Price of one real search call, USD, for every provider. */
   searchCostUsd?: number;
+  /** Price of one real search call per provider, USD. */
+  searchPrices?: Partial<Record<'tavily' | 'brave', number>>;
+  /** The authoritative ledger. Required unless allowLegacyLedger is set. */
+  treasury?: Treasury;
+  /** Local browser demo only: keep using the repository's own transaction
+   *  list instead of a Treasury run. Never set in the Worker. */
+  allowLegacyLedger?: boolean;
+  /** Run the Math.random() experiment simulator (SIMULATION/LEGACY) during
+   *  cycles. Off unless explicitly enabled; its results never touch the
+   *  ledger and are stored as SIMULATED memory that decisions ignore. */
+  simulateForecasts?: boolean;
+  /** Refuse paid search calls without a meter (the Worker sets this). */
+  requireMeter?: boolean;
+  /** Atomic server-side authorization for every paid call (the Worker). */
+  spendGate?: SpendGate;
+  /** Spending limits and the autonomy switch (src/economy/spendLimits.ts).
+   *  When set, Survivor's own cycles make paid calls only if
+   *  autonomousPaidCalls is true. */
+  spendLimits?: SpendLimits;
+  /** Provider prices in billing units; unpriced providers are not called. */
+  providerPrices?: ProviderPrices;
 }
 
 export interface RunOptions {
@@ -117,25 +144,71 @@ export interface CycleOutcome {
 }
 
 export class AgentEngine {
+  /** Why the last runCycle() call did not run, when it returned null. */
+  lastRejection: string | null = null;
+
   constructor(
     private repo: EngineRepository,
     private providers: EngineProviders = {},
     private options: EngineOptions = {},
   ) {}
 
-  /** Seed the repository on first run (idempotent — safe to call every boot). */
+  /** The current run's ledger: Treasury when present, else the legacy demo list. */
+  private async ledger(): Promise<Transaction[]> {
+    const treasury = this.options.treasury;
+    if (!treasury) return this.repo.listTransactions();
+    return (await treasury.entries()).map((e) => ({
+      id: e.id,
+      type: e.amount >= 0 ? (e.kind === 'STARTING_CAPITAL' ? 'DEPOSIT' : 'REVENUE') : 'EXPENSE',
+      amount: e.amount,
+      description: e.description,
+      balanceAfter: e.balanceAfter,
+      createdAt: e.createdAt,
+      ledger: 'REAL' as const,
+      runId: e.runId,
+      kind: e.kind,
+      idempotencyKey: e.idempotencyKey,
+      environment: e.environment,
+      metadata: e.metadata,
+    }));
+  }
+
+  private async currentRun(): Promise<SurvivorRun | null> {
+    return this.options.treasury ? this.options.treasury.getCurrentRun() : null;
+  }
+
+  /** Re-read immediately before every paid call (kill switch, run status). */
+  private spendGuard(): SpendGuard {
+    return async () => {
+      // A gate without limits cannot be armed: fail closed.
+      if (this.options.spendGate && !this.options.spendLimits) {
+        return { reason: 'AUTONOMY_DISABLED', detail: 'spend gate configured without limits — paid calls refused' };
+      }
+      if (this.options.spendLimits && !this.options.spendLimits.autonomousPaidCalls) {
+        return { reason: 'AUTONOMY_DISABLED', detail: 'autonomous paid calls are disabled (AUTONOMOUS_PAID_CALLS is not "enabled")' };
+      }
+      const kill = await readKillSwitch(this.repo);
+      if (kill.engaged) return { reason: 'KILL_SWITCH', detail: kill.reason || 'emergency stop' };
+      if (this.options.treasury) {
+        const open = runAcceptsWork(await this.options.treasury.getOpenRun());
+        if (!open.ok) return { reason: 'RUN_CLOSED', detail: open.reason };
+      }
+      return null;
+    };
+  }
+
+  /** Seed the repository on first run (idempotent — safe to call every boot).
+   *  Never creates money: capital enters only through Treasury.createRun. */
   async ensureSeeded(): Promise<void> {
     const agent = await this.safeGetAgent();
     const snap = createSeedSnapshot();
 
-    // Bootstrap the REAL treasury independently of agent creation. The
-    // repository only returns ledger = 'REAL' rows, so on the first boot after
-    // migration 0019 (old rows are SIMULATED) this records the owners' real
-    // $50 operating budget exactly once; normal boots cannot mint another.
     if (agent) {
-      const transactions = await this.repo.listTransactions();
-      if (transactions.length === 0) {
-        await this.repo.appendTransaction(snap.transactions[0]);
+      // Local demo only: the legacy in-browser ledger still starts from a
+      // practice $50. Production (Treasury) never mints capital here.
+      if (!this.options.treasury && this.options.allowLegacyLedger) {
+        const transactions = await this.ledger();
+        if (transactions.length === 0) await this.repo.appendTransaction(openingLedger(50)[0]);
       }
       return;
     }
@@ -148,7 +221,9 @@ export class AgentEngine {
     // seeded on a fresh database.)
     await this.repo.createAgentIfMissing(snap.agent);
     await this.repo.upsertOpportunities(snap.opportunities);
-    for (const tx of snap.transactions) await this.repo.appendTransaction(tx);
+    if (!this.options.treasury && this.options.allowLegacyLedger) {
+      await this.repo.appendTransaction(openingLedger(50)[0]);
+    }
     for (const evt of snap.events) await this.repo.appendEvent(evt);
     for (const strat of snap.strategies) await this.repo.appendStrategy(strat);
     // Survivor 2.0 §10 — the mission ladder, scaled to this agent's actual
@@ -168,14 +243,38 @@ export class AgentEngine {
     const stepDelay = opts.stepDelay ?? 600;
     const shouldContinue = opts.shouldContinue ?? (() => true);
     const hooks = this.hooks();
+    this.lastRejection = null;
+
+    if (!this.options.treasury && !this.options.allowLegacyLedger) {
+      throw new Error('AgentEngine requires a Treasury (or allowLegacyLedger for the local demo)');
+    }
+
+    // Preflight, before anything is claimed or spent: the kill switch, then
+    // the run. A DEAD, ENDED or missing run never runs a normal cycle.
+    const kill = await readKillSwitch(this.repo);
+    if (kill.engaged) {
+      this.lastRejection = `KILL_SWITCH_ENGAGED: ${kill.reason || 'emergency stop'}`;
+      await hooks.log('WARNING', `Cycle refused — kill switch engaged (${kill.reason || 'emergency stop'}).`);
+      return null;
+    }
+    const runAtStart = await this.currentRun();
+    if (this.options.treasury) {
+      const open = runAcceptsWork(runAtStart);
+      if (!open.ok) {
+        this.lastRejection = open.reason;
+        await hooks.log('WARNING', `Cycle refused — ${open.reason}`);
+        return null;
+      }
+    }
 
     const agent = await this.repo.getAgent();
 
     // Atomic claim: prevents an overlapping cron tick / manual trigger from
-    // racing this one and creating duplicate cycles or double-spending the
-    // simulated balance. A stale claim (crashed mid-cycle) can be reclaimed.
+    // racing this one and creating duplicate cycles or double-spending.
+    // A stale claim (crashed mid-cycle) can be reclaimed.
     const claimed = await this.repo.tryClaimCycle();
     if (!claimed) {
+      this.lastRejection = 'CYCLE_LOCKED: another cycle is already running';
       await hooks.log(
         'WARNING',
         'A cycle is already running — this trigger was skipped to avoid overlapping execution.',
@@ -184,36 +283,99 @@ export class AgentEngine {
     }
 
     // The bot pays for its own brain: every paid AI call and search this
-    // cycle is checked against the daily cap and the dormant floor, and what
-    // it actually cost is written to the real ledger when the cycle ends.
-    const meter = CostMeter.fromLedger(await this.repo.listTransactions(), this.options.costPolicy);
+    // cycle is authorized first (kill switch, run status, funds above the
+    // death threshold, daily cap) and posted to the run's ledger afterwards,
+    // one entry per call.
+    const sessionId = uid('cycle-cost');
+    const limits = this.options.spendLimits;
+    const meter = CostMeter.fromLedger(
+      await this.ledger(),
+      {
+        ...this.options.costPolicy,
+        ...(limits ? { dailyCapUsd: limits.autoDailyUsd, sessionCapUsd: limits.autoPerCycleUsd } : {}),
+        floorUsd: runAtStart?.deathThreshold ?? 0,
+      },
+      Date.now(),
+      {
+        guard: this.spendGuard(),
+        channel: 'AUTO',
+        gate: this.options.spendGate && runAtStart && limits
+          ? {
+              gate: this.options.spendGate,
+              runId: runAtStart.id,
+              initiatedBy: 'SURVIVOR',
+              sessionId,
+              reason: `cycle #${agent.totalCyclesRun + 1}`,
+              limits: {
+                perCallUsd: limits.perCallUsd,
+                perSessionUsd: limits.autoPerCycleUsd,
+                channelDailyUsd: limits.autoDailyUsd,
+                totalDailyUsd: limits.totalDailyUsd,
+                runwayReserveUsd: limits.runwayReserveUsd,
+              },
+            }
+          : undefined,
+      },
+    );
+
     this.providers.llm?.attachMeter?.(meter);
-    if (meter.dormant) {
-      await hooks.log(
-        'WARNING',
-        `Dormant: the real treasury is at or below the $${meter.policy.floorUsd.toFixed(2)} floor. No paid AI or search this cycle — free work only. Survivor wakes when revenue or a top-up lifts it above the floor.`,
-      );
+    if (meter.exhausted) {
+      await hooks.log('WARNING', 'No funds above the death threshold — no paid AI or search this cycle.');
     }
 
+    let cycleRef: { id?: string; index?: number } = {};
     try {
-      return await this.runClaimedCycle(agent, opts, hooks, stepDelay, shouldContinue, meter);
+      return await this.runClaimedCycle(agent, opts, hooks, stepDelay, shouldContinue, meter, cycleRef);
     } finally {
       this.providers.llm?.attachMeter?.(null);
+      const cycleLabel = `cycle #${agent.totalCyclesRun + 1}`;
       try {
-        const cycleLabel = `cycle #${agent.totalCyclesRun + 1}`;
-        const costTx = meter.toExpense(await this.repo.listTransactions(), cycleLabel);
-        if (costTx) await this.repo.appendTransaction(costTx);
+        await this.postCosts(meter, {
+          sessionId,
+          channel: 'AUTO',
+          reason: cycleLabel,
+          cycleId: cycleRef.id,
+          cycleIndex: cycleRef.index,
+          strategy: (await this.repo.getAgent()).currentStrategy || undefined,
+        });
         if (meter.llmCalls || meter.searchCalls || meter.blockedTotal) {
           await hooks.log('WALLET', `Running costs, ${cycleLabel}: ${meter.summary()}.`);
         }
       } catch (e) {
         await hooks.log('WARNING', `Could not record this cycle's AI/search costs: ${(e as Error).message}`);
       }
-      const finalTx = await this.repo.listTransactions();
-      const finalBalance = balanceFrom(finalTx);
-      const releaseStatus = computeSurvivalStatus(finalBalance);
-      await this.repo.releaseCycleLock(releaseStatus);
+      await this.repo.releaseCycleLock(await this.agentStatusNow());
     }
+  }
+
+  /** Write the meter's line items to the ledger (Treasury) or, in the legacy
+   *  demo, as one aggregate expense. */
+  private async postCosts(meter: CostMeter, ctx: import('../economy/treasury').CostContext): Promise<void> {
+    if (this.options.treasury) {
+      const results = await this.options.treasury.recordCosts(meter.items, ctx);
+      const rejected = results.filter((r) => r.status === 'REJECTED');
+      if (rejected.length) {
+        await this.hooks().log('WARNING', `${rejected.length} cost entr(ies) were refused by the ledger: ${rejected.map((r) => (r.status === 'REJECTED' ? r.reason : '')).join('; ')}`);
+      }
+      return;
+    }
+    const amount = Math.round(meter.spentUsd * 1_000_000) / 1_000_000;
+    if (amount <= 0) return;
+    const before = (await this.ledger()).reduce((sum, t) => sum + t.amount, 0);
+    await this.repo.appendTransaction({
+      id: uid('tx_cost'),
+      type: 'EXPENSE',
+      amount: -amount,
+      description: `[AUTO] AI + search costs — ${ctx.reason}`,
+      balanceAfter: before - amount,
+      createdAt: Date.now(),
+      ledger: 'REAL',
+    });
+  }
+
+  private async agentStatusNow(): Promise<Agent['status']> {
+    if (this.options.treasury) return agentStatusForRun(await this.options.treasury.getCurrentRun());
+    return computeSurvivalStatus(balanceFrom(await this.ledger()));
   }
 
   private async runClaimedCycle(
@@ -223,10 +385,13 @@ export class AgentEngine {
     stepDelay: number,
     shouldContinue: () => boolean,
     meter: CostMeter,
+    cycleRef: { id?: string; index?: number },
   ): Promise<CycleOutcome | null> {
     let opportunities = await this.repo.listOpportunities();
-    let transactions = await this.repo.listTransactions();
-    let memory = await this.repo.listMemory();
+    let transactions = await this.ledger();
+    // Decisions read only verified real-world experience; simulated and
+    // pre-0022 memory is history (see services/memory.ts realExperience).
+    let memory = realExperience(await this.repo.listMemory());
 
     const index = agent.totalCyclesRun + 1;
     const cycle: AgentCycle = {
@@ -236,6 +401,8 @@ export class AgentEngine {
       steps: STEP_ORDER.map((key) => ({ key, label: STEP_LABELS[key], status: 'pending' as const })),
       discoveredIds: [],
     };
+    cycleRef.id = cycle.id;
+    cycleRef.index = index;
     await this.repo.appendCycle(cycle);
     await this.repo.updateAgent({
       cycleCount: agent.cycleCount + 1,
@@ -276,7 +443,7 @@ export class AgentEngine {
     const tavilyProvider = opts.useLive !== false ? this.providers.tavily ?? this.providers.search ?? null : null;
     const braveProvider = opts.useLive !== false ? this.providers.brave ?? null : null;
     const hasLiveSearch = Boolean(tavilyProvider?.connected || braveProvider?.connected);
-    const survivalStatusAtStart = computeSurvivalStatus(balanceFrom(await this.repo.listTransactions()));
+    const survivalStatusAtStart = computeSurvivalStatus(balanceFrom(await this.ledger()), await this.currentRun());
     const economyState = await loadEconomyState(this.repo);
     const searchCtx: SearchEconomyContext = {
       state: economyState,
@@ -289,6 +456,9 @@ export class AgentEngine {
       },
       meter,
       searchCostUsd: this.options.searchCostUsd ?? 0,
+      searchPrices: this.options.searchPrices,
+      providerPrices: this.options.providerPrices,
+      requireMeter: this.options.requireMeter,
     };
 
     /* 2 — DISCOVER */
@@ -325,7 +495,7 @@ export class AgentEngine {
         'Live search unavailable — no new opportunities added. Production live-only mode does not use SAMPLE fallback data.',
       );
     }
-    if (!(await tick('DISCOVER'))) return aborted(cycle, await this.repo.listTransactions());
+    if (!(await tick('DISCOVER'))) return aborted(cycle, await this.ledger());
 
     /* 3 — VERIFY */
     await hooks.setActivity?.('Analyzing evidence and verifying claims…', 'VERIFY');
@@ -346,7 +516,7 @@ export class AgentEngine {
         await hooks.log('VERIFY', 'No new items to verify — re-checking existing evidence.');
       }
     }
-    if (!(await tick('VERIFY'))) return aborted(cycle, await this.repo.listTransactions());
+    if (!(await tick('VERIFY'))) return aborted(cycle, await this.ledger());
 
     /* 4 — SCORE */
     await hooks.setActivity?.('Scoring opportunities against the $50 budget…', 'SCORE');
@@ -374,7 +544,7 @@ export class AgentEngine {
           : 'Scoring complete — no executable candidates yet.',
       );
     }
-    if (!(await tick('SCORE'))) return aborted(cycle, await this.repo.listTransactions());
+    if (!(await tick('SCORE'))) return aborted(cycle, await this.ledger());
 
     /* 5 — RANK */
     await hooks.setActivity?.('Ranking candidates by risk-adjusted return…', 'RANK');
@@ -395,14 +565,14 @@ export class AgentEngine {
       await this.repo.upsertOpportunities(ranked);
       await hooks.log('SCORE', `Ranking complete — ${ranked.filter((o) => o.researchStage !== 'UNDISCOVERED').length} opportunities in the active set.`);
     }
-    if (!(await tick('RANK'))) return aborted(cycle, await this.repo.listTransactions());
+    if (!(await tick('RANK'))) return aborted(cycle, await this.ledger());
 
     /* 6 — SELECT */
     await hooks.setActivity?.('Selecting the next experiment…', 'SELECT');
     {
       opportunities = await this.repo.listOpportunities();
-      transactions = await this.repo.listTransactions();
-      memory = await this.repo.listMemory();
+      transactions = await this.ledger();
+      memory = realExperience(await this.repo.listMemory());
       decision = decide(opportunities, memory, transactions);
       for (const rej of decision.rejections.slice(0, 3)) {
         await hooks.log('REJECTION', `Rejected "${rej.opportunity.name}": ${rej.reason}`);
@@ -416,14 +586,20 @@ export class AgentEngine {
         await hooks.log('WARNING', 'No executable opportunity this cycle — research continues next cycle.');
       }
     }
-    if (!(await tick('SELECT'))) return aborted(cycle, await this.repo.listTransactions());
+    if (!(await tick('SELECT'))) return aborted(cycle, await this.ledger());
 
-    /* 7 — SIMULATE */
+    /* 7 — SIMULATE (SIMULATION/LEGACY)
+     * simulateExperiment() rolls Math.random() to invent an outcome. It is
+     * off unless simulateForecasts is set (local demo only). Its output is
+     * never written to the ledger and is stored as SIMULATED memory, which
+     * production decisions ignore. Survivor has no real execution step yet:
+     * a selected opportunity is a recommendation, not an action. */
     await hooks.setStatus?.('EXECUTING');
     const selected = decision?.selected ?? null;
-    transactions = await this.repo.listTransactions();
+    transactions = await this.ledger();
     const balance = balanceFrom(transactions);
-    const budget = selected ? experimentBudget(selected, balance) : 0;
+    const simulate = Boolean(this.options.simulateForecasts);
+    const budget = selected && simulate ? experimentBudget(selected, balance) : 0;
     // Hard safety re-check, independent of experimentBudget()'s own math:
     // never let a write proceed above 18% of the CURRENT balance. This is
     // the last line of defense before the ledger is touched.
@@ -436,11 +612,12 @@ export class AgentEngine {
       await delay(stepDelay);
       if (!shouldContinue()) {
         await this.repo.updateCycleStep(cycle.id, 'SIMULATE', 'skipped');
-        return aborted(cycle, await this.repo.listTransactions());
+        return aborted(cycle, await this.ledger());
       }
 
-      transactions = await this.repo.listTransactions();
-      memory = await this.repo.listMemory();
+      transactions = await this.ledger();
+      // The simulator may read its own (simulated) history.
+      const simMemory = (await this.repo.listMemory()).filter((m) => m.provenance === 'SIMULATED');
 
       // Revenue simulations must use a real selling price, not the experiment
       // budget. A $5 validation spend can produce a $150/$250/$350/$450 sale.
@@ -462,7 +639,7 @@ export class AgentEngine {
       const sim = simulateExperiment({
         opportunity: selected,
         budget,
-        memory: memory.find((m) => m.kind === 'opportunity' && m.refId === selected.id),
+        memory: simMemory.find((m) => m.kind === 'opportunity' && m.refId === selected.id),
         marketPrice,
       });
 
@@ -510,6 +687,14 @@ export class AgentEngine {
         'EXPERIMENT',
         `Experiment outcome: ${sim.outcome.replace('_', ' ')} after ${sim.durationDays} simulated days (ROI ${experiment.roi}%).`,
       );
+    } else if (!simulate) {
+      await this.repo.updateCycleStep(cycle.id, 'SIMULATE', 'skipped');
+      await hooks.log(
+        'EXPERIMENT',
+        selected
+          ? `No simulated experiment: Math.random() forecasts are disabled in this environment. "${selected.name}" stays a recommendation — Survivor has no real execution step yet.`
+          : 'No executable opportunity selected this cycle.',
+      );
     } else {
       await this.repo.updateCycleStep(cycle.id, 'SIMULATE', 'skipped');
       await hooks.log(
@@ -519,7 +704,7 @@ export class AgentEngine {
           : 'SIMULATE step skipped: no affordable executable candidate (finance models remain research-only).',
       );
     }
-    if (!(await tick('SIMULATE', stepDelay * 0.6))) return aborted(cycle, await this.repo.listTransactions());
+    if (!(await tick('SIMULATE', stepDelay * 0.6))) return aborted(cycle, await this.ledger());
 
     /* 8 — MEASURE */
     await hooks.setActivity?.('Measuring results and writing to memory…', 'MEASURE');
@@ -528,7 +713,8 @@ export class AgentEngine {
       const opp = opportunities.find((o) => o.id === experiment!.opportunityId);
       if (opp) {
         let memState = await this.repo.listMemory();
-        // Build memory updates the same way memory service expects.
+        // recordResult tags these entries SIMULATED and keeps them apart
+        // from real experience; decisions never read them.
         const updatedEntries = recordResult(memState, experiment, opp);
         // Upsert only the affected entries (opportunity + category).
         const affectedIds = new Set<string>();
@@ -547,18 +733,18 @@ export class AgentEngine {
         await hooks.log(
           'MEMORY',
           oppMem
-            ? `Memory updated: "${opp.name}" tested ${oppMem.tests}× — spent $${oppMem.spent.toFixed(2)}, returned $${oppMem.revenue.toFixed(2)} — conclusion: ${oppMem.conclusion}.`
+            ? `Simulated memory updated (ignored by decisions): "${opp.name}" tested ${oppMem.tests}× — spent $${oppMem.spent.toFixed(2)}, returned $${oppMem.revenue.toFixed(2)} — conclusion: ${oppMem.conclusion}.`
             : 'Memory updated with experiment result.',
         );
       }
     }
-    if (!(await tick('MEASURE'))) return aborted(cycle, await this.repo.listTransactions());
+    if (!(await tick('MEASURE'))) return aborted(cycle, await this.ledger());
 
     /* 9 — LEARN */
     await hooks.setActivity?.('Updating strategy from results…', 'LEARN');
     {
-      transactions = await this.repo.listTransactions();
-      memory = await this.repo.listMemory();
+      transactions = await this.ledger();
+      memory = realExperience(await this.repo.listMemory());
       const finalBalance = balanceFrom(transactions);
       const threshold = (await this.repo.getAgent()).survivalThreshold;
       const { strategy, objective } = strategyFromMemory(memory, finalBalance, threshold);
@@ -583,7 +769,8 @@ export class AgentEngine {
         const researched = (await this.repo.listOpportunities()).filter(
           (o) => o.researchStage !== 'UNDISCOVERED',
         );
-        const allExperiments = await this.repo.listExperiments();
+        // Simulated (Math.random) experiments are not evidence for KILL/SCALE.
+        const allExperiments = (await this.repo.listExperiments()).filter((e) => e.simulated === false);
         const verifiedRevenueEntryIdsForLearning = new Set(await this.repo.listVerifiedRevenueEntryIds());
         const learningEvents = (await this.repo.listLearningEvents()).filter((event) =>
           verifiedRevenueEntryIdsForLearning.has(event.refId),
@@ -948,7 +1135,7 @@ export class AgentEngine {
           await this.repo.listRealRevenue(),
           verifiedRevenueEntryIdsForActions,
         );
-        const currentSurvivalStatus = computeSurvivalStatus(balanceFrom(await this.repo.listTransactions()));
+        const currentSurvivalStatus = computeSurvivalStatus(balanceFrom(await this.ledger()), await this.currentRun());
         const actions = computeRecommendedActions(
           freshOpps,
           decisions,
@@ -1010,9 +1197,9 @@ export class AgentEngine {
 
     /* Final status — persisted by the caller's releaseCycleLock() so it is
      * set exactly once, on every exit path (success, abort, or throw). */
-    transactions = await this.repo.listTransactions();
+    transactions = await this.ledger();
     const finalBalance = balanceFrom(transactions);
-    const finalStatus: CycleOutcome['finalStatus'] = computeSurvivalStatus(finalBalance);
+    const finalStatus: CycleOutcome['finalStatus'] = computeSurvivalStatus(finalBalance, await this.currentRun());
 
     // Survivor 2.0 §10 — evaluate the mission ladder against the real
     // final balance for this cycle; log once when a mission completes.

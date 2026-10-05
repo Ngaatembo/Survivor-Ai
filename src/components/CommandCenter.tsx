@@ -52,9 +52,9 @@ export function CommandCenter({ go }: { go: (v: View) => void }) {
     <div className="view-enter">
       {dead && (
         <div className="dead-banner">
-          DORMANT — the real treasury is at or below the $10 floor. Survivor keeps doing free work
-          (scoring, follow-ups, drafts) but makes no paid AI or search calls. Record revenue or a
-          top-up in the Wallet to wake it.
+          DEAD — this run's balance reached its death threshold. The experiment has ended: no
+          cycles, no paid AI or search, and no deposit or revenue can revive it. A new experiment
+          is a new run, created explicitly by an admin.
         </div>
       )}
 

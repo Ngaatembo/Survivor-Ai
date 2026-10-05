@@ -205,8 +205,11 @@ console.log('--- researchProspect: no search results at all -> honest low-confid
     const model = generateBusinessModel(opp, []);
     const offerWithGoodIntel = generateOffer(prospect, model, llmIntel);
     assert(
-      offerWithGoodIntel.gapAnalysis?.includes('delivery') ?? false,
-      'a confident, LLM-synthesized intelligence report is folded into the offer\'s gap analysis',
+      // The offer quotes the selected, source-linked primary problem — not
+      // the free-text recommendedAngle — so only evidence-backed claims
+      // reach customer-facing text.
+      offerWithGoodIntel.gapAnalysis?.includes('direct online ordering path') ?? false,
+      'a confident, LLM-synthesized primary problem is folded into the offer\'s gap analysis',
     );
     const offerWithDigest = generateOffer(prospect, model, digestIntel);
     assert(
