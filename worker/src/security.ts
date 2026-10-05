@@ -66,13 +66,16 @@ export const ROUTE_POLICIES: RoutePolicy[] = [
   { method: 'POST', path: '/payments/finivex/payment-link', access: 'OPERATOR', financial: true, external: true },
   { method: 'POST', path: '/payments/ecocash/sandbox-charge', access: 'OPERATOR', financial: true, external: true },
   { method: 'POST', path: '/actions/approvals/execute', access: 'OPERATOR', external: true },
+  // revenue loop — free; a PAID result asks the payment provider and may credit the ledger
+  { method: 'POST', path: '/revenue/loop/run', access: 'OPERATOR', note: 'free: reads stored data, queues human actions' },
+  { method: 'POST', path: '/revenue/actions/result', access: 'OPERATOR', financial: true, note: 'PAID is credited only after provider verification' },
 ];
 
 /** Paths that belong to the API. Anything else is a static dashboard asset. */
 export const API_PREFIXES = [
   '/auth', '/sales', '/admin', '/integrations', '/payments', '/health', '/status', '/state', '/income',
   '/actions', '/content', '/prospects', '/offers', '/outreach', '/demo', '/projects', '/real-revenue',
-  '/treasury', '/survival-challenge', '/cycles', '/runs', '/ledger', '/control',
+  '/treasury', '/survival-challenge', '/cycles', '/runs', '/ledger', '/control', '/revenue',
 ];
 
 function matches(p: RoutePolicy, method: string, path: string): boolean {

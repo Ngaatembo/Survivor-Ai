@@ -80,6 +80,9 @@ import { commercialActionAllowed } from '../../src/sales/intelligence';
 import { buildForexResearchPackage, classifyForexSource, type ForexResearchFinding } from '../../src/lib/forexResearch';
 import { runUnifiedProspectResearch } from '../../src/services/unifiedProspectResearch';
 import { decideFinivexVerification, extractFinivexFacts } from '../../src/lib/revenueVerification';
+import { RevenueLoop } from '../../src/revenue/loop';
+import { webAuraServiceStrategy, type WebAuraSource } from '../../src/revenue/strategies/webAuraService';
+import type { ActionResult } from '../../src/revenue/types';
 import { evaluateVerifiedFirstDollarChallenge } from '../../src/lib/firstDollar';
 import {
   SURVIVAL_CHALLENGE_KEY,
@@ -313,6 +316,37 @@ async function openPaidSession(
       }
     },
   };
+}
+
+/** The revenue loop over D1. Free to run: strategies read stored data only. */
+function buildRevenueLoop(env: Env, built: ReturnType<typeof buildEngine>): RevenueLoop | null {
+  if (!built.treasury || (env.DB_BACKEND ?? 'd1') !== 'd1') return null;
+  const { repo, treasury } = built;
+  const config = finivexConfig(env);
+  return new RevenueLoop({
+    db: env.DB as any,
+    agentId: env.AGENT_ID ?? 'agent-survive-01',
+    treasury,
+    runwayReserveUsd: spendLimitsFromEnv(env as any).runwayReserveUsd,
+    killSwitchEngaged: async () => (await readKillSwitch(repo)).engaged,
+    strategies: [{
+      strategy: webAuraServiceStrategy,
+      sourceRef: (s: WebAuraSource) => s.prospect.id,
+      loadSources: async (): Promise<WebAuraSource[]> => {
+        const [prospects, offers] = await Promise.all([repo.listProspects(), repo.listOffers()]);
+        const byProspect = new Map(offers.map((o) => [o.prospectId, o]));
+        return prospects.map((prospect) => ({ prospect, offer: byProspect.get(prospect.id) }));
+      },
+    }],
+    // PAID is checked with the payment provider itself, never taken on trust.
+    checkPayment: finivexStatus(config).configured
+      ? async (transactionId) => {
+          const res = await getFinivexPaymentStatus(config, transactionId);
+          const facts = extractFinivexFacts(res.body);
+          return { ok: res.ok, httpStatus: res.httpStatus, status: facts.status, amount: facts.amount, currency: facts.currency };
+        }
+      : undefined,
+  });
 }
 
 function buildEngine(env: Env): {
@@ -1254,6 +1288,9 @@ export default {
             'revenue_verifications',
             'survivor_runs',
             'spend_authorizations',
+            'survivor_opportunities',
+            'survivor_actions',
+            'survivor_transitions',
           ];
           const placeholders = requiredTables.map(() => '?').join(',');
           const rows = await env.DB
@@ -3021,6 +3058,35 @@ export default {
 
     /* ---------------------- runs, ledger, kill switch ---------------------- */
 
+    /* ------------------------- revenue loop (operator) ------------------------- */
+    if (url.pathname.startsWith('/revenue/')) {
+      const loop = buildRevenueLoop(env, buildEngine(env));
+      if (!loop) return json({ ok: false, error: 'revenue loop requires the D1 backend' }, { status: 503 });
+      const send = (r: { ok: boolean; status?: number }) => json(r, { status: r.ok ? 200 : (r as any).status ?? 400 });
+      if (url.pathname === '/revenue/summary' && req.method === 'GET') return json({ ok: true, ...(await loop.summary()) });
+      if (url.pathname === '/revenue/opportunities' && req.method === 'GET') return json({ ok: true, opportunities: await loop.opportunities() });
+      if (url.pathname === '/revenue/actions' && req.method === 'GET') return json({ ok: true, actions: await loop.actions() });
+      if (url.pathname === '/revenue/loop/run' && req.method === 'POST') return send(await loop.run('operator'));
+      if (req.method === 'POST' && url.pathname.startsWith('/revenue/actions/')) {
+        let body: any = {};
+        try { body = await req.json(); } catch { return json({ ok: false, error: 'invalid JSON body' }, { status: 400 }); }
+        const actionId = typeof body?.actionId === 'string' ? body.actionId : '';
+        const note = typeof body?.note === 'string' ? body.note.slice(0, 500) : '';
+        if (!actionId) return json({ ok: false, error: 'actionId is required' }, { status: 400 });
+        const verb = url.pathname.slice('/revenue/actions/'.length);
+        if (verb === 'approve') return send(await loop.decide(actionId, 'APPROVE', note));
+        if (verb === 'reject') return send(await loop.decide(actionId, 'REJECT', note));
+        if (verb === 'complete') return send(await loop.complete(actionId, note));
+        if (verb === 'result') {
+          const payment = body?.payment && typeof body.payment === 'object'
+            ? { transactionId: String(body.payment.transactionId ?? ''), amount: Number(body.payment.amount), currency: String(body.payment.currency ?? '').toUpperCase() }
+            : undefined;
+          return send(await loop.reportResult(actionId, body?.result as ActionResult, note, payment));
+        }
+      }
+      return json({ ok: false, error: 'not found' }, { status: 404 });
+    }
+
     if (url.pathname === '/runs' && req.method === 'GET') {
       const { treasury } = buildEngine(env);
       if (!treasury) return json({ ok: false, error: 'ledger unavailable on this backend' }, { status: 503 });
@@ -3162,6 +3228,15 @@ export default {
           );
         } catch (e) {
           console.error('[cron] cycle failed:', (e as Error).message);
+        }
+        // Revenue loop: free (stored data only), queues human actions, never
+        // contacts anyone or spends. Refuses itself on kill switch / dead run.
+        try {
+          const loop = buildRevenueLoop(env, buildEngine(env));
+          const res = loop ? await loop.run('survivor') : null;
+          if (res) console.log(res.ok ? `[cron] revenue loop: ${res.queued.length} action(s) queued, ${res.inFlight} in flight` : `[cron] revenue loop refused: ${res.error}`);
+        } catch (e) {
+          console.error('[cron] revenue loop failed:', (e as Error).message);
         }
       })(),
     );
